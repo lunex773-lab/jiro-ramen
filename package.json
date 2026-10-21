@@ -1,0 +1,22 @@
+{
+  "name": "jiro-ramen",
+  "private": true,
+  "version": "0.1.0",
+  "description": "次郎系ラーメン店舗経営シミュレーション（Web 3D / Cloudflare）",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @jiro/client",
+    "dev:server": "npm run dev -w @jiro/server",
+    "build": "npm run build -w @jiro/client",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e -w @jiro/client"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
