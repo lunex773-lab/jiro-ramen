@@ -82,7 +82,8 @@ export const STATUS_LABEL: Record<EquipmentStatus, string> = {
 
 /**
  * 設備を使う。状態が下がり、故障判定を行う。
- * 故障率 = 基本故障率 × (1 + 4 × 劣化度)。劣化度 = 1 − 状態/100
+ * 故障率 = 基本故障率 × (0.15 + 6 × 劣化度²)。劣化度 = 1 − 状態/100
+ * 新品はほとんど壊れず、使い込むほど（メンテを怠るほど）急に壊れやすくなる。
  */
 export function useEquipment(s: GameState, ctx: SimCtx, e: Equipment, times = 1): void {
   const def = defOf(e);
@@ -93,7 +94,7 @@ export function useEquipment(s: GameState, ctx: SimCtx, e: Equipment, times = 1)
   let st = statusFromCondition(e.condition);
   if (st !== 'broken' && def.failureBase > 0) {
     const wear = 1 - e.condition / 100;
-    const p = 1 - Math.pow(1 - def.failureBase * (1 + 4 * wear), times);
+    const p = 1 - Math.pow(1 - def.failureBase * (0.15 + 6 * wear * wear), times);
     if (rand(s) < p) st = 'broken';
   }
   if (st !== e.status) {

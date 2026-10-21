@@ -268,10 +268,11 @@ export function buildTasks(s: GameState): Task[] {
         add('serve', `serve:${bowl.id}`, [step(asm.id, 'bowl_take', { slot }), step(o.seatId, 'serve')], (s.t - o.createdAt) * 0.1);
       }
     }
-    for (const b of placedRole(s, 'boiler').filter(isUsable)) {
+    for (const b of placedRole(s, 'boiler')) {
       const free = b.slots.filter((x) => x === null).length;
       const need = orders.filter((o) => !noodlesStartedFor(s, o.id)).length;
-      if (free > 0 && need > 0) add('noodlesIn', `noodlesIn:${b.id}`, [step(b.id, 'noodles_in')], Math.min(10, need));
+      // 故障した釜でも、入っている麺は上げられる（新しく入れるのは不可）
+      if (isUsable(b) && free > 0 && need > 0) add('noodlesIn', `noodlesIn:${b.id}`, [step(b.id, 'noodles_in')], Math.min(10, need));
       if (b.slots.some((x) => x && x.elapsed >= x.ideal - 1.5)) add('noodlesUp', `noodlesUp:${b.id}`, [step(b.id, 'noodles_up')]);
       if (b.slots.some((x) => x && x.elapsed > x.ideal + BALANCE.cooking.noodleBadWindow)) add('discard', `discard:${b.id}`, [step(b.id, 'noodles_discard')]);
     }

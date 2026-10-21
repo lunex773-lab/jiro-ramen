@@ -3,6 +3,7 @@ import {
   createGame,
   makeCtx,
   makeEmployee,
+  requestRepair,
   step,
   type Employee,
   type EmployeeRole,
@@ -46,6 +47,11 @@ export function addBot(s: GameState, role: EmployeeRole, skill = 0.75, wage = 0)
   return e;
 }
 
+/** 故障したら修理を依頼する（注意深いプレイヤーの代わり） */
+export function autoRepair(s: GameState, ctx: SimCtx): void {
+  for (const e of s.equipment) if (e.status === 'broken') requestRepair(s, ctx, e);
+}
+
 /** 時間を進める */
 export function run(s: GameState, ctx: SimCtx, seconds: number, dt = 0.1): void {
   const n = Math.round(seconds / dt);
@@ -53,10 +59,11 @@ export function run(s: GameState, ctx: SimCtx, seconds: number, dt = 0.1): void 
 }
 
 /** 営業日を最後まで進める（精算まで） */
-export function runDay(s: GameState, ctx: SimCtx, maxSeconds = 2000): void {
+export function runDay(s: GameState, ctx: SimCtx, maxSeconds = 2000, repair = true): void {
   let t = 0;
   while (s.phase !== 'closed' && s.phase !== 'bankrupt' && t < maxSeconds) {
     step(s, 0.1, ctx);
+    if (repair) autoRepair(s, ctx);
     t += 0.1;
   }
 }
