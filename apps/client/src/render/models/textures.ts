@@ -326,7 +326,7 @@ export function texSoup(): THREE.CanvasTexture {
       const x = r() * w;
       const y = r() * h;
       const rad = rr(r, 0.6, 2.4) * (r() < 0.08 ? 2 : 1);
-      c.fillStyle = rgba(rr(r, 214, 240), rr(r, 190, 214), rr(r, 150, 172), rr(r, 0.45, 0.9));
+      c.fillStyle = rgba(rr(r, 206, 232), rr(r, 180, 204), rr(r, 138, 160), rr(r, 0.4, 0.8));
       c.beginPath();
       c.arc(x, y, rad, 0, Math.PI * 2);
       c.fill();
@@ -527,13 +527,13 @@ function drawRollFace(c: CanvasRenderingContext2D, r: Rng, cx: number, cy: numbe
       if (i === 0) c.moveTo(x, y);
       else c.lineTo(x, y);
     }
-    c.lineWidth = pass === 0 ? R * 0.085 : R * 0.03;
-    c.strokeStyle = pass === 0 ? 'rgba(222,198,176,0.8)' : 'rgba(240,226,206,0.55)';
+    c.lineWidth = pass === 0 ? R * 0.08 : R * 0.028;
+    c.strokeStyle = pass === 0 ? 'rgba(214,188,166,0.7)' : 'rgba(236,220,200,0.45)';
     c.stroke();
   }
   // 渦の芯（煮崩れた濃い部分）
-  c.fillStyle = '#6a3f27';
-  noisyCircle(c, r, cx + R * 0.05, cy, R * 0.2, 0.15);
+  c.fillStyle = '#8e5e40';
+  noisyCircle(c, r, cx + R * 0.05, cy, R * 0.13, 0.2);
   c.fill();
   for (let i = 0; i < 160; i++) {
     const a = r() * Math.PI * 2;
@@ -571,7 +571,7 @@ function mottleLocal(c: CanvasRenderingContext2D, r: Rng, cx: number, cy: number
 /** もやしの絡み（ヤサイの山の芯に貼る） */
 export function texSprouts(): THREE.CanvasTexture {
   return sharedTexture('sprouts', 512, 512, (c, w, h) => {
-    c.fillStyle = '#d4caad';
+    c.fillStyle = '#e2dac2';
     c.fillRect(0, 0, w, h);
     const r = makeRng(61);
     for (let i = 0; i < 520; i++) {
@@ -772,14 +772,18 @@ export function texChiliPowder(): THREE.CanvasTexture {
     const r = makeRng(131);
     c.clearRect(0, 0, w, h);
     const cols: [number, number, number][] = [
-      [200, 56, 24],
-      [217, 80, 30],
-      [226, 106, 42],
-      [181, 40, 18],
-      [232, 132, 58],
-      [207, 74, 26],
-      [150, 30, 14],
+      [214, 78, 34],
+      [228, 104, 48],
+      [236, 128, 62],
+      [198, 58, 26],
+      [242, 146, 78],
+      [220, 90, 38],
+      [176, 44, 20],
     ];
+    // 中心は粉が厚く積もって地が見えない
+    c.fillStyle = 'rgb(218,88,40)';
+    noisyCircle(c, r, w / 2, h / 2, w * 0.17, 0.25, 40);
+    c.fill();
     const blobs: [number, number, number][] = [[0.5, 0.5, 0.2]];
     for (let i = 0; i < 4; i++) blobs.push([rr(r, 0.3, 0.7), rr(r, 0.3, 0.7), rr(r, 0.08, 0.14)]);
     for (let i = 0; i < 26000; i++) {

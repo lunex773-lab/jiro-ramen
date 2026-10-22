@@ -51,7 +51,7 @@ describe('ゲームバージョン', () => {
   it('バージョンとプロトコルを返す', async () => {
     const r = await callJson('/api/v1/game-version');
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ gameVersion: '0.1.0', minClientVersion: '0.1.0', protocol: PROTOCOL_VERSION });
+    expect(r.body).toEqual({ gameVersion: '0.9.0', minClientVersion: '0.1.0', protocol: PROTOCOL_VERSION });
   });
 });
 

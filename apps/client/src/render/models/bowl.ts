@@ -156,7 +156,7 @@ const M = {
   noodle: () => cached('m:noodle', () => new THREE.MeshStandardMaterial({ color: '#dcbd7e', roughness: 0.38, metalness: 0, emissive: '#3a2a10', emissiveIntensity: 0.25 })),
   dome: () =>
     cached('m:dome', () =>
-      new THREE.MeshStandardMaterial({ map: texSprouts(), vertexColors: true, roughness: 0.45, metalness: 0, emissive: '#3a362a', emissiveIntensity: 0.5 }),
+      new THREE.MeshStandardMaterial({ map: texSprouts(), vertexColors: true, roughness: 0.4, metalness: 0, emissive: '#4e4a3c', emissiveIntensity: 0.6 }),
     ),
   sprout: () =>
     cached('m:sprout', () =>
@@ -182,7 +182,7 @@ const M = {
     ),
   abura: () =>
     cached('m:abura', () =>
-      new THREE.MeshStandardMaterial({ roughness: 0.16, metalness: 0, emissive: '#4a3418', emissiveIntensity: 0.45, envMap: texEnv(), envMapIntensity: 0.6 }),
+      new THREE.MeshStandardMaterial({ roughness: 0.32, metalness: 0, emissive: '#5a4426', emissiveIntensity: 0.5, envMap: texEnv(), envMapIntensity: 0.35 }),
     ),
   chili: () => cached('m:chili', () => new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, side: THREE.DoubleSide })),
   powder: () =>
@@ -215,17 +215,17 @@ function discGeometry(seg: number): THREE.BufferGeometry {
 function sproutGeometry(detail: BowlDetail): THREE.BufferGeometry {
   return cached('sprout:' + detail, () => {
     const segs = detail === 'high' ? 5 : 3;
-    const rad = 3;
-    const L = 0.058;
+    const rad = detail === 'high' ? 4 : 3;
+    const L = 0.06;
     const pos: number[] = [];
     const col: number[] = [];
     const idx: number[] = [];
     for (let i = 0; i <= segs; i++) {
       const t = i / segs;
       const x = (t - 0.5) * L;
-      const yb = 0.008 * (1 - (2 * t - 1) ** 2);
-      const zb = 0.0035 * Math.sin(t * Math.PI * 2);
-      const r = t > 0.95 ? 0.0026 : t < 0.05 ? 0.0009 : 0.0019;
+      const yb = 0.01 * (1 - (2 * t - 1) ** 2);
+      const zb = 0.004 * Math.sin(t * Math.PI * 2);
+      const r = t > 0.95 ? 0.003 : t < 0.05 ? 0.0011 : 0.0023;
       for (let k = 0; k < rad; k++) {
         const a = (k / rad) * Math.PI * 2;
         pos.push(x, yb + Math.cos(a) * r, zb + Math.sin(a) * r);
@@ -254,7 +254,7 @@ function sproutGeometry(detail: BowlDetail): THREE.BufferGeometry {
 
 function cabbageGeometry(): THREE.BufferGeometry {
   return cached('cabbage', () => {
-    const g = new THREE.PlaneGeometry(0.036, 0.028, 2, 2);
+    const g = new THREE.PlaneGeometry(0.028, 0.022, 2, 2);
     g.rotateX(-Math.PI / 2);
     const p = g.attributes.position!;
     for (let i = 0; i < p.count; i++) {
@@ -285,6 +285,18 @@ function lumpGeometry(detail: 0 | 1, seed: number, squash: number): THREE.Buffer
       const k = rr(r, 0.82, 1.12);
       p.setXYZ(i, sx * k, sy * k * squash, sz * k);
     }
+    g.computeVertexNormals();
+    return g;
+  });
+}
+
+/** 刻みニンニクの粒（少し丸めた八面体） */
+function garlicGeometry(): THREE.BufferGeometry {
+  return cached('garlicgeo', () => {
+    let g: THREE.BufferGeometry = new THREE.OctahedronGeometry(1, 0);
+    g.deleteAttribute('normal');
+    g.deleteAttribute('uv');
+    g = mergeVertices(g);
     g.computeVertexNormals();
     return g;
   });
@@ -591,14 +603,14 @@ interface Built {
   steamY: number;
 }
 
-const CHILI_COLORS = ['#c83818', '#d9501e', '#e26a2a', '#b52812', '#e8843a', '#cf4a1a'].map((c) => new THREE.Color(c));
+const CHILI_COLORS = ['#d24a1e', '#de6228', '#e87a36', '#c03a16', '#ec9048', '#d65420'].map((c) => new THREE.Color(c));
 const SPROUT_BASE = new THREE.Color(1, 1, 1);
 const SOUP_STAIN = new THREE.Color(0.8, 0.64, 0.44);
 const CHILI_TINT = new THREE.Color(0.85, 0.3, 0.1);
-const GARLIC_COLORS = ['#f6ebc2', '#f0dfa0', '#faf3dc', '#ecd890', '#f4e4b0'].map((c) => new THREE.Color(c));
-const ABURA_LIGHT = new THREE.Color('#f6eedc');
-const ABURA_BROWN = new THREE.Color('#b38250');
-const CABBAGE_COLORS = ['#d6e6a8', '#e4eebe', '#c4dc92', '#eef2d8'].map((c) => new THREE.Color(c));
+const GARLIC_COLORS = ['#f3e8c2', '#eedda6', '#f8f1dc', '#e9d68e', '#f1e3b4'].map((c) => new THREE.Color(c));
+const ABURA_LIGHT = new THREE.Color('#eadcc0');
+const ABURA_BROWN = new THREE.Color('#a8763e');
+const CABBAGE_COLORS = ['#e2edc4', '#ecf2d6', '#d4e4aa', '#f2f4e2'].map((c) => new THREE.Color(c));
 
 function makeInstanced(geo: THREE.BufferGeometry, mat: THREE.Material, count: number, owned: Disposable[]): THREE.InstancedMesh {
   const im = new THREE.InstancedMesh(geo, mat, Math.max(1, count));
@@ -700,7 +712,9 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
   }
   const ichimi = Math.max(0, c.toppings.ichimi);
   // 唐辛子を集中させる位置（山の頂上から見る人の右奥へ）
-  const patch = { x: (mound?.cx ?? 0) - 0.014, z: (mound?.cz ?? 0) + 0.004, s: 0.026 + 0.007 * Math.min(ichimi, 3) };
+  const patch = mound
+    ? { x: mound.cx - 0.02, z: mound.cz + 0.012, s: 0.024 + 0.007 * Math.min(ichimi, 3) }
+    : { x: -0.02, z: 0.02, s: 0.012 + 0.004 * Math.min(ichimi, 3) };
   const patchW = (x: number, z: number) => (ichimi <= 0 ? 0 : Math.exp(-((x - patch.x) ** 2 + (z - patch.z) ** 2) / (2 * patch.s * patch.s)));
   const heightAt = (x: number, z: number) => Math.max(field.get(x, z), mound ? moundY(mound, x, z) + 0.003 : -1);
 
@@ -746,8 +760,8 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
     const gx = Math.sin(gTheta) * gr;
     const gz = Math.cos(gTheta) * gr;
     const lv = Math.min(ninniku, 3);
-    const Rg = 0.014 + 0.007 * lv;
-    const Hg = 0.012 + 0.008 * lv;
+    const Rg = 0.016 + 0.0075 * lv;
+    const Hg = 0.014 + 0.009 * lv;
     let base = heightAt(gx, gz);
     for (let k = 0; k < 6; k++) {
       const a = (k / 6) * Math.PI * 2;
@@ -756,11 +770,11 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
     base -= 0.003;
     // 芯のドーム（豚と同じマテリアルにまとめる）
     const core = garlicCoreGeometry().clone();
-    core.scale(Rg * 0.85, Hg * 0.85, Rg * 0.85);
+    core.scale(Rg * 0.84, Hg * 0.86, Rg * 0.84);
     core.translate(gx, base, gz);
     porkParts.push(core);
-    const n = Math.round(interp(ninniku, [[0.5, 70], [1, 140], [2, 230], [3, 320]]) * (hi ? 1 : 0.25));
-    const gm = makeInstanced(lumpGeometry(0, 21, 0.75), M.garlic(), n, owned);
+    const n = Math.round(interp(ninniku, [[0.5, 110], [1, 200], [2, 310], [3, 420]]) * (hi ? 1 : 0.25));
+    const gm = makeInstanced(garlicGeometry(), M.garlic(), n, owned);
     for (let i = 0; i < n; i++) {
       const spill = r() < 0.08;
       const rho = (spill ? rr(r, 0.9, 1.5) : Math.pow(r(), 0.6)) * Rg;
@@ -769,7 +783,7 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
       const z = gz + Math.sin(a) * rho;
       const hh = spill ? 0 : Hg * Math.pow(Math.max(0, 1 - (rho / Rg) ** 2), 0.7) * rr(r, 0.82, 1.02);
       const y = spill ? heightAt(x, z) + 0.001 : base + hh + 0.0005;
-      const s = rr(r, 0.0018, 0.0034);
+      const s = rr(r, 0.0021, 0.0038);
       tmp.e.set(r() * 6, r() * 6, r() * 6);
       tmp.q.setFromEuler(tmp.e);
       tmp.m.compose(v1.set(x, y, z), tmp.q, tmp.s.set(s * rr(r, 0.8, 1.4), s * rr(r, 0.6, 1), s * rr(r, 0.8, 1.3)));
@@ -803,8 +817,8 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
   // ── ヤサイ（もやし・キャベツ） ──
   if (mound) {
     group.add(buildDome(mound, hi, patchW, owned));
-    const nSprout = Math.round(interp(yasai, [[0.5, 80], [1, 170], [2, 240], [3, 290]]) * (hi ? 1 : 0.16));
-    const drape = yasai >= 2 ? Math.round(nSprout * 0.05) : 0;
+    const nSprout = Math.round(interp(yasai, [[0.5, 90], [1, 190], [2, 260], [3, 310]]) * (hi ? 1 : 0.16));
+    const drape = 0;
     const sp = makeInstanced(sproutGeometry(detail), M.sprout(), nSprout + drape, owned);
     let used = 0;
     for (let i = 0; i < nSprout; i++) {
@@ -816,20 +830,24 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
       // 豚やニンニクの下に隠れるものは省く
       if (field.get(x, z) > y + 0.006) continue;
       moundNormal(mound, x, z, nrm);
-      // 接平面内のランダムな向き。少しだけ先を持ち上げる
-      dir.set(rr(r, -1, 1), 0, rr(r, -1, 1));
+      // 接平面内の向き: 山を巻くような横向きを優先しつつランダムに
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      dir.set(-sa + rr(r, -1.1, 1.1), rr(r, -0.25, 0.25), ca + rr(r, -1.1, 1.1));
+      if (r() < 0.5) dir.negate();
       dir.addScaledVector(nrm, -dir.dot(nrm)).normalize();
       dir.addScaledVector(nrm, r() < 0.12 ? rr(r, 0.1, 0.35) : rr(r, -0.12, 0.08)).normalize();
       // 軸周りのねじれ（曲がる向き）をランダムに
       const roll = rr(r, -1.2, 1.2);
       nn.copy(nrm).multiplyScalar(Math.cos(roll)).add(v1.crossVectors(dir, nrm).multiplyScalar(Math.sin(roll)));
-      v2.set(x, y, z).addScaledVector(nrm, 0.0016);
+      v2.set(x, y, z).addScaledVector(nrm, 0.0014 + r() * r() * 0.006);
       setBasis(sp, used, v2, dir, nn, rr(r, 0.85, 1.15));
       const h01 = (y - mound.baseY) / mound.H;
       tmp.c.copy(SPROUT_BASE).multiplyScalar(rr(r, 0.92, 1.03));
       if (h01 < 0.28) tmp.c.lerp(SOUP_STAIN, (0.28 - h01) * 2.4 * rr(r, 0.4, 1));
+      else if (r() < 0.12) tmp.c.lerp(SOUP_STAIN, rr(r, 0.2, 0.5));
       const w = patchW(x, z);
-      if (w > 0.05 && r() < 0.45 + 0.5 * w) tmp.c.lerp(CHILI_TINT, Math.min(0.9, w * rr(r, 0.6, 1.2)));
+      if (w > 0.04 && r() < 0.6 + 0.4 * w) tmp.c.lerp(CHILI_TINT, Math.min(0.95, w * rr(r, 0.8, 1.4)));
       sp.setColorAt(used, tmp.c);
       used++;
     }
@@ -837,10 +855,10 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
     for (let i = 0; i < drape; i++) {
       const a = rr(r, 0, Math.PI * 2);
       const out = v1.set(Math.cos(a), 0, Math.sin(a));
-      dir.set(-out.z, 0, out.x).multiplyScalar(r() < 0.5 ? 1 : -1).addScaledVector(out, rr(r, 0.2, 0.45));
-      dir.y -= rr(r, 0.1, 0.3);
+      dir.set(-out.z, 0, out.x).multiplyScalar(r() < 0.5 ? 1 : -1).addScaledVector(out, rr(r, 0.05, 0.2));
+      dir.y -= rr(r, 0.02, 0.12);
       dir.normalize();
-      v2.set(Math.cos(a) * 0.111, RIM_TOP + 0.002, Math.sin(a) * 0.111);
+      v2.set(Math.cos(a) * 0.1135, RIM_TOP + 0.0015, Math.sin(a) * 0.1135);
       setBasis(sp, used, v2, dir, tmp.up, rr(r, 0.85, 1.0));
       tmp.c.copy(SPROUT_BASE).multiplyScalar(rr(r, 0.9, 1));
       sp.setColorAt(used, tmp.c);
@@ -850,7 +868,7 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
     finishInstanced(sp);
     group.add(sp);
     // キャベツ
-    const nCab = Math.round(yasai * (hi ? 6 : 2));
+    const nCab = Math.round(yasai * (hi ? 4 : 1.5));
     if (nCab > 0) {
       const cb = makeInstanced(cabbageGeometry(), M.cabbage(), nCab, owned);
       let cu = 0;
@@ -887,13 +905,13 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
   // ── アブラ（背脂）: 山の頂上に盛る ──
   const abura = Math.max(0, c.toppings.abura);
   if (abura > 0) {
-    const cx = mound ? mound.cx + 0.008 : 0.012;
-    const cz = mound ? mound.cz - 0.012 : -0.004;
+    const cx = mound ? mound.cx + 0.012 : 0.012;
+    const cz = mound ? mound.cz - 0.02 : -0.004;
     const lv = Math.min(abura, 3);
     const Ra = 0.016 + 0.007 * lv;
-    const nBig = Math.round(interp(abura, [[1, 9], [2, 16], [3, 24]]) * (hi ? 1 : 0.5));
-    const nSmall = Math.round(interp(abura, [[1, 40], [2, 75], [3, 110]]) * (hi ? 1 : 0.25));
-    const big = makeInstanced(lumpGeometry(1, 7, 0.8), M.abura(), nBig, owned);
+    const nBig = Math.round(interp(abura, [[1, 7], [2, 13], [3, 20]]) * (hi ? 1 : 0.5));
+    const nSmall = Math.round(interp(abura, [[1, 55], [2, 100], [3, 140]]) * (hi ? 1 : 0.25));
+    const big = makeInstanced(lumpGeometry(1, 7, 0.62), M.abura(), nBig, owned);
     const small = makeInstanced(lumpGeometry(0, 8, 0.85), M.abura(), nSmall, owned);
     const place = (im: THREE.InstancedMesh, i: number, sMin: number, sMax: number, brown: [number, number]) => {
       const rho = Math.sqrt(r()) * Ra;
@@ -910,8 +928,8 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
       im.setColorAt(i, tmp.c);
       field.stamp(x, z, y + s * 0.6, s * 0.7);
     };
-    for (let i = 0; i < nBig; i++) place(big, i, 0.005, 0.009, [0.0, 0.55]);
-    for (let i = 0; i < nSmall; i++) place(small, i, 0.0022, 0.0042, [0.2, 0.85]);
+    for (let i = 0; i < nBig; i++) place(big, i, 0.005, 0.009, [0.15, 0.7]);
+    for (let i = 0; i < nSmall; i++) place(small, i, 0.0022, 0.0042, [0.3, 0.95]);
     finishInstanced(big);
     finishInstanced(small);
     group.add(big, small);
@@ -920,10 +938,10 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
   // ── 唐辛子（一味）: 粉の層＋粒 ──
   if (ichimi > 0) {
     const lv = Math.min(ichimi, 3);
-    group.add(buildPowder(heightAt, patch.x, patch.z, patch.s * 2.3, hi ? 20 : 8, owned));
+    if (mound) group.add(buildPowder(heightAt, patch.x, patch.z, patch.s * 1.9, hi ? 20 : 8, owned));
     const rimA = Math.atan2(patch.z, patch.x) + 0.25;
     group.add(buildRimPowder(rimA, 0.7 + 0.35 * lv, hi ? 24 : 10, owned));
-    const n = Math.round(interp(ichimi, [[0.5, 160], [1, 280], [2, 480], [3, 680]]) * (hi ? 1 : 0.3));
+    const n = Math.round(interp(ichimi, [[0.5, 300], [1, 520], [2, 900], [3, 1250]]) * (hi ? 1 : 0.3));
     const cm = makeInstanced(chiliGeometry(), M.chili(), n, owned);
     for (let i = 0; i < n; i++) {
       const b = r();
@@ -938,8 +956,8 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
           x *= 0.106 / d;
           z *= 0.106 / d;
         }
-        y = heightAt(x, z) + 0.0016;
-      } else if (b < 0.78) {
+        y = heightAt(x, z) + (mound && moundY(mound, x, z) > 0 ? 0.0035 + r() * 0.003 : 0.0012);
+      } else if (b < 0.8) {
         const a = rimA + rnorm(r) * 0.9;
         const rad = rr(r, 0.1148, 0.1196);
         x = Math.cos(a) * rad;
@@ -952,8 +970,8 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
         z = Math.sin(a) * rad;
         y = heightAt(x, z) + 0.0016;
       }
-      const s = rr(r, 0.0016, 0.0034);
-      tmp.e.set(rr(r, -0.5, 0.5), r() * 6, rr(r, -0.5, 0.5));
+      const s = rr(r, 0.0013, 0.0028);
+      tmp.e.set(rr(r, -0.35, 0.35), r() * 6, rr(r, -0.35, 0.35));
       tmp.q.setFromEuler(tmp.e);
       tmp.m.compose(v1.set(x, y, z), tmp.q, tmp.s.set(s, s, s));
       cm.setMatrixAt(i, tmp.m);
@@ -984,10 +1002,15 @@ function buildPowder(heightAt: (x: number, z: number) => number, cx: number, cz:
         x *= 0.108 / d;
         z *= 0.108 / d;
       }
-      // 周囲の最大値をとって、もやしの上に乗るように
-      let y = heightAt(x, z);
-      y = Math.max(y, heightAt(x + 0.003, z), heightAt(x - 0.003, z), heightAt(x, z + 0.003), heightAt(x, z - 0.003));
-      pos.push(x, y + 0.0022, z);
+      // 周囲の最大値をとって、もやしの上に乗るように。急斜面は粉が積もらないので表面の下へ沈める
+      const y0 = heightAt(x, z);
+      const hx1 = heightAt(x + 0.003, z);
+      const hx0 = heightAt(x - 0.003, z);
+      const hz1 = heightAt(x, z + 0.003);
+      const hz0 = heightAt(x, z - 0.003);
+      const y = Math.max(y0, hx1, hx0, hz1, hz0);
+      const slope = Math.hypot(hx1 - hx0, hz1 - hz0) / 0.006;
+      pos.push(x, y + 0.0022 - Math.max(0, slope - 0.8) * 0.01, z);
       uv.push(u, v);
     }
   }
@@ -1056,7 +1079,7 @@ function buildDome(m: Mound, hi: boolean, patchW: (x: number, z: number) => numb
   const col: number[] = [];
   const uv: number[] = [];
   const idx: number[] = [];
-  const pale = new THREE.Color(0.97, 0.95, 0.88);
+  const pale = new THREE.Color(1.0, 0.99, 0.93);
   const c = new THREE.Color();
   const add = (x: number, y: number, z: number) => {
     pos.push(x, y, z);
@@ -1065,7 +1088,7 @@ function buildDome(m: Mound, hi: boolean, patchW: (x: number, z: number) => numb
     c.copy(pale);
     if (h01 < 0.3) c.lerp(SOUP_STAIN, (0.3 - h01) * 2);
     const w = patchW(x, z);
-    if (w > 0) c.lerp(CHILI_TINT, Math.min(0.8, w * 0.9));
+    if (w > 0) c.lerp(CHILI_TINT, Math.min(0.92, w * 1.1));
     col.push(c.r, c.g, c.b);
   };
   add(m.cx, moundY(m, m.cx, m.cz) - 0.002, m.cz);

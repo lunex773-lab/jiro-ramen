@@ -47,7 +47,7 @@ import { decodeCheckpoint, encodeCheckpoint, RidCache, type CheckpointData } fro
 import type { Env } from './env';
 import { LAYOUT_ACTIONS, MAX_HOST_INIT_BYTES, MAX_MSG_BYTES, parseClientMsg } from './protocol';
 import { TokenBucket, WS_MSG_COST, WS_MSG_RATE } from './ratelimit';
-import { isObj, log, safeJsonParse } from './util';
+import { cleanName, isObj, log, safeJsonParse } from './util';
 import { isClientSupported } from './version';
 
 // ───────────────────────── 定数 ─────────────────────────
@@ -568,6 +568,8 @@ export class GameRoom extends DurableObject<Env> {
       return;
     }
     a.hello = true;
+    // 表示名は hello の名前（検証済み）を優先し、なければアカウント登録時の名前を使う
+    a.name = cleanName(m.name) ?? a.name;
     ws.serializeAttachment(a);
     rt.needFull = true;
     const host = this.isHost(a.pid);

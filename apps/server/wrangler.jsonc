@@ -35,7 +35,7 @@
   "r2_buckets": [{ "binding": "SAVES", "bucket_name": "jiro-saves" }],
 
   "vars": {
-    "GAME_VERSION": "0.1.0",
+    "GAME_VERSION": "0.9.0",
     // これより古いクライアントは WebSocket の hello で拒否する
     "MIN_CLIENT_VERSION": "0.1.0",
     // CORS を許可するオリジン（カンマ区切り）。GitHub Pages とローカルの Vite 開発サーバー

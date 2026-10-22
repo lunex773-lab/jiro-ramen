@@ -86,8 +86,8 @@ ok(host.token && guest.token, 'anonymous auth');
 
 const room = (await api('/api/v1/session/create', { token: host.token, body: {} })).body;
 ok(room.code?.length === 6, `room created code=${room.code}`);
-const join = (await api('/api/v1/session/join', { token: guest.token, body: { code: room.code } })).body;
-ok(join.roomId === room.roomId, 'guest joined by code');
+const joined = (await api('/api/v1/session/join', { token: guest.token, body: { code: room.code } })).body;
+ok(joined.roomId === room.roomId, 'guest joined by code');
 
 const hc = new Client(wsUrl(room.roomId, room.joinToken));
 await hc.opened;
@@ -99,7 +99,7 @@ const w2 = await hc.next('welcome');
 const full = await hc.next('full');
 ok(full.state.shopName === 'スモーク屋', `hostInit accepted (host actor ${w2.playerId})`);
 
-const gc = new Client(wsUrl(join.roomId, join.joinToken));
+const gc = new Client(wsUrl(joined.roomId, joined.joinToken));
 await gc.opened;
 gc.send({ t: 'hello', name: 'スモーク客', protocol: core.PROTOCOL_VERSION, clientVersion: ver.body.gameVersion });
 const gw = await gc.next('welcome');

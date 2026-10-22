@@ -221,7 +221,11 @@ function buildBowls(): void {
 
 function buildCloseup(): void {
   scene.background = new THREE.Color('#3a2f27');
-  addLights({ sunPos: new THREE.Vector3(0.6, 3, 1.2), extent: 0.6, hemi: 1.0, sun: 1.5 });
+  addLights({ sunPos: new THREE.Vector3(0.4, 3, 0.6), extent: 0.5, hemi: 1.25, sun: 1.7 });
+  // 手前上からの柔らかい補助光（店の天井照明のイメージ）
+  const fill = new THREE.DirectionalLight('#fff6ea', 0.9);
+  fill.position.set(-0.3, 1.2, -1.2);
+  scene.add(fill);
   counterSlab(1.6, 0.8, 0);
   // 奥の壁
   const wall = new THREE.Mesh(new THREE.PlaneGeometry(3, 1.5), new THREE.MeshStandardMaterial({ color: '#5a4b3e', roughness: 0.9 }));
@@ -232,9 +236,9 @@ function buildCloseup(): void {
   b.setDetail('high');
   b.setContents(contents({ yasai: 2, ninniku: 2, abura: 1, ichimi: 2, buta: 3 }));
   scene.add(b.group);
-  orbit.target.set(0, 0.07, 0.01);
-  orbit.dist = 0.5;
-  orbit.pitch = 0.95;
+  orbit.target.set(0, 0.075, 0.0);
+  orbit.dist = 0.4;
+  orbit.pitch = 0.88;
   orbit.yaw = 0;
 }
 
