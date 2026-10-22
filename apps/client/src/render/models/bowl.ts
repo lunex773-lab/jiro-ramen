@@ -607,7 +607,7 @@ const CHILI_COLORS = ['#d24a1e', '#de6228', '#e87a36', '#c03a16', '#ec9048', '#d
 const SPROUT_BASE = new THREE.Color(1, 1, 1);
 const SOUP_STAIN = new THREE.Color(0.8, 0.64, 0.44);
 const CHILI_TINT = new THREE.Color(0.85, 0.3, 0.1);
-const GARLIC_COLORS = ['#f3e8c2', '#eedda6', '#f8f1dc', '#e9d68e', '#f1e3b4'].map((c) => new THREE.Color(c));
+const GARLIC_COLORS = ['#f2e4b0', '#ecd690', '#f6edcc', '#e6cf7c', '#efdc9e'].map((c) => new THREE.Color(c));
 const ABURA_LIGHT = new THREE.Color('#eadcc0');
 const ABURA_BROWN = new THREE.Color('#a8763e');
 const CABBAGE_COLORS = ['#e2edc4', '#ecf2d6', '#d4e4aa', '#f2f4e2'].map((c) => new THREE.Color(c));
@@ -713,7 +713,7 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
   const ichimi = Math.max(0, c.toppings.ichimi);
   // 唐辛子を集中させる位置（山の頂上から見る人の右奥へ）
   const patch = mound
-    ? { x: mound.cx - 0.02, z: mound.cz + 0.012, s: 0.024 + 0.007 * Math.min(ichimi, 3) }
+    ? { x: mound.cx - 0.014, z: mound.cz + 0.004, s: 0.024 + 0.007 * Math.min(ichimi, 3) }
     : { x: -0.02, z: 0.02, s: 0.012 + 0.004 * Math.min(ichimi, 3) };
   const patchW = (x: number, z: number) => (ichimi <= 0 ? 0 : Math.exp(-((x - patch.x) ** 2 + (z - patch.z) ** 2) / (2 * patch.s * patch.s)));
   const heightAt = (x: number, z: number) => Math.max(field.get(x, z), mound ? moundY(mound, x, z) + 0.003 : -1);
@@ -913,23 +913,28 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
     const nSmall = Math.round(interp(abura, [[1, 55], [2, 100], [3, 140]]) * (hi ? 1 : 0.25));
     const big = makeInstanced(lumpGeometry(1, 7, 0.62), M.abura(), nBig, owned);
     const small = makeInstanced(lumpGeometry(0, 8, 0.85), M.abura(), nSmall, owned);
+    // 盛る前の表面の高さ（ここから少しだけ積み上げる。高さ場に書き戻すと塔になるので戻さない）
+    const baseH = (x: number, z: number) => heightAt(x, z);
+    const pile = 0.004 + 0.003 * lv;
+    const stamps: [number, number, number, number][] = [];
     const place = (im: THREE.InstancedMesh, i: number, sMin: number, sMax: number, brown: [number, number]) => {
       const rho = Math.sqrt(r()) * Ra;
       const a = r() * Math.PI * 2;
       const x = cx + Math.cos(a) * rho;
       const z = cz + Math.sin(a) * rho;
       const s = rr(r, sMin, sMax);
-      const y = heightAt(x, z) + s * 0.15;
+      const y = baseH(x, z) + s * 0.1 + pile * (1 - (rho / Ra) ** 2) * r();
       tmp.e.set(rr(r, -0.6, 0.6), r() * 6, rr(r, -0.6, 0.6));
       tmp.q.setFromEuler(tmp.e);
       tmp.m.compose(v1.set(x, y, z), tmp.q, tmp.s.set(s * rr(r, 0.85, 1.25), s * rr(r, 0.7, 1.0), s * rr(r, 0.85, 1.25)));
       im.setMatrixAt(i, tmp.m);
       tmp.c.copy(ABURA_LIGHT).lerp(ABURA_BROWN, rr(r, brown[0], brown[1]));
       im.setColorAt(i, tmp.c);
-      field.stamp(x, z, y + s * 0.6, s * 0.7);
+      stamps.push([x, z, y + s * 0.6, s * 0.7]);
     };
     for (let i = 0; i < nBig; i++) place(big, i, 0.005, 0.009, [0.15, 0.7]);
     for (let i = 0; i < nSmall; i++) place(small, i, 0.0022, 0.0042, [0.3, 0.95]);
+    for (const [x, z, y, rad] of stamps) field.stamp(x, z, y, rad);
     finishInstanced(big);
     finishInstanced(small);
     group.add(big, small);
@@ -1010,7 +1015,7 @@ function buildPowder(heightAt: (x: number, z: number) => number, cx: number, cz:
       const hz0 = heightAt(x, z - 0.003);
       const y = Math.max(y0, hx1, hx0, hz1, hz0);
       const slope = Math.hypot(hx1 - hx0, hz1 - hz0) / 0.006;
-      pos.push(x, y + 0.0022 - Math.max(0, slope - 0.8) * 0.01, z);
+      pos.push(x, y + 0.0022 - Math.max(0, slope - 1.4) * 0.01, z);
       uv.push(u, v);
     }
   }
