@@ -847,7 +847,7 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
       if (h01 < 0.28) tmp.c.lerp(SOUP_STAIN, (0.28 - h01) * 2.4 * rr(r, 0.4, 1));
       else if (r() < 0.12) tmp.c.lerp(SOUP_STAIN, rr(r, 0.2, 0.5));
       const w = patchW(x, z);
-      if (w > 0.04 && r() < 0.6 + 0.4 * w) tmp.c.lerp(CHILI_TINT, Math.min(0.95, w * rr(r, 0.8, 1.4)));
+      if (w > 0.04 && r() < 0.55 + 0.4 * w) tmp.c.lerp(CHILI_TINT, Math.min(0.85, w * rr(r, 0.7, 1.3)));
       sp.setColorAt(used, tmp.c);
       used++;
     }
@@ -902,6 +902,9 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
     }
   }
 
+  // ── 唐辛子の粉の層（背脂より先に敷き、背脂はその上に乗せる） ──
+  if (ichimi > 0 && mound) group.add(buildPowder(heightAt, patch.x, patch.z, patch.s * 1.9, hi ? 20 : 8, owned));
+
   // ── アブラ（背脂）: 山の頂上に盛る ──
   const abura = Math.max(0, c.toppings.abura);
   if (abura > 0) {
@@ -923,7 +926,7 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
       const x = cx + Math.cos(a) * rho;
       const z = cz + Math.sin(a) * rho;
       const s = rr(r, sMin, sMax);
-      const y = baseH(x, z) + s * 0.1 + pile * (1 - (rho / Ra) ** 2) * r();
+      const y = baseH(x, z) + 0.0035 + s * 0.25 + pile * (1 - (rho / Ra) ** 2) * r();
       tmp.e.set(rr(r, -0.6, 0.6), r() * 6, rr(r, -0.6, 0.6));
       tmp.q.setFromEuler(tmp.e);
       tmp.m.compose(v1.set(x, y, z), tmp.q, tmp.s.set(s * rr(r, 0.85, 1.25), s * rr(r, 0.7, 1.0), s * rr(r, 0.85, 1.25)));
@@ -943,7 +946,6 @@ function buildContents(c: BowlContents, detail: BowlDetail, seed: number): Built
   // ── 唐辛子（一味）: 粉の層＋粒 ──
   if (ichimi > 0) {
     const lv = Math.min(ichimi, 3);
-    if (mound) group.add(buildPowder(heightAt, patch.x, patch.z, patch.s * 1.9, hi ? 20 : 8, owned));
     const rimA = Math.atan2(patch.z, patch.x) + 0.25;
     group.add(buildRimPowder(rimA, 0.7 + 0.35 * lv, hi ? 24 : 10, owned));
     const n = Math.round(interp(ichimi, [[0.5, 300], [1, 520], [2, 900], [3, 1250]]) * (hi ? 1 : 0.3));
