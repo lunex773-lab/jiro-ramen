@@ -195,7 +195,7 @@ export function fire(s: GameState, ctx: SimCtx, employeeId: string): { ok: boole
 
 export function setRole(s: GameState, employeeId: string, role: EmployeeRole): boolean {
   const e = s.employees.find((x) => x.id === employeeId);
-  if (!e || !(role in ROLE_LABEL)) return false;
+  if (!e || !Object.hasOwn(ROLE_LABEL, role)) return false;
   e.profile.role = role;
   releaseTask(e);
   return true;
@@ -204,7 +204,7 @@ export function setRole(s: GameState, employeeId: string, role: EmployeeRole): b
 /** 担当設定: 仕事ごとの優先度補正（-100 で担当外） */
 export function setPriority(s: GameState, employeeId: string, kind: string, value: number): boolean {
   const e = s.employees.find((x) => x.id === employeeId);
-  if (!e || !(kind in TASK_KINDS) || !Number.isFinite(value)) return false;
+  if (!e || !Object.hasOwn(TASK_KINDS, kind) || !Number.isFinite(value)) return false;
   e.priorities[kind] = Math.max(-100, Math.min(50, Math.round(value)));
   return true;
 }

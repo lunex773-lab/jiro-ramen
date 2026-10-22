@@ -6,6 +6,8 @@ import { INGREDIENTS } from './data/ingredients';
 import { MENU } from './data/menu';
 import { STAGES } from './data/stages';
 import { SCHEMA_VERSION } from './state';
+import { removePlayer } from './sim/actions';
+import { makeCtx } from './sim/notices';
 import type { GameState } from './types';
 
 export const SLOT_COUNT = 3;
@@ -181,6 +183,11 @@ export function preSaveCheck(s: GameState): string[] {
 
 export function makeSaveFile(s: GameState, slot: number, prev: SaveFile | null, now: number): SaveFile {
   const state = JSON.parse(JSON.stringify(s)) as GameState;
+  // 共同経営のゲストはホストのキャリアに残さない（ゲストが持っていた物は安全な場所へ戻す）
+  const hostIds = state.players.filter((p) => p.isHost).map((p) => p.id);
+  const keep = hostIds.length > 0 ? hostIds : state.players.slice(0, 1).map((p) => p.id);
+  const ctx = makeCtx();
+  for (const p of [...state.players]) if (!keep.includes(p.id)) removePlayer(state, p.id, ctx);
   // 接続状態などの一時的な情報はセーブに残さない
   for (const p of state.players) {
     p.connected = false;

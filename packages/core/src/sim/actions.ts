@@ -3,6 +3,7 @@
 
 import { BALANCE } from '../data/balance';
 import { BOWL_PACK, EQUIPMENT, SEAT_PRICE } from '../data/equipment';
+import { INGREDIENTS } from '../data/ingredients';
 import { MENU } from '../data/menu';
 import { moveWithCollision, stageOf } from '../geometry';
 import type { EmployeeRole, GameState, Id, Rot, Vec2 } from '../types';
@@ -11,7 +12,7 @@ import { cash, recordPL } from './economy';
 import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipment';
 import { fire, hire, setPriority, setRole } from './employees';
 import { nextDay, openShop, payArrears, takeLoan, declareBankruptcy, updateFinanceWarnings } from './day';
-import { cancelWork, getActor, interact, type Args } from './interact';
+import { cancelWork, dropHand, getActor, interact, type Args } from './interact';
 import { placeOrder } from './inventory';
 import { autoPlace, expand, placeEquipment, storeEquipment } from './layout';
 import { emit, type SimCtx } from './notices';
@@ -118,6 +119,8 @@ export function applyAction(s: GameState, actorId: Id, a: Action, ctx: SimCtx, n
     }
     case 'setAutoOrder': {
       if (typeof a.itemId !== 'string' || !isNum(a.qty) || a.qty < 0 || a.qty > 1_000_000) return fail('不正な値');
+      // 仕入れできる食材だけ（任意のキーで状態が膨らむのを防ぐ）
+      if (!Object.hasOwn(INGREDIENTS, a.itemId) || !INGREDIENTS[a.itemId]!.purchasable) return fail('仕入れできない食材です');
       s.autoOrder[a.itemId] = Math.round(a.qty);
       return { ok: true };
     }
@@ -200,7 +203,7 @@ export function applyAction(s: GameState, actorId: Id, a: Action, ctx: SimCtx, n
     case 'expand':
       return expand(s, ctx);
     case 'setPrice': {
-      const m = MENU[a.menuId];
+      const m = Object.hasOwn(MENU, a.menuId) ? MENU[a.menuId] : undefined;
       if (!m || !isNum(a.price)) return fail('不正な価格');
       if (!isUnlocked(s, m.unlock)) return fail('まだ解放されていません');
       const price = Math.round(a.price / 10) * 10;
@@ -210,7 +213,7 @@ export function applyAction(s: GameState, actorId: Id, a: Action, ctx: SimCtx, n
       return { ok: true };
     }
     case 'pauseMenu': {
-      if (!MENU[a.menuId]) return fail('不明なメニュー');
+      if (!Object.hasOwn(MENU, a.menuId)) return fail('不明なメニュー');
       s.pausedMenu = s.pausedMenu.filter((x) => x !== a.menuId);
       if (a.paused) s.pausedMenu.push(a.menuId);
       return { ok: true };
@@ -249,4 +252,16 @@ function sanitizeArgs(args: Args | undefined): Args {
     else if (typeof v === 'boolean') out[k] = v;
   }
   return out;
+}
+
+/**
+ * 共同経営から抜けたプレイヤーを状態から取り除く（持っていた物は安全な場所へ戻す）。
+ * ホストは取り除けない。
+ */
+export function removePlayer(s: GameState, playerId: Id, ctx: SimCtx): boolean {
+  const p = s.players.find((x) => x.id === playerId);
+  if (!p || p.isHost) return false;
+  dropHand(s, p, ctx);
+  s.players = s.players.filter((x) => x.id !== playerId);
+  return true;
 }

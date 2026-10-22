@@ -106,8 +106,10 @@ export class RemoteHost implements GameHost {
       }
       this.onMessage(msg);
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       this.ws = null;
+      // 4001=バージョン違い 4003=満員 4004=ルーム終了: 再接続しない
+      if ([4001, 4003, 4004].includes(ev.code)) this.closedByUser = true;
       if (this.closedByUser) {
         this.setConn('closed');
         return;
@@ -224,7 +226,8 @@ export class RemoteHost implements GameHost {
         break;
       case 'error':
         this.lastError = msg.message;
-        if (msg.code === 'room_full' || msg.code === 'unauthorized') {
+        // 再接続しても回復しない理由のときは再試行しない
+        if (['room_full', 'unauthorized', 'room_closed', 'client_outdated', 'protocol_mismatch'].includes(msg.code)) {
           this.closedByUser = true;
           this.readyResolve?.(false);
           this.readyResolve = null;

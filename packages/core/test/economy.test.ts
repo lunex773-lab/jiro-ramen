@@ -109,3 +109,14 @@ describe('経済', () => {
     expect(fc.total).toBe(fc.rent + fc.wages + fc.upkeep + fc.utilities + fc.loans);
   });
 });
+
+describe('入力の検証', () => {
+  it('自動発注は仕入れできる食材だけ、担当設定は既知の仕事だけ受け付ける', () => {
+    const { s, ctx } = newGame();
+    expect(applyAction(s, 'p1', { type: 'setAutoOrder', itemId: 'xyz', qty: 1 }, ctx).ok).toBe(false);
+    expect(applyAction(s, 'p1', { type: 'setAutoOrder', itemId: 'yasai', qty: 1 }, ctx).ok).toBe(false);
+    expect(applyAction(s, 'p1', { type: 'setAutoOrder', itemId: '__proto__', qty: 1 }, ctx).ok).toBe(false);
+    expect(applyAction(s, 'p1', { type: 'setAutoOrder', itemId: 'moyashi', qty: 4000 }, ctx).ok).toBe(true);
+    expect(applyAction(s, 'p1', { type: 'setPrice', menuId: 'toString', price: 1000 }, ctx).ok).toBe(false);
+  });
+});

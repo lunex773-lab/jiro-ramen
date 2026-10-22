@@ -125,3 +125,16 @@ describe('セーブ（3スロット）', () => {
     expect(compareSaves(local, base, base.revision)).toBe('localNewer');
   });
 });
+
+describe('共同経営のセーブ', () => {
+  it('ゲストはホストのセーブに残らず、ゲストが持っていた丼は戻される', () => {
+    const { s } = newGame(9);
+    s.players.push({ ...s.players[0]!, id: 'g1', name: 'ゲスト', isHost: false, hand: { kind: 'clean', bowlIds: [s.bowls[0]!.id] }, work: null });
+    s.bowls[0]!.loc = { at: 'hand', actorId: 'g1' };
+    const f = makeSaveFile(s, 1, null, 1);
+    expect(f.state.players.map((p) => p.id)).toEqual(['p1']);
+    expect(f.state.bowls[0]!.loc.at).toBe('rack');
+    // 元の状態は変わらない
+    expect(s.players).toHaveLength(2);
+  });
+});
