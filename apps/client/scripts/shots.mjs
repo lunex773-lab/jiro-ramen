@@ -43,7 +43,7 @@ if (!noBuild) {
   if (r.status !== 0) process.exit(r.status ?? 1);
 }
 
-const server = spawn('npx', dev ? ['vite', '--port', String(PORT), '--strictPort'] : ['vite', 'preview', '--port', String(PORT), '--strictPort'], { cwd: clientDir, stdio: ['ignore', 'pipe', 'inherit'] });
+const server = spawn('npx', dev ? ['vite', '--port', String(PORT), '--strictPort'] : ['vite', 'preview', '--port', String(PORT), '--strictPort'], { cwd: clientDir, stdio: ['ignore', 'pipe', 'inherit'], detached: true });
 await new Promise((ok, ng) => {
   const timer = setTimeout(() => ng(new Error('preview server timeout')), 30000);
   server.stdout.on('data', (d) => {
@@ -86,5 +86,11 @@ try {
   }
 } finally {
   await browser.close();
-  server.kill();
+  // npx の子プロセス（vite）ごと止める
+  try {
+    process.kill(-server.pid, 'SIGTERM');
+  } catch {
+    server.kill();
+  }
 }
+process.exit(0);

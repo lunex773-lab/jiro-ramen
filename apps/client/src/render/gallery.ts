@@ -491,12 +491,13 @@ window.addEventListener('resize', resize);
 resize();
 if (window.innerWidth < window.innerHeight && section !== 'closeup') orbit.dist *= 1.5;
 
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 let frames = 0;
 let t = 0;
 const tmpV = new THREE.Vector3();
-function frame(): void {
-  const dt = Math.min(0.05, clock.getDelta());
+function frame(now: number): void {
+  timer.update(now);
+  const dt = Math.min(0.05, timer.getDelta());
   t += dt;
   for (const f of tickers) f(t, dt);
   Models.tickModels(t);
