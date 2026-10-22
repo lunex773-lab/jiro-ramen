@@ -14,6 +14,7 @@ import {
   isUnlocked,
   loanAvailable,
   maintenanceCost,
+  MAINTENANCE_THRESHOLD,
   MENU,
   operatingProfit,
   pendingOf,
@@ -376,7 +377,7 @@ export class ManageMenu {
                 ? h('button', { class: `mini ${e.status === 'broken' ? 'danger' : ''}`, disabled: e.status === 'repairing', onclick: () => this.act({ type: 'repair', equipmentId: e.id }, '修理を依頼しました') }, e.status === 'repairing' ? '修理中' : `修理 ${yenStr(e.status === 'broken' ? def.repairCost : Math.round(def.repairCost * 0.5))}`)
                 : null,
               def.repairCost > 0
-                ? h('button', { class: `mini ${e.maintenanceBooked ? 'on' : 'ghost'}`, title: '閉店後に状態を回復', onclick: () => this.act({ type: 'maintenance', equipmentId: e.id, on: !e.maintenanceBooked }) }, `定期メンテ${e.maintenanceBooked ? 'ON' : 'OFF'}（${yenStr(maintenanceCost(e))}/日）`)
+                ? h('button', { class: `mini ${e.maintenanceBooked ? 'on' : 'ghost'}`, title: `ONにすると、状態が${MAINTENANCE_THRESHOLD}%を下回った日の閉店後にメンテ（状態+40%）を行います`, onclick: () => this.act({ type: 'maintenance', equipmentId: e.id, on: !e.maintenanceBooked }) }, `自動メンテ${e.maintenanceBooked ? 'ON' : 'OFF'}（1回${yenStr(maintenanceCost(e))}）`)
                 : null,
               this.host.isHost
                 ? h(

@@ -1,6 +1,7 @@
 // 初心者向けの「次にやること」ガイド。状態から次の一手を提案する（最初の数日だけ表示）。
 
 import {
+  BALANCE,
   bowlForOrder,
   bowlsOnAssembly,
   EQUIPMENT,
@@ -62,6 +63,6 @@ export function nextHint(s: GameState, myId: string): string | null {
   if (onAsm.some((x) => x.bowl.contents && x.bowl.contents.tare === 0)) return '盛り付け台で「タレを入れる」';
   if (onAsm.some((x) => x.bowl.contents && x.bowl.contents.soupL === 0)) return '盛り付け台で「スープを注ぐ」';
   const boiling = s.equipment.some((e) => e.slots.some(Boolean));
-  if (!boiling) return '麺釜で「麺を入れる」（約25秒でゆで上がり）';
+  if (!boiling) return `麺釜で「麺を入れる」（約${BALANCE.cooking.noodleIdeal}秒でゆで上がり）`;
   return '麺がゆで上がるまでに、コールを聞いておきましょう';
 }

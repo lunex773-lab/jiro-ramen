@@ -163,10 +163,13 @@ export function maintenanceCost(e: Equipment): number {
   return Math.max(2_000, Math.round(defOf(e).repairCost * 0.2));
 }
 
-/** 閉店後の定期メンテ（予約済みの設備の状態を回復） */
+/** 定期メンテを行う状態の目安（これを下回ったら閉店後に実施） */
+export const MAINTENANCE_THRESHOLD = 70;
+
+/** 閉店後の定期メンテ（ONの設備のうち、状態が目安を下回ったものだけ実施・課金） */
 export function runMaintenance(s: GameState, ctx: SimCtx): void {
   for (const e of s.equipment) {
-    if (!e.maintenanceBooked) continue;
+    if (!e.maintenanceBooked || e.condition >= MAINTENANCE_THRESHOLD || e.status === 'broken' || e.status === 'repairing') continue;
     const cost = maintenanceCost(e);
     if (spend(s, 'maintenance', 'repairs', cost, `${defOf(e).name}の定期メンテ`, `mt:${e.id}:${s.day}`)) {
       e.condition = clamp(e.condition + 40, 0, 100);

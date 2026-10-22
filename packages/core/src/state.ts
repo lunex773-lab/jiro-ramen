@@ -62,14 +62,14 @@ export function createGame(opts: NewGameOptions = {}): GameState {
     inventory: [],
     deliveries: [],
     autoOrder: {
-      noodle: 10_000,
-      pork_raw: 4,
+      noodle: 20_000,
+      pork_raw: 8,
       bones: 10_000,
       backfat_raw: 2_000,
-      moyashi: 8_000,
+      moyashi: 12_000,
       cabbage: 3_000,
       garlic_raw: 1_000,
-      soy: 3_600,
+      soy: 5_400,
       ichimi: 300,
     },
     equipment: [],
@@ -140,20 +140,20 @@ export function createGame(opts: NewGameOptions = {}): GameState {
   }
 
   // 開業日に必要な最低限の在庫（前の店主からの引き継ぎ分）
-  addLot(s, 'noodle', 10_000, 0.3);
-  addLot(s, 'pork_raw', 2, 850);
-  addLot(s, 'pork_block', 1, 870);
-  addLot(s, 'buta', 18, 48);
+  addLot(s, 'noodle', 15_000, 0.3);
+  addLot(s, 'pork_raw', 4, 850);
+  addLot(s, 'pork_block', 2, 870);
+  addLot(s, 'buta', 36, 48);
   addLot(s, 'soy', 3_600, 0.39);
   addLot(s, 'tare', 1_500, 0.29);
   addLot(s, 'bones', 10_000, 0.18);
   addLot(s, 'backfat_raw', 2_000, 0.35);
-  addLot(s, 'moyashi', 6_000, 0.12);
-  addLot(s, 'cabbage', 2_400, 0.15);
+  addLot(s, 'moyashi', 8_000, 0.12);
+  addLot(s, 'cabbage', 2_000, 0.15);
   addLot(s, 'garlic_raw', 1_000, 1.0);
   addLot(s, 'garlic', 300, 1.0);
   addLot(s, 'abura', 600, 0.38);
-  addLot(s, 'yasai', 3_000, 0.13);
+  addLot(s, 'yasai', 5_000, 0.13);
   addLot(s, 'ichimi', 300, 2);
 
   s.players.push(makePlayer(s, opts.playerId ?? 'p1', opts.playerName?.trim() || '店主', true));

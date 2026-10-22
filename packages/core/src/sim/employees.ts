@@ -33,6 +33,8 @@ import {
   noodlesStartedFor,
   bowlForOrder,
   dropHand,
+  verbBlocked,
+  assemblyFunctional,
   type Actor,
 } from './interact';
 import { isBowlComplete } from './cooking';
@@ -68,6 +70,22 @@ export const TASK_KINDS: Record<string, { label: string; base: number; roles: Em
   mop: { label: '床の清掃', base: 30, roles: ['cleaner'] },
   tidyHand: { label: '片付け', base: 20, roles: ['cook', 'server', 'cleaner'] },
 };
+
+/** その食材を仕込みで補充できる見込みがあるか（材料と設備がある、または工程中） */
+function canReplenish(s: GameState, itemId: string): boolean {
+  for (const r of Object.values(PREP_RECIPES)) {
+    const produces = r.outputs.some((o) => o.itemId === itemId) || (itemId === 'buta' && r.outputs.some((o) => o.itemId === 'pork_block'));
+    if (!produces) continue;
+    if (s.equipment.some((e) => e.process?.recipeId === r.id)) return true;
+    if (r.unlock && !s.career.unlocked.includes(r.unlock)) continue;
+    const station = s.equipment.some((e) => e.placed && EQUIPMENT[e.type]?.role === r.station && isUsable(e));
+    if (station && r.inputs.every((i) => stockOf(s, i.itemId) >= i.qty)) return true;
+  }
+  return itemId === 'buta' && stockOf(s, 'pork_block') > 0;
+}
+
+/** 1杯盛るのに最低限必要な量（これを下回ったら補充を最優先） */
+const MIN_FOR_BOWL: Record<string, number> = { buta: 5, yasai: 540, garlic: 36, abura: 75 };
 
 export interface Task {
   key: string;
@@ -246,14 +264,17 @@ export function buildTasks(s: GameState): Task[] {
       const on = bowlsOnAssembly(s, asm);
       const free = asm.bowlSlots.filter((x) => x === null).length;
       const cleanAtRack = s.bowls.filter((b) => b.state === 'clean' && b.loc.at === 'rack').length;
-      if (free > 0 && ordersWithoutBowl.length > 0 && cleanAtRack > 0 && racks[0]) {
+      // スープやトッピングに届かない盛り付け台には丼を並べない（完成できず詰まるため）
+      if (free > 0 && ordersWithoutBowl.length > 0 && cleanAtRack > 0 && racks[0] && assemblyFunctional(s, asm)) {
         const n = Math.min(free, ordersWithoutBowl.length, 6);
         add('setBowls', `setBowls:${asm.id}`, [step(racks[0].id, 'bowls_take', { count: n }), step(asm.id, 'bowls_place')]);
       }
       if (on.some((x) => x.bowl.contents && x.bowl.contents.tare === 0) && stockOf(s, 'tare') > 30) add('tare', `tare:${asm.id}`, [step(asm.id, 'tare')]);
       if (on.some((x) => x.bowl.contents && x.bowl.contents.tare > 0 && x.bowl.contents.soupL === 0)) add('soup', `soup:${asm.id}`, [step(asm.id, 'soup')]);
       const needTop = on.filter((x) => x.bowl.contents && x.bowl.contents.noodleG > 0 && !x.bowl.contents.steps.includes('toppings'));
-      if (needTop.length > 0) {
+      // 豚やヤサイが切れているときは、補充できる見込みがある限り待ってから盛る（足りないまま出すとミスになる）
+      const stocked = Object.entries(MIN_FOR_BOWL).every(([id, q]) => stockOf(s, id) >= q || !canReplenish(s, id));
+      if (needTop.length > 0 && stocked) {
         const allAsked = needTop.every((x) => s.orders.find((o) => o.id === x.bowl.orderId)?.callRevealed ?? true);
         // コール未確認のまま盛ると間違えるので、確認してから盛る（丼が冷めすぎる前に）
         const oldest = Math.max(...needTop.map((x) => s.t - (x.bowl.contents?.startedAt ?? s.t)));
@@ -273,7 +294,9 @@ export function buildTasks(s: GameState): Task[] {
       const need = orders.filter((o) => !noodlesStartedFor(s, o.id)).length;
       // 故障した釜でも、入っている麺は上げられる（新しく入れるのは不可）
       if (isUsable(b) && free > 0 && need > 0) add('noodlesIn', `noodlesIn:${b.id}`, [step(b.id, 'noodles_in')], Math.min(10, need));
-      if (b.slots.some((x) => x && x.elapsed >= x.ideal - 1.5)) add('noodlesUp', `noodlesUp:${b.id}`, [step(b.id, 'noodles_up')]);
+      // スープまで入った丼が待っているときだけ麺を上げる（麺だけ先に入れると品質が下がる）
+      const readyBowls = placedRole(s, 'assembly').some((a) => bowlsOnAssembly(s, a).some((x) => x.bowl.contents && x.bowl.contents.soupL > 0 && x.bowl.contents.noodleG === 0));
+      if (readyBowls && b.slots.some((x) => x && x.elapsed >= x.ideal - 1.5)) add('noodlesUp', `noodlesUp:${b.id}`, [step(b.id, 'noodles_up')]);
       if (b.slots.some((x) => x && x.elapsed > x.ideal + BALANCE.cooking.noodleBadWindow)) add('discard', `discard:${b.id}`, [step(b.id, 'noodles_discard')]);
     }
     // ── 接客 ──
@@ -309,13 +332,17 @@ export function buildTasks(s: GameState): Task[] {
         .filter((e) => e.process && PREP_RECIPES[e.process.recipeId]?.outputs.some((o) => o.itemId === item || (item === 'buta' && o.itemId === 'pork_block')))
         .length;
       let have = stockOf(s, item);
-      if (r.id === 'braise_pork') have += stockOf(s, 'pork_block') * 18 + inProcess * 36;
+      if (r.id === 'braise_pork') have += stockOf(s, 'pork_block') * 18 + inProcess * 72;
       else if (inProcess > 0) continue;
       if (have >= r.restockBelow.qty) continue;
       const st = stations.find((e) => !e.process || r.kind === 'hold');
       if (!st) continue;
-      const urgent = have < r.restockBelow.qty * 0.4;
-      add(urgent ? 'prepUrgent' : 'prep', `prep:${r.id}`, [step(st.id, `prep:${r.id}`)]);
+      // 切れる寸前ほど優先度を上げる（盛り付けに必要な量を切ったら調理より先に補充）
+      const ratio = have / r.restockBelow.qty;
+      const minNeed = MIN_FOR_BOWL[item] ?? 0;
+      if (stockOf(s, item) < minNeed && r.id !== 'braise_pork') add('prepUrgent', `prep:${r.id}`, [step(st.id, `prep:${r.id}`)], 30);
+      else if (ratio < 0.4) add('prepUrgent', `prep:${r.id}`, [step(st.id, `prep:${r.id}`)], Math.round((0.4 - ratio) * 40));
+      else add('prep', `prep:${r.id}`, [step(st.id, `prep:${r.id}`)], Math.round((1 - ratio) * 20));
     }
   }
 
@@ -456,8 +483,16 @@ function tidyHandTask(s: GameState, e: Employee): Task | null {
   }
 }
 
+/**
+ * 失敗した仕事の再試行を遅らせる表（従業員ID|仕事キー → sim時刻）。
+ * 一時的な判断材料なので状態（セーブ）には含めない。含めなくても結果の決定性は
+ * 「同じ操作列なら同じ結果」の範囲で保たれる（サーバーとクライアントで AI を二重に動かさないため）。
+ */
+const failCooldown = new Map<string, number>();
+
 /** 従業員AIの更新 */
 export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
+  if (failCooldown.size > 500) failCooldown.clear();
   if (s.employees.length === 0) return;
   let tasks: Task[] | null = null;
   const busyTargets = playerBusyTargets(s);
@@ -527,10 +562,11 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
       }
       const r = interact(s, e.id, cur.targetId, cur.verb, cur.args, ctx);
       if (!r.ok) {
-        // 状況が変わった（誰かが先に処理した等）。仕事を手放す
+        // 状況が変わった（誰かが先に処理した等）。仕事を手放し、同じ仕事はしばらく避ける
         e.ai.note = r.reason ?? '';
+        if (e.ai.taskId) failCooldown.set(`${e.id}|${e.ai.taskId}`, s.t + 3);
         releaseTask(e);
-        e.ai.cooldown = 0.5;
+        e.ai.cooldown = 0.3;
         continue;
       }
       e.ai.steps.shift();
@@ -555,7 +591,13 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
       // 手がふさがっていると始められない仕事
       const firstVerb = t.steps[0]!.verb;
       if (e.hand.kind !== 'none' && !['dishes_drop', 'bowls_place', 'serve', 'mop', 'mop_return', 'lost_store', 'collect', 'noodles_up'].includes(firstVerb)) continue;
+      // 最近失敗した仕事はしばらく選ばない
+      const failedUntil = failCooldown.get(`${e.id}|${t.key}`);
+      if (failedUntil !== undefined && failedUntil > s.t) continue;
       const sc = taskScore(e, t);
+      if (sc <= bestScore) continue;
+      // 実際に実行できるか（行為と同じ判定）を確認してから選ぶ
+      if (verbBlocked(s, e.id, t.steps[0]!.targetId, firstVerb, t.steps[0]!.args) !== null) continue;
       if (sc > bestScore) {
         bestScore = sc;
         best = t;

@@ -34,16 +34,16 @@ export const BALANCE = {
   /** 来客 */
   customers: {
     /** 評判3.0・ピーク時の1秒あたり来店数 */
-    baseRate: 0.06,
+    baseRate: 0.08,
     /** 評判による倍率の指数 */
     reputationExponent: 1.6,
     /** 価格基準（この平均価格で価格倍率1.0） */
     referencePrice: 1_000,
     maxCustomers: 60,
     walkSpeed: 1.25,
-    ticketTime: 3,
+    ticketTime: 2,
     /** 標準の食事時間（秒）。量・食事速度で増減 */
-    eatTimeBase: 55,
+    eatTimeBase: 22,
     /** 店外行列の長さに対する入店意欲の減衰 */
     balkPerQueue: 0.06,
     patienceBase: 150,
@@ -52,11 +52,11 @@ export const BALANCE = {
   /** 調理 */
   cooking: {
     /** 理想のゆで時間（秒）。極太麺 */
-    noodleIdeal: 25,
+    noodleIdeal: 18,
     /** この差以内なら最高品質 */
-    noodlePerfectWindow: 4,
+    noodlePerfectWindow: 3,
     /** この差で品質0.25 */
-    noodleBadWindow: 16,
+    noodleBadWindow: 12,
     /** 放置でゆですぎ扱いになり自動で品質が落ち続ける */
     soupPerBowlSmall: 0.35,
     soupPerBowlLarge: 0.4,
@@ -102,11 +102,15 @@ export const BALANCE = {
   },
 
   /** 従業員 */
+  /**
+   * 従業員。1営業日 = 昼の4時間営業（11〜15時）なので、日給は4時間勤務の額にしている。
+   * 設計書 14.2 の仮値（日給12,000〜20,000円＝終日勤務相当）から変更（docs/BALANCE.md 参照）。
+   */
   staff: {
-    wageMin: 12_000,
-    wageMax: 20_000,
-    hireFeeMin: 20_000,
-    hireFeeMax: 50_000,
+    wageMin: 6_000,
+    wageMax: 10_000,
+    hireFeeMin: 10_000,
+    hireFeeMax: 25_000,
     candidatesPerDay: 4,
     baseWalkSpeed: 1.9,
     /** 経験値による能力上昇（1日あたり） */

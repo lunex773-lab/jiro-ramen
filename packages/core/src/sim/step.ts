@@ -11,7 +11,7 @@ import { addDirt, spawnLostItemOwners, updateArrivals, updateCustomers } from '.
 import { allCustomersGone, checkGoals, settleDay, startClosing } from './day';
 import { onEmployeeWorkDone, updateEmployees } from './employees';
 import { defOf, effectSum, updateRepairs } from './equipment';
-import { completeProcess, progressWork, roleOf } from './interact';
+import { assignBowls, completeProcess, progressWork, roleOf } from './interact';
 import { receiveDeliveries, stockOf } from './inventory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 
@@ -110,6 +110,8 @@ function housekeeping(s: GameState, dt: number, ctx: SimCtx): void {
   for (const e of s.equipment) {
     for (const sl of e.slots) if (sl && sl.orderId && !live.has(sl.orderId)) sl.orderId = null;
   }
+  // 宙に浮いた丼は次の注文に割り当て直す（途中で帰った客の分を無駄にしない）
+  assignBowls(s);
   // 厨房の汚れ（調理量に比例して発生、換気設備で軽減）
   if (s.phase === 'open' || s.phase === 'closing') {
     const cooking = s.equipment.filter((e) => e.placed && (roleOf(e) === 'boiler' || roleOf(e) === 'soup') && (e.slots.some(Boolean) || e.process)).length;

@@ -5,6 +5,7 @@ import {
   makeEmployee,
   requestRepair,
   step,
+  TASK_KINDS,
   type Employee,
   type EmployeeRole,
   type GameState,
@@ -44,6 +45,13 @@ export function addBot(s: GameState, role: EmployeeRole, skill = 0.75, wage = 0)
   });
   e.presentToday = true;
   s.employees.push(e);
+  return e;
+}
+
+/** 一人で全部やるボット（プレイヤーの代わり）。担当設定で全種類の仕事を任せる */
+export function addSoloBot(s: GameState, skill = 0.65): Employee {
+  const e = addBot(s, 'cook', skill);
+  for (const k of Object.keys(TASK_KINDS)) e.priorities[k] = 1;
   return e;
 }
 

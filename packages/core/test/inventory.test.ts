@@ -81,7 +81,7 @@ describe('在庫', () => {
     applyAction(s, 'p1', { type: 'interact', targetId: prep.id, verb: 'prep:chop_garlic' }, ctx);
     run(s, ctx, 8);
     const lot = s.inventory.find((l) => l.itemId === 'garlic')!;
-    expect(lot.qty).toBe(300);
+    expect(lot.qty).toBe(500);
     expect(lot.unitCost).toBeCloseTo(1.0, 5);
   });
 });

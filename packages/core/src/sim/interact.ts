@@ -294,7 +294,9 @@ const VERBS: VerbDef[] = [
       if (ready.length === 0) return no(label, 'ゆで上がった麺がありません');
       const targets = drainTargets(s, a, e);
       if (targets.length === 0) return no(label, '麺を受ける丼がありません（盛り付け台に丼を並べるか、丼を持ってください）');
-      const n = Math.min(ready.length, targets.length);
+      // スープ入りの丼があるときは、その数だけ上げる（スープのない丼に麺だけ入れない）
+      const soupReady = targets.filter((b) => b.contents && b.contents.soupL > 0).length;
+      const n = Math.min(ready.length, soupReady > 0 ? soupReady : targets.length);
       const asm = dependency(s, e, 'assembly', false);
       const f = a.hand.kind === 'bowl' ? 1 : distanceFactor(asm?.d ?? 0);
       return ok(`麺上げ（${n}玉）`, (0.9 * f) / Math.max(0.3, effectiveSpeed(e) || 1), n);
@@ -1199,7 +1201,9 @@ function drainTargets(s: GameState, a: Actor, boiler: Equipment): Bowl[] {
       if (bowl.contents && bowl.contents.noodleG === 0) out.push(bowl);
     }
   }
-  return out;
+  // スープまで入った丼を優先（タレ→スープ→麺の順が正しい）
+  const rank = (b: Bowl) => (b.contents!.soupL > 0 ? 2 : 0) + (b.contents!.tare > 0 ? 1 : 0);
+  return out.sort((x, y) => rank(y) - rank(x));
 }
 
 // ───────────────────────── 公開API ─────────────────────────
@@ -1248,6 +1252,19 @@ export interface InteractResult {
   reason?: string;
   /** 長押し作業を開始した */
   started?: boolean;
+}
+
+/**
+ * 動詞が今の状態で実行できるか（距離は問わない）。従業員AIが仕事を選ぶ前の確認に使う。
+ * 実行できなければ理由を返す。
+ */
+export function verbBlocked(s: GameState, actorId: Id, targetId: Id, verb: string, args: Args): string | null {
+  const a = getActor(s, actorId);
+  const t = resolveTarget(s, targetId);
+  const v = VERB_MAP.get(verb);
+  if (!a || !t || !v || !v.match(t)) return 'その操作はできません';
+  if (!v.phases.includes(s.phase)) return 'この時間帯にはできません';
+  return v.plan(s, a, t, args).reason;
 }
 
 /** 動詞を実行する（即時なら即適用、時間がかかるなら作業を開始） */
@@ -1369,3 +1386,8 @@ export function dropHand(s: GameState, a: Actor, ctx: SimCtx): void {
   emit(ctx, { type: 'drop', actorId: a.id });
 }
 
+
+/** 盛り付け台が使える状態か（スープ寸胴とトッピング台が作業できる距離にある） */
+export function assemblyFunctional(s: GameState, asm: Equipment): boolean {
+  return soupPotFor(s, asm) !== null && dependency(s, asm, 'topping') !== null && isUsable(asm);
+}
