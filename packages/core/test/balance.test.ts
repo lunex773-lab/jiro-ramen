@@ -15,7 +15,7 @@ function playDays(s: GameState, ctx: ReturnType<typeof newGame>['ctx'], days: nu
     const r = s.history[s.history.length - 1]!;
     rows.push(`day${r.day} served=${r.served}/${r.customers} lost=${r.lost} sales=${r.sales} cogs=${r.cogs} waste=${r.waste} rent=${r.rent} upkeep=${r.upkeep} util=${r.utilities} repairs=${r.repairs} wages=${r.wages} hiring=${r.hiring} refunds=${r.refunds} compl=${r.complaints} remakes=${r.remakes} mist=${r.mistakes} stockouts=${r.stockouts} op=${r.operatingProfit} cash=${r.cashEnd} rep=${r.reputation} sat=${r.avgSatisfaction.toFixed(2)} brk=${r.breakdowns}`);
     const res = applyAction(s, 'p1', { type: 'nextDay' }, ctx);
-    if (!res.ok && s.phase !== 'bankrupt') rows.push(`  nextDay blocked: ${res.reason}`);
+    if (!res.ok && (s.phase as string) !== 'bankrupt') rows.push(`  nextDay blocked: ${res.reason}`);
   }
   return rows;
 }

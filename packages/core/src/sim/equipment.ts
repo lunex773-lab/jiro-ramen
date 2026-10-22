@@ -173,7 +173,7 @@ export function runMaintenance(s: GameState, ctx: SimCtx): void {
     const cost = maintenanceCost(e);
     if (spend(s, 'maintenance', 'repairs', cost, `${defOf(e).name}の定期メンテ`, `mt:${e.id}:${s.day}`)) {
       e.condition = clamp(e.condition + 40, 0, 100);
-      if (e.status !== 'repairing') e.status = statusFromCondition(e.condition);
+      e.status = statusFromCondition(e.condition);
     } else {
       notify(s, ctx, `mtfail:${e.id}`, 'warn', `${defOf(e).name}の定期メンテ代が払えませんでした`);
     }
