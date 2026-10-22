@@ -535,9 +535,9 @@ function hashId(id: string): number {
   return Math.abs(h);
 }
 
-/** 並んでいる客は店の方を向く */
-function waitYaw(c: Customer): number {
-  return c.pos.z < 0 ? Math.PI / 2 : Math.PI;
+/** 並んでいる客は入口・券売機の方（-x）を向く */
+function waitYaw(_c: Customer): number {
+  return -Math.PI / 2;
 }
 
 export type { Employee };

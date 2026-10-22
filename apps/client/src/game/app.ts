@@ -28,6 +28,7 @@ import { LocalHost, type GameHost } from './host';
 import { loadSettings, saveSettings, type Settings } from './settings';
 import { findFocus } from './targeting';
 import { openLobby } from '../ui/lobby';
+import { cloudDownload, cloudUpload } from '../net/cloud';
 
 export const VERSION = '0.9.0';
 
@@ -228,6 +229,16 @@ export class App {
       onClose: () => this.closeManage(),
       onLayoutEditor: () => this.openEditor(),
       onSave: () => this.saveNow(true),
+      onCloudSave: () => {
+        this.saveNow(false);
+        void cloudUpload(this.uiLayer, this.store, this.slot, this.settings.playerName);
+      },
+      onCloudLoad: async () => {
+        const replaced = await cloudDownload(this.uiLayer, this.store, this.slot, this.settings.playerName);
+        if (!replaced) return;
+        const r = loadFromSlot(this.store, this.slot);
+        if (r.ok) this.startLocal(r.file.state, this.slot);
+      },
       onSettings: () => this.showSettings(() => this.show(null)),
       onTitle: () => void this.backToTitle(),
       onHelp: () => this.showHelp(() => this.show(null)),
