@@ -1,0 +1,6 @@
+# ローカル開発用の秘密情報（wrangler dev が読み込む）。
+# このファイルを .dev.vars にコピーして値を書き換えること。.dev.vars は Git に含めない（.gitignore 済み）。
+# 本番環境では `npx wrangler secret put SESSION_SECRET` で設定する（ここに本番の値を書かない）。
+#
+# 生成例: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+SESSION_SECRET=replace-with-a-random-string-of-at-least-32-characters

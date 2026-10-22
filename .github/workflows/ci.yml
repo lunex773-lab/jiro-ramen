@@ -1,0 +1,22 @@
+name: CI
+
+# 開発中は手動実行のみ（クライアントとサーバーのビルドが通るようになったら push で自動実行にする）
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 型チェック
+        run: npm run typecheck
+      - name: テスト（core / server）
+        run: npm test
+      - name: クライアントのビルド
+        run: npm run build

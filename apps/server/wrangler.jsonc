@@ -1,0 +1,47 @@
+// 次郎系ラーメン経営ゲームのバックエンド（Cloudflare Workers + Durable Objects + D1 + R2）。
+// 設計書 2.2 / 17 / 18 に対応。デプロイ手順は docs/CLOUDFLARE_SETUP.md を参照。
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "jiro-ramen-server",
+  "main": "src/index.ts",
+  // テストで使う vitest-pool-workers 同梱の workerd（1.20260815）でも動く日付にしている。
+  // 日付を上げるときは apps/server と ルートの node_modules にある workerd の両方が対応しているか確認すること。
+  "compatibility_date": "2026-08-01",
+  // Node.js API は使っていないので nodejs_compat は不要。
+  "compatibility_flags": [],
+
+  // Workers Logs（wrangler tail / ダッシュボードのログ）を有効にする
+  "observability": { "enabled": true },
+
+  // 共同経営ルーム。1ルーム = 1 Durable Object（ルームIDから idFromName で決まる。設計書 2.2）
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "GameRoom" }]
+  },
+  // SQLite ストレージを使う Durable Object として登録する（無料プランでも使える方式）
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoom"] }],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "jiro-db",
+      // ★ 要置き換え: `npx wrangler d1 create jiro-db` を実行して表示された database_id を貼り付けること。
+      //   ローカル開発・テスト（--local / vitest）はこのままの値でも動く。
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // セーブのスナップショット（設計書 2.2: 大きなデータは R2、メタデータは D1）
+  "r2_buckets": [{ "binding": "SAVES", "bucket_name": "jiro-saves" }],
+
+  "vars": {
+    "GAME_VERSION": "0.1.0",
+    // これより古いクライアントは WebSocket の hello で拒否する
+    "MIN_CLIENT_VERSION": "0.1.0",
+    // CORS を許可するオリジン（カンマ区切り）。GitHub Pages とローカルの Vite 開発サーバー
+    "ALLOWED_ORIGINS": "https://lunex773-lab.github.io,http://localhost:5173"
+  }
+  // 秘密情報（SESSION_SECRET: 参加トークンの HMAC 鍵）は vars に書かない。
+  //   本番: `npx wrangler secret put SESSION_SECRET`
+  //   ローカル: apps/server/.dev.vars（.dev.vars.example をコピー）
+}

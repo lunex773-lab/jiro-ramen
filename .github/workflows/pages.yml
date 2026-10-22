@@ -1,0 +1,46 @@
+name: GitHub Pages
+
+# クライアント（ブラウザ版）を GitHub Pages に公開する。
+# 事前に リポジトリの Settings → Pages → Build and deployment → Source を「GitHub Actions」にしてください。
+# 開発中は手動実行のみ（クライアントとサーバーのビルドが通るようになったら push で自動実行にする）
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: ビルド
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
+          # 共同経営サーバーの URL（リポジトリの Variables に VITE_SERVER_URL を設定すると埋め込まれる）
+          VITE_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+        run: npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/client/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
