@@ -3,6 +3,10 @@
 import {
   BALANCE,
   createGame,
+  equipmentCenter,
+  resolveTarget,
+  seatCounterPoint,
+  targetPoints,
   deleteSlot,
   listSlots,
   loadFromSlot,
@@ -451,6 +455,29 @@ export class App {
     this.sfx.unlock();
     const r = await this.host?.act({ type: 'openShop' });
     if (r && !r.ok) toast(this.uiLayer, r.reason ?? '開店できません', 'warn');
+  }
+
+  // ───────────────── テスト用 ─────────────────
+
+  /** E2E テスト用: 自分を対象の正面に立たせ、対象の方を向かせる */
+  debugFace(targetId: string): boolean {
+    const host = this.host;
+    if (!host || !this.controls) return false;
+    const s = host.state;
+    const t = resolveTarget(s, targetId);
+    if (!t) return false;
+    const pts = targetPoints(s, t);
+    // 厨房側の位置を優先（席はカウンター越し）
+    const p = pts[pts.length - 1];
+    if (!p) return false;
+    const c = t.kind === 'equipment' ? equipmentCenter(t.e) : t.kind === 'seat' ? seatCounterPoint(s, t.seat) : t.kind === 'dirt' ? t.dirt.pos : p;
+    this.localPos = { x: p.x, z: p.z };
+    const me = s.players.find((x) => x.id === host.playerId);
+    if (me && host.mode === 'local') me.pos = { x: p.x, z: p.z };
+    this.controls.yaw = Math.atan2(c.x - p.x, c.z - p.z);
+    this.controls.pitch = t.kind === 'dirt' ? -0.9 : -0.35;
+    host.move(p.x, p.z, this.controls.yaw);
+    return true;
   }
 
   // ───────────────── セーブ ─────────────────
