@@ -120,11 +120,19 @@ input, select { font: inherit; }
 /* ───────── HUD ───────── */
 .hud { position: absolute; inset: 0; pointer-events: none; }
 .hud > * { pointer-events: auto; }
-.hud-top {
+.hud-head {
   position: absolute;
   top: calc(var(--sat) + 6px);
   left: calc(var(--sal) + 8px);
   right: calc(var(--sar) + 8px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.hud > .hud-head, .hud > .hud-br { pointer-events: none; }
+.hud-head > :empty { display: none; }
+.hud-top {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -133,7 +141,9 @@ input, select { font: inherit; }
 }
 .hud-top > * { pointer-events: auto; }
 .top-left, .top-right { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.top-right { justify-content: flex-end; }
+.top-left { flex: 0 0 auto; }
+.top-left > *, .top-right > * { white-space: nowrap; }
+.top-right { flex: 1 1 auto; min-width: 0; justify-content: flex-end; }
 .top-left .day, .top-left .clock, .top-right .money, .top-right .rep, .top-right .queue {
   background: rgba(0, 0, 0, 0.55);
   border-radius: 10px;
@@ -149,10 +159,6 @@ input, select { font: inherit; }
 .chip.menu { background: var(--yellow); color: #1a1407; }
 
 .hud-rail {
-  position: absolute;
-  top: calc(var(--sat) + 52px);
-  left: calc(var(--sal) + 8px);
-  right: calc(var(--sar) + 8px);
   display: flex;
   gap: 6px;
   overflow-x: auto;
@@ -182,9 +188,7 @@ input, select { font: inherit; }
 @keyframes pulse { 50% { transform: translateY(-2px); } }
 
 .hud-notices {
-  position: absolute;
-  left: calc(var(--sal) + 8px);
-  top: calc(var(--sat) + 132px);
+  align-self: flex-start;
   width: min(320px, 60vw);
   display: flex;
   flex-direction: column;
@@ -228,7 +232,7 @@ input, select { font: inherit; }
   white-space: nowrap;
 }
 .hud-detail {
-  position: absolute;
+  position: fixed;
   right: calc(var(--sar) + 8px);
   top: calc(var(--sat) + 132px);
   width: min(300px, 46vw);
@@ -252,15 +256,22 @@ input, select { font: inherit; }
 .slot-sub { color: var(--muted); flex: 1 1 100%; }
 .slot .mini { min-height: 30px; padding: 4px 10px; }
 
-.hud-actions {
+.hud-br {
   position: absolute;
   right: calc(var(--sar) + 10px);
   bottom: calc(var(--sab) + 14px);
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 62vw;
+}
+.hud-br > * { pointer-events: auto; }
+.hud-actions {
+  display: flex;
   flex-direction: column-reverse;
   gap: 8px;
   align-items: flex-end;
-  max-width: 62vw;
 }
 .act {
   position: relative;
@@ -312,7 +323,8 @@ input, select { font: inherit; }
 }
 .touch .hud-hand { bottom: calc(var(--sab) + 150px); }
 .hud-cta {
-  position: absolute;
+  pointer-events: auto;
+  position: fixed;
   left: 50%;
   bottom: calc(var(--sab) + 90px);
   transform: translateX(-50%);
@@ -325,10 +337,7 @@ input, select { font: inherit; }
 }
 .cta-info { background: rgba(0, 0, 0, 0.6); padding: 6px 12px; border-radius: 10px; font-size: 13px; }
 .hint {
-  position: absolute;
-  left: 50%;
-  top: calc(var(--sat) + 104px);
-  transform: translateX(-50%);
+  align-self: center;
   background: rgba(242, 194, 0, 0.92);
   color: #1a1407;
   font-weight: 800;
@@ -574,8 +583,18 @@ input, select { font: inherit; }
 @media (max-width: 520px) {
   .top-left .day, .top-left .clock, .top-right .money, .top-right .rep, .top-right .queue { font-size: 13px; padding: 4px 7px; }
   .chip { min-height: 30px; padding: 4px 9px; font-size: 12px; }
-  .hud-detail { top: auto; bottom: calc(var(--sab) + 240px); right: 8px; width: 56vw; max-height: 28vh; }
-  .hud-notices { top: calc(var(--sat) + 124px); width: 64vw; }
-  .act { min-width: 130px; font-size: 14px; }
-  .act.primary { font-size: 15px; }
+  .top-left { flex-wrap: nowrap; }
+  /* 縦長の画面では詳細を操作ボタンの真上に積み、中央の照準と重ならないよう高さを抑える */
+  .hud-detail { position: static; width: 56vw; max-height: 18vh; }
+  .hud-actions .act:nth-child(n + 5) { display: none; }
+  .hud-notices { width: 72vw; }
+  .hud-notices .notice:nth-last-child(n + 3) { display: none; }
+  .hud-cta { position: static; transform: none; width: auto; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px; }
+  .hud-cta .btn.big { min-height: 44px; font-size: 16px; padding: 8px 18px; }
+  .cta-info { font-size: 12px; }
+  .cta-info.redundant { display: none; }
+  .hint { font-size: 12px; }
+  .work-bar { bottom: auto; top: calc(50% - 72px); }
+  .act { min-width: 130px; min-height: 46px; font-size: 14px; }
+  .act.primary { min-height: 52px; font-size: 15px; }
 }

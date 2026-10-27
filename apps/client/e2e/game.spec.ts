@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const SHOTS = process.env.SHOTS_DIR;
 
@@ -29,6 +29,12 @@ type Jiro = {
   debugFace(id: string): boolean;
 };
 
+/** タッチ端末ではタップ、PC ではクリックで押す */
+async function press(loc: Locator) {
+  if (test.info().project.use.hasTouch) await loc.tap();
+  else await loc.click();
+}
+
 async function face(page: Page, type: string) {
   const ok = await page.evaluate((t) => {
     const app = (window as unknown as { __jiro: Jiro }).__jiro;
@@ -56,12 +62,12 @@ test('設備を見ると操作ボタンが出て、丼を取って並べられ�
   const take = page.locator('.act', { hasText: 'きれいな丼を取る' });
   await expect(take).toBeVisible();
   await shot(page, '03-rack');
-  await take.tap();
+  await press(take);
   await expect(page.locator('.hud-hand')).toContainText('きれいな丼');
   await face(page, 'assembly');
   const place = page.locator('.act', { hasText: /丼を並べる|丼を置く/ });
   await expect(place).toBeVisible();
-  await place.tap();
+  await press(place);
   await expect(page.locator('.hud-detail')).toContainText('盛り付け台');
   await shot(page, '04-assembly');
 });

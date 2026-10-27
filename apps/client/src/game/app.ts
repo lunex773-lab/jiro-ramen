@@ -224,7 +224,7 @@ export class App {
       onOpenShop: () => void this.openShop(),
       onHelp: () => this.showHelp(() => this.show(null)),
     });
-    this.uiLayer.appendChild(this.hintEl);
+    this.hud.attachHint(this.hintEl);
     this.manage = new ManageMenu(this.uiLayer, host, {
       onClose: () => this.closeManage(),
       onLayoutEditor: () => this.openEditor(),

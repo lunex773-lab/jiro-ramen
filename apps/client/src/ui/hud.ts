@@ -59,6 +59,8 @@ export class Hud {
   private hand: HTMLElement;
   private cta: HTMLElement;
   private crosshair: HTMLElement;
+  /** 上部の積み上げ（状態・伝票・案内・通知）。縦に並べて重ならないようにする */
+  private head: HTMLElement;
   private lastTopKey = '';
   private lastRailKey = '';
   private lastActionsKey = '';
@@ -89,12 +91,21 @@ export class Hud {
     this.workBar = h('div', { class: 'work-bar' }, this.workLabel, h('div', { class: 'work-track' }, this.workFill));
     this.hand = h('div', { class: 'hud-hand' });
     this.cta = h('div', { class: 'hud-cta' });
-    this.el = h('div', { class: 'hud' }, this.top, this.rail, this.notices, this.crosshair, this.focusLabel, this.detail, this.workBar, this.hand, this.actions, this.cta);
+    // 開店ボタンは PC では画面下中央（fixed）、縦長のスマホでは上部の積み上げに入る（CSS で切り替え）
+    this.head = h('div', { class: 'hud-head' }, this.top, this.rail, this.cta, this.notices);
+    // 注視中の設備の詳細は、スマホでは操作ボタンの真上に積む
+    const br = h('div', { class: 'hud-br' }, this.detail, this.actions);
+    this.el = h('div', { class: 'hud' }, this.head, this.crosshair, this.focusLabel, this.workBar, this.hand, br);
     // HUD 上のタッチを 3D 操作に渡さない
     for (const el of [this.top, this.rail, this.detail, this.actions, this.cta, this.notices]) {
       el.addEventListener('pointerdown', (e) => e.stopPropagation());
     }
     root.appendChild(this.el);
+  }
+
+  /** 初心者向けの案内を伝票と通知の間に置く */
+  attachHint(el: HTMLElement): void {
+    this.head.insertBefore(el, this.notices);
   }
 
   get currentVerbs(): VerbInfo[] {
@@ -233,7 +244,7 @@ export class Hud {
           ? h('span', { class: 'act-sub' }, `長押し ${v.duration.toFixed(1)}秒`)
           : null
         : h('span', { class: 'act-sub' }, v.reason ?? ''),
-      !this.root.classList.contains('touch') && i < 6 ? h('span', { class: 'act-key' }, i === 0 ? 'E' : String(i + 1)) : null,
+      !this.root.closest('.touch') && i < 6 ? h('span', { class: 'act-key' }, i === 0 ? 'E' : String(i + 1)) : null,
     );
     if (!v.enabled) return btn;
     btn.addEventListener('pointerdown', (e) => {
@@ -326,7 +337,8 @@ export class Hud {
     } else if (s.phase === 'prep') {
       replace(
         this.cta,
-        h('div', { class: 'cta-info' }, '開店前の仕込み時間です。準備ができたら開店しましょう'),
+        // 縦長の画面ではボタンだけで伝わるので説明を省く
+        h('div', { class: 'cta-info redundant' }, '開店前の仕込み時間です。準備ができたら開店しましょう'),
         h('button', { class: 'btn big primary', onclick: () => this.cb.onOpenShop() }, '🏮 開店する'),
       );
     } else if (s.phase === 'closing') {

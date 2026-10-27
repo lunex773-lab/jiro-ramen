@@ -15,7 +15,7 @@ export function nextHint(s: GameState, myId: string): string | null {
   const me = s.players.find((p) => p.id === myId);
   if (!me) return null;
   if (s.phase === 'prep') {
-    if (s.day === 1) return '仕込み時間です。準備ができたら画面下の「開店する」を押しましょう';
+    if (s.day === 1) return '仕込み時間です。準備ができたら「開店する」を押しましょう';
     if (stockOf(s, 'buta') < 10 && stockOf(s, 'pork_block') > 0) return '豚が少ないです。仕込み台で「豚を切る」';
     return null;
   }
