@@ -7,6 +7,7 @@ import { makeEquipment } from './sim/equipment';
 import { emptyDayStats } from './sim/economy';
 import { addLot } from './sim/inventory';
 import type { GameState, Player, Seat } from './types';
+import { newTutorial } from './sim/tutorial';
 import { newId } from './util';
 
 export const SCHEMA_VERSION = 1;
@@ -16,6 +17,8 @@ export interface NewGameOptions {
   shopName?: string;
   playerName?: string;
   playerId?: string;
+  /** 営業0日目（練習の日）のチュートリアルから始める */
+  tutorial?: boolean;
 }
 
 export const PLAYER_COLORS = ['#e74c3c', '#2e86de', '#27ae60', '#f39c12'];
@@ -47,7 +50,7 @@ export function createGame(opts: NewGameOptions = {}): GameState {
     shopName: opts.shopName?.trim() || 'ラーメン まし屋',
     nextId: 1,
     version: 0,
-    day: 1,
+    day: opts.tutorial ? 0 : 1,
     phase: 'prep',
     t: 0,
     openT: 0,
@@ -106,6 +109,7 @@ export function createGame(opts: NewGameOptions = {}): GameState {
     notices: [],
     bankruptcy: null,
     paused: false,
+    tutorial: opts.tutorial ? newTutorial('basics') : null,
   };
   // JSON で表現できない -Infinity は使わない
   s.career.bestDayProfit = -1e12;

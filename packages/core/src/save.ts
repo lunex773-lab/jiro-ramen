@@ -93,7 +93,8 @@ export function validateState(s: unknown): string[] {
     if (!cond) errs.push(msg);
   };
   need(isNum(s.schema), 'schema');
-  need(isNum(s.day) && (s.day as number) >= 1, 'day');
+  // 0日目はチュートリアル（練習の日）
+  need(isNum(s.day) && (s.day as number) >= 0, 'day');
   need(isNum(s.money), 'money');
   need(isNum(s.t) && isNum(s.openT), 't');
   need(isStr(s.phase) && ['prep', 'open', 'closing', 'closed', 'bankrupt'].includes(s.phase as string), 'phase');

@@ -14,6 +14,7 @@ import { defOf, effectSum, updateRepairs } from './equipment';
 import { assignBowls, completeProcess, progressWork, roleOf } from './interact';
 import { receiveDeliveries, stockOf } from './inventory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
+import { updateTutorial } from './tutorial';
 
 /** 1ステップの最大時間（大きな dt は分割する） */
 const MAX_DT = 0.25;
@@ -59,6 +60,7 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
   if (s.phase === 'closing' && allCustomersGone(s)) {
     settleDay(s, ctx);
   }
+  if (s.tutorial) updateTutorial(s, ctx);
   s.version += 1;
 }
 

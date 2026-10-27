@@ -211,6 +211,8 @@ function activeCustomers(s: GameState): number {
 /** 来店処理（ポアソン到着を累積値で近似。乱数は状態に保存されるので決定的） */
 export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
   if (s.phase !== 'open') return;
+  // 練習の日（営業0日目）は、チュートリアルが決まったお客さんだけを呼ぶ
+  if (s.tutorial?.kind === 'basics') return;
   s.arrivalAcc += arrivalRate(s) * dt;
   while (s.arrivalAcc >= 1) {
     s.arrivalAcc -= 1 + randRange(s, -0.3, 0.3);
@@ -415,7 +417,7 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
           c.slot = -1;
           break;
         }
-        const choice = chooseMenu(s, c);
+        const choice = c.script ? { menuId: c.script.menuId, stockout: false } : chooseMenu(s, c);
         c.stockout = choice.stockout;
         if (choice.stockout) {
           s.today.stockouts += 1;
@@ -641,11 +643,11 @@ export function onServed(s: GameState, ctx: SimCtx, o: Order, q: QualityResult):
   s.today.totalQueueWait += c.queueWait;
 
   const yasaiBonus = 1 + 0.08 * o.call.yasai;
-  c.eatLeft = BALANCE.customers.eatTimeBase * m.eatFactor * yasaiBonus * (1.4 - 0.7 * c.traits.eatSpeed) * randRange(s, 0.85, 1.15);
+  c.eatLeft = c.script ? c.script.eatTime : BALANCE.customers.eatTimeBase * m.eatFactor * yasaiBonus * (1.4 - 0.7 * c.traits.eatSpeed) * randRange(s, 0.85, 1.15);
   c.state = 'eating';
   c.stateTime = 0;
   const bad = q.mistakes.length > 0 || q.quality < 0.45;
-  if (bad && rand(s) < 0.25 + c.traits.complaintPropensity * (q.mistakes.length > 0 ? 1.4 : 0.8)) {
+  if (bad && !c.script && rand(s) < 0.25 + c.traits.complaintPropensity * (q.mistakes.length > 0 ? 1.4 : 0.8)) {
     c.state = 'complaint';
     c.complaintReason = q.mistakes[0] ?? '味がおかしい';
     sayFor(c, s, `ちょっと！${c.complaintReason}んだけど`, 6);
@@ -661,6 +663,15 @@ export function onServed(s: GameState, ctx: SimCtx, o: Order, q: QualityResult):
 
 function finishEating(s: GameState, c: Customer, seat: Seat, ctx: SimCtx): void {
   const b = s.bowls.find((x) => x.id === seat.bowlId);
+  if (c.script) {
+    // チュートリアルのお客さん: 汚れやこぼし・忘れ物は手順の中で決めたとおりに出す
+    if (b) {
+      b.state = 'dirty';
+      b.contents = null;
+    }
+    seat.dirt = clamp01(seat.dirt + BALANCE.cleaning.counterDirtPerCustomer);
+    return;
+  }
   // マナーの良い客は丼を上げてカウンターを拭く
   const tidy = rand(s) < c.traits.manners * BALANCE.cleaning.mannersFactor;
   if (b) {

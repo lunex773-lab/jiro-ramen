@@ -333,6 +333,8 @@ export interface Customer {
   slot: number;
   /** 忘れ物を取りに来た客 */
   forLostItem: Id | null;
+  /** チュートリアル用の客（注文と食べる時間が決まっていて、帰ったりクレームを言ったりしない） */
+  script?: { menuId: string; eatTime: number } | null;
 }
 
 export type OrderStatus = 'waiting' | 'served' | 'cancelled' | 'refunded';
@@ -527,6 +529,23 @@ export interface CareerState {
   bestDayServed: number;
   bestDayProfit: number;
   daysPlayed: number;
+  /** 3日目の「従業員のチュートリアル」を案内したか（受けた・断ったのどちらでも true） */
+  staffTutorialOffered?: boolean;
+}
+
+/**
+ * チュートリアルの進み具合。basics = 営業0日目（練習の日）、staff = 3日目の従業員の回。
+ * 手順の中身（文言・完了条件）は sim/tutorial.ts にあり、状態には番号と基準値だけを持つ。
+ */
+export interface TutorialState {
+  kind: 'basics' | 'staff';
+  step: number;
+  /** 手順を始めたときの値（完了判定の基準。席・丼・汚れの ID など） */
+  mark: Record<string, number | string>;
+  /** その手順の開始処理を済ませたか */
+  entered: boolean;
+  /** 最後の手順まで終えた（basics は画面側で1日目を始める） */
+  finished: boolean;
 }
 
 export interface Bankruptcy {
@@ -606,4 +625,6 @@ export interface GameState {
   bankruptcy: Bankruptcy | null;
   /** 共同経営でホストが切断し一時停止しているか */
   paused: boolean;
+  /** チュートリアル中なら進み具合（ひとりプレイのみ） */
+  tutorial?: TutorialState | null;
 }

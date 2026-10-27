@@ -16,6 +16,7 @@ import { cancelWork, dropHand, getActor, interact, type Args } from './interact'
 import { placeOrder } from './inventory';
 import { autoPlace, expand, placeEquipment, storeEquipment } from './layout';
 import { emit, type SimCtx } from './notices';
+import { inBasicsTutorial, tutorialAction, type TutorialOp } from './tutorial';
 
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
@@ -44,7 +45,8 @@ export type Action =
   | { type: 'takeLoan' }
   | { type: 'payArrears' }
   | { type: 'rename'; name: string }
-  | { type: 'giveUp' };
+  | { type: 'giveUp' }
+  | { type: 'tutorial'; op: TutorialOp; stepId?: string };
 
 export type ActionType = Action['type'];
 
@@ -110,6 +112,8 @@ export function applyAction(s: GameState, actorId: Id, a: Action, ctx: SimCtx, n
     case 'openShop':
       return openShop(s, ctx);
     case 'nextDay':
+      // 練習の日の結果は本番に残さない（1日目は画面側で新しく始める）
+      if (inBasicsTutorial(s)) return fail('チュートリアル中は次の日へ進めません');
       return nextDay(s, ctx);
     case 'orderStock': {
       if (typeof a.itemId !== 'string' || !isNum(a.packs)) return fail('不正な発注');
@@ -235,6 +239,13 @@ export function applyAction(s: GameState, actorId: Id, a: Action, ctx: SimCtx, n
       if (s.phase !== 'closed') return fail('閉店後にだけ選べます');
       declareBankruptcy(s, ctx, '経営を断念した');
       return { ok: true };
+    }
+    case 'tutorial': {
+      const ops: readonly string[] = ['next', 'alt', 'close', 'quit', 'staffStart', 'staffDecline'];
+      if (!ops.includes(a.op)) return fail('不明な操作です');
+      if (a.stepId !== undefined && typeof a.stepId !== 'string') return fail('不正な操作');
+      const r = tutorialAction(s, ctx, a.op, a.stepId);
+      return r.ok ? { ok: true } : fail(r.reason ?? '操作できません');
     }
     default:
       return fail('不明な操作です');
