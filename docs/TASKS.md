@@ -24,6 +24,7 @@
 | T12 | HUD のスマホ縦画面対応 | 高 | T01 | `apps/client/src/ui/hud.ts`, `apps/client/src/styles.css` | 上部（状態・伝票・案内・通知）と右下（詳細・操作ボタン）を積み上げ式にして重なりを解消 | E2E のスクリーンショット確認（390×844） | 合格 | — |
 | T13 | CI・公開 | 高 | T12 | `.github/workflows/{ci,pages}.yml` | push で型チェック・テスト・ビルド・E2E、GitHub Pages へ自動公開 | GitHub Actions | 公開ジョブ成功 | — |
 | T14 | 遅い端末でタップが外れる不具合 | 高 | T13 | `apps/client/src/ui/{manage,hud}.ts`, `apps/client/src/game/app.ts` | 経営メニューのタブと HUD 上部を作り直さず文字だけ更新、押下中は再描画を保留、メニュー表示中は 3D 描画を停止 | CI の E2E で発見 → CPU を 6 倍遅くして再現 → 修正後に解消を確認 | CI（GitHub Actions）全ジョブ合格 | — |
+| T15 | ゲームタイトルと初期店名の確定 | 中 | T00 | `docs/PHASE0_REPORT.md` | タイトル「次郎系ラーメン屋 経営シミュレーター」、初期店名「ラーメン まし屋」で確定（オーナー確認済み。コードは変更なし） | — | 完了 | — |
 
 ## 残課題
 
@@ -31,7 +32,6 @@
 | --- | --- | --- | --- |
 | U01 | iPhone 実機（Safari）での確認 | 高 | 自動テストは Chromium の iPhone 相当画面で実施。実機での操作感・性能・音声は未確認 |
 | U02 | Cloudflare への本番デプロイ | 高 | このクラウド環境からは Cloudflare に接続できない。手順は [CLOUDFLARE_SETUP.md](CLOUDFLARE_SETUP.md)。デプロイ後にリポジトリの Variables へ `VITE_SERVER_URL` を登録 |
-| U03 | ゲームタイトルと初期店名の確定 | 中 | 仮: 「次郎系ラーメン屋 経営シミュレーター」「ラーメン まし屋」（オーナー確認待ち） |
 | U04 | 長時間プレイでのバランス調整 | 中 | シミュレーションでは 1 人営業で 1 日 +6,000〜12,000 円程度（[BALANCE.md](BALANCE.md)）。実プレイでの調整が必要 |
 | U05 | App Store 公開 | 低 | 将来の目標。Capacitor 等でのネイティブ化、Apple Developer Program、Mac と Xcode が必要 |
 | U06 | クライアントのバンドルサイズ | 低 | Three.js を含むチャンクが gzip 約 220KB。必要なら分割読み込みを検討 |
