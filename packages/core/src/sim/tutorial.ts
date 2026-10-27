@@ -37,6 +37,8 @@ export interface TutorialStep {
   auto?: (s: GameState, t: TutorialState) => boolean;
   /** 画面側で判定する完了条件（満たしたら画面から「次へ」を送る） */
   ui?: TutorialUi;
+  /** 関係する経営メニューのタブ（画面で目立たせる） */
+  tab?: 'stock' | 'menu' | 'equip' | 'staff' | 'layout';
   /** 押すと次へ進むボタンの文言（説明だけの手順など） */
   button?: string;
   /** もう一つの選択肢。押すと指定の手順へ飛ぶ */
@@ -135,6 +137,7 @@ const BASICS: TutorialStep[] = [
   },
   {
     id: 'stock_open',
+    tab: 'stock',
     title: '経営: 在庫と発注',
     text: '右上の「☰ 経営」を押して経営メニューを開き、「在庫・発注」タブを開こう。',
     target: { kind: 'ui', id: 'menu' },
@@ -142,8 +145,9 @@ const BASICS: TutorialStep[] = [
   },
   {
     id: 'stock_order',
+    tab: 'stock',
     title: '経営: 在庫と発注',
-    text: '食材の残りと消費期限が見られます。足りない食材は「仕入れ」で発注します（翌朝届く。当日便は割高ですぐ届く）。自動発注を決めておくと閉店時に不足分を頼みます。試しに、どれか1つ仕入れてみよう。',
+    text: '食材の残りと消費期限が見られます。足りない食材は「仕入れ」で発注します。「翌朝便」は翌日の開店前に、「当日便」は3割高で約60秒後に届きます。自動発注の量を決めておくと、閉店後に不足分を頼みます。試しに、どれか1つ仕入れてみよう。',
     enter: (s, _ctx, t) => {
       t.mark.purchases = s.today.purchases;
     },
@@ -151,6 +155,7 @@ const BASICS: TutorialStep[] = [
   },
   {
     id: 'price',
+    tab: 'menu',
     title: '経営: 値段を決める',
     text: '「メニュー」タブで値段を変えられます。高くすると1杯の利益は増えますが、お客さんは減り、割高だと満足度も下がります。試しにどれか1つ値段を変えてみよう（営業中は変えられません）。',
     enter: (s, _ctx, t) => {
@@ -160,8 +165,9 @@ const BASICS: TutorialStep[] = [
   },
   {
     id: 'equip',
+    tab: 'equip',
     title: '経営: 設備の手入れ',
-    text: '「設備」タブを開くと、券売機が「劣化」しています。劣化・不調のうちに直すと修理費は半額で、壊れると営業に響きます。「修理」するか、「メンテ予約」（閉店後に整備）をしよう。',
+    text: '「設備」タブを開くと、券売機が「劣化」しています。劣化・不調のうちに直すと修理費は半額で、壊れると営業に響きます。「修理」を押すか、「自動メンテ」をON（状態が下がった日の閉店後に整備）にしよう。',
     enter: (s, _ctx, t) => {
       const tm = equipmentByRole(s, 'ticket');
       if (!tm) return;
@@ -176,6 +182,7 @@ const BASICS: TutorialStep[] = [
   },
   {
     id: 'layout',
+    tab: 'layout',
     title: '経営: レイアウト',
     text: '「店舗」タブの「レイアウト編集を開く」で、設備や椅子の配置を変えられます。よく使う設備を近くにまとめると早く作れます。何か1つ動かしてみよう。',
     enter: (s, _ctx, t) => {
@@ -422,6 +429,7 @@ const STAFF: TutorialStep[] = [
   },
   {
     id: 'staff_open',
+    tab: 'staff',
     title: '従業員の画面',
     text: '右上の「☰ 経営」から経営メニューを開き、「従業員」タブを開こう。',
     target: { kind: 'ui', id: 'menu' },
@@ -429,14 +437,16 @@ const STAFF: TutorialStep[] = [
   },
   {
     id: 'staff_read',
+    tab: 'staff',
     title: '候補者の見方',
     text: '能力（速さ・調理・接客・衛生・移動・信頼性）と、日給・採用費を比べます。採用費は雇うときに1回、日給は毎日の閉店時に払います。信頼性が低いと休むことがあります。',
     button: '次へ',
   },
   {
     id: 'staff_hire',
+    tab: 'staff',
     title: '雇ってみる',
-    text: '雇いたい人がいれば「雇う」を押そう。今は雇わない場合は下のボタンを押してください（あとでいつでも雇えます）。',
+    text: '雇いたい人がいれば「採用する」を押そう。今は雇わない場合は下のボタンを押してください（あとでいつでも雇えます）。',
     enter: (s, _ctx, t) => {
       t.mark.emps = s.employees.length;
     },
@@ -445,6 +455,7 @@ const STAFF: TutorialStep[] = [
   },
   {
     id: 'staff_roles',
+    tab: 'staff',
     title: '担当を決める',
     text: '雇った人の「担当設定」を開くと、仕事の種類ごとの優先度を変えられます。例えば調理を任せて、あなたは接客と片付けに回る、など。',
     enter: (s, _ctx, t) => {

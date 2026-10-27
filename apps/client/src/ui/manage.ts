@@ -130,6 +130,15 @@ export class ManageMenu {
     return this.el.isConnected;
   }
 
+  get currentTab(): ManageTab {
+    return this.tab;
+  }
+
+  /** チュートリアルで開いてほしいタブを目立たせる */
+  highlightTab(tab: string | null): void {
+    for (const [id, b] of this.tabButtons) b.classList.toggle('tut-pulse', id === tab && id !== this.tab);
+  }
+
   private async act(a: Action, okMsg?: string): Promise<boolean> {
     const r = await this.host.act(a);
     if (!r.ok) toast(this.root, r.reason ?? 'できませんでした', 'warn');

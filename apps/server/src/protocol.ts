@@ -16,8 +16,13 @@ export const ACTION_TYPES = [
   'fire', 'setRole', 'setPriority', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
 ] as const satisfies readonly ActionType[];
 
+/** 共同経営では受け付けない操作（チュートリアルはひとりプレイのみ） */
+export const SOLO_ONLY_ACTION_TYPES = ['tutorial'] as const satisfies readonly ActionType[];
+
+type AcceptedActionType = (typeof ACTION_TYPES)[number];
+
 // core に操作が追加されたらここでコンパイルエラーになる（検証の追加漏れを防ぐ）
-type MissingActionTypes = Exclude<ActionType, (typeof ACTION_TYPES)[number]>;
+type MissingActionTypes = Exclude<ActionType, AcceptedActionType | (typeof SOLO_ONLY_ACTION_TYPES)[number]>;
 const actionTypesComplete: [MissingActionTypes] extends [never] ? true : MissingActionTypes = true;
 void actionTypesComplete;
 
@@ -52,7 +57,7 @@ function isArgs(v: unknown): boolean {
 
 type FieldRules = Record<string, (v: unknown) => boolean>;
 
-const RULES: Record<ActionType, FieldRules> = {
+const RULES: Record<AcceptedActionType, FieldRules> = {
   move: { x: isNum, z: isNum, yaw: isNum },
   interact: { targetId: isId, verb: isStr(32), args: isArgs },
   cancelWork: {},
@@ -86,7 +91,7 @@ const RULES: Record<ActionType, FieldRules> = {
 /** 操作要求の形を検証する。正しければ余計なキーを除いた Action を返す */
 export function parseAction(v: unknown): Action | null {
   if (!isObj(v) || typeof v.type !== 'string' || !ACTION_SET.has(v.type)) return null;
-  const rules = RULES[v.type as ActionType];
+  const rules = RULES[v.type as AcceptedActionType];
   const out: Record<string, unknown> = { type: v.type };
   for (const [k, ok] of Object.entries(rules)) {
     if (!ok(v[k])) return null;

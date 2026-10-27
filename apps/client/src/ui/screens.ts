@@ -23,6 +23,8 @@ function screen(cls: string, ...children: (HTMLElement | null)[]): HTMLElement {
 
 export interface TitleCallbacks {
   onSingle(): void;
+  /** チュートリアル（営業0日目の練習）だけを遊ぶ。セーブはしない */
+  onTutorial(): void;
   onMulti(): void;
   onHelp(): void;
   onSettings(): void;
@@ -42,6 +44,7 @@ export function titleScreen(cb: TitleCallbacks, version: string): HTMLElement {
       'div',
       { class: 'menu-col' },
       h('button', { class: 'btn big primary', onclick: () => cb.onSingle() }, '🍜 ひとりで経営する'),
+      h('button', { class: 'btn', onclick: () => cb.onTutorial() }, '📘 チュートリアル（営業0日目の練習）'),
       h('button', { class: 'btn big', onclick: () => cb.onMulti() }, '👥 オンライン共同経営（最大4人）'),
       h('div', { class: 'row' }, h('button', { class: 'btn ghost', onclick: () => cb.onHelp() }, '遊び方'), h('button', { class: 'btn ghost', onclick: () => cb.onSettings() }, '設定')),
     ),

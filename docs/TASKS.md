@@ -3,7 +3,7 @@
 設計書 23.1 の項目（タスクID・概要・優先度・依存・変更ファイル・実装内容・テスト・結果・未解決事項）で記録します。
 「結果」は自動テスト・ビルド・画面確認で確かめた内容だけを書いています。
 
-最終確認（2026-10-27）: 型チェック OK、単体テスト core 63 件・server 58 件・client 4 件 合格、E2E 12 件（iPhone 横向き相当 7・PC 5）合格、本番ビルド OK。GitHub Actions の CI（同じ内容）合格、GitHub Pages への公開ジョブ成功。
+最終確認（2026-10-27）: 型チェック OK、単体テスト core 71 件・server 58 件・client 4 件 合格、E2E 18 件（iPhone 横向き相当 10・PC 8）合格、本番ビルド OK。GitHub Actions の CI（同じ内容）合格、GitHub Pages への公開ジョブ成功。
 
 ## 完了したタスク
 
@@ -27,6 +27,8 @@
 | T15 | ゲームタイトルと初期店名の確定 | 中 | T00 | `docs/PHASE0_REPORT.md` | タイトル「次郎系ラーメン屋 経営シミュレーター」、初期店名「ラーメン まし屋」で確定（オーナー確認済み。コードは変更なし） | — | 完了 | — |
 | T16 | iPhone の横向き専用にする | 高 | T12 | `apps/client/src/ui/hud.ts`, `apps/client/src/styles.css`, `apps/client/src/game/app.ts`, `apps/client/src/render/world.ts`, `apps/client/public/manifest.webmanifest`, `apps/client/playwright.config.ts`, `apps/client/e2e/game.spec.ts` | 横画面の HUD（上: 状態 / 左: 伝票・通知 / 上中央: 案内・手元 / 右: 詳細＋操作ボタン / 下中央: 開店）、タイトル・スロット・経営メニューの横画面配置、縦向きでは「横向きにしてください」を表示してゲームを一時停止、横長の画面で左右が引き伸ばされないよう画角を調整、マニフェストを横向きに | E2E を iPhone 13 横向きの Safari 相当（750×342）で実行、縦向きの案内と一時停止のテストを追加、750×342・844×390・1280×800 のスクリーンショット確認 | 合格 | iOS の Safari は画面の向きを固定できないため、縦向きでは案内で対応（実機での確認が必要） |
 | T17 | Cloudflare のデプロイ先を `apps/server` に向ける | 高 | T09 | `package.json`, `apps/server/package.json`, `docs/CLOUDFLARE_SETUP.md`, `README.md` | ルートで `wrangler deploy` すると設定ファイルがなく自動構成がワークスペースのルートで止まっていた。ルートに `deploy:server`・`deploy:server:dry`、サーバーに `deploy:migrate`（D1 のテーブル作成→デプロイ）を追加し、ダッシュボードの GitHub 連携の設定手順を記載 | エラーをルートで再現、`apps/server` とルートのスクリプトで `wrangler deploy --dry-run` 成功、新しく複製したリポジトリで `npm ci`→dry-run 成功、`deploy:migrate` と同じ手順を `--local`・`--dry-run` で非対話に実行して成功 | 修正済み（本番デプロイは未実施） | U02 |
+| T18 | 返金した客の丼を下げられない不具合 | 高 | T03 | `packages/core/src/sim/customers.ts`, `packages/core/src/sim/interact.ts` | クレームで返金した客と、忘れ物を受け取った客が、通常の退店処理を通らずに帰っていた。返金した客の丼は下げて洗う丼にし、席を空け、来店の評価も記録する。忘れ物の客は店内の待ち場所を空ける | `packages/core/test/complaint.test.ts`（修正前のコードで失敗することを確認） | 合格 | — |
+| T19 | チュートリアル（営業0日目・3日目の従業員の回） | 高 | T02〜T08 | `packages/core/src/sim/tutorial.ts`, `packages/core/src/sim/{actions,customers,step}.ts`, `packages/core/src/{state,save,types}.ts`, `apps/client/src/ui/tutorial.ts`, `apps/client/src/game/app.ts`, `apps/client/src/render/world.ts`, `apps/client/src/ui/{hud,manage,screens,dom}.ts`, `apps/client/src/styles.css` | 1手順ずつの案内（操作で状態が変わると次へ、経営メニューのタブなど画面の操作は画面が判定）、決まった注文で帰らないチュートリアル用の客、練習の日は自然な来店を止め結果を残さない、開店は案内の手順まで止める、3日目の回（受ける・受けない、雇う・雇わない）、案内パネル・3D の目印・画面外の矢印・ボタンとタブの強調、新規開始時の選択とタイトルからの開始 | `packages/core/test/tutorial.test.ts`（0日目を最後まで操作で進める、3日目の回）、E2E（新規開始で選んで進める・やめると1日目、3日目の回、タイトルから）、横向き 750×342 のスクリーンショット確認 | 合格 | 案内の文言・長さは実際に遊んで調整が必要 |
 
 ## 残課題
 

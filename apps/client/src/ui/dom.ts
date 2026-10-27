@@ -58,7 +58,7 @@ export function stars(v: number): string {
 }
 
 /** 確認ダイアログ（ブラウザ標準の confirm はスマホで見づらいので自前） */
-export function confirmDialog(root: HTMLElement, title: string, body: string, okLabel = 'OK', danger = false): Promise<boolean> {
+export function confirmDialog(root: HTMLElement, title: string, body: string, okLabel = 'OK', danger = false, cancelLabel = 'キャンセル'): Promise<boolean> {
   return new Promise((resolve) => {
     const close = (v: boolean) => {
       overlay.remove();
@@ -75,7 +75,7 @@ export function confirmDialog(root: HTMLElement, title: string, body: string, ok
         h(
           'div',
           { class: 'row end' },
-          h('button', { class: 'btn ghost', onclick: () => close(false) }, 'キャンセル'),
+          h('button', { class: 'btn ghost', onclick: () => close(false) }, cancelLabel),
           h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => close(true) }, okLabel),
         ),
       ),

@@ -202,6 +202,12 @@ export class Sfx {
         case 'workDone':
           if (mine) this.tone(1200, 0.05, 'sine', 0.05);
           break;
+        case 'tutorialStep':
+          [880, 1175].forEach((f, i) => this.tone(f, 0.12, 'sine', 0.06, 0, i * 0.09));
+          break;
+        case 'tutorialDone':
+          [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.18, 'triangle', 0.1, 0, i * 0.11));
+          break;
         default:
           break;
       }

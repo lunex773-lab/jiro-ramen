@@ -1091,6 +1091,9 @@ export function checkHostState(raw: unknown): GameState | string {
   if (errs.length > 0) return errs.slice(0, 3).join(', ');
   const st = s as unknown as GameState;
   if (st.phase === 'bankrupt' || st.bankruptcy) return '破産したキャリアでは共同経営を始められません';
+  if (st.day === 0 || st.tutorial?.kind === 'basics') return 'チュートリアル（練習の日）のデータでは共同経営を始められません';
+  // チュートリアル（従業員の回など）はひとりプレイのみ。途中でも共同経営では行わない
+  st.tutorial = null;
   if (st.players.length > 16) return 'プレイヤーが多すぎます';
   const ids = new Set<string>();
   for (const p of st.players as unknown[]) {

@@ -4,6 +4,7 @@
 import {
   BALANCE,
   bowlsOnAssembly,
+  currentTutorialStep,
   bowlStageLabel,
   callToShort,
   EQUIPMENT,
@@ -154,6 +155,16 @@ export class Hud {
     speed: HTMLElement;
   } | null = null;
 
+  private menuBtn: HTMLElement | null = null;
+  private tutorialUi: 'menu' | 'open' | null = null;
+
+  /** チュートリアルで押してほしいボタンを目立たせる */
+  setTutorialHighlight(ui: 'menu' | 'open' | null): void {
+    this.tutorialUi = ui;
+    this.menuBtn?.classList.toggle('tut-pulse', ui === 'menu');
+    this.cta.querySelector('.btn.primary')?.classList.toggle('tut-pulse', ui === 'open');
+  }
+
   private buildTop(): NonNullable<Hud['topParts']> {
     const parts = {
       day: h('div', { class: 'day' }),
@@ -187,9 +198,10 @@ export class Hud {
         parts.queue,
         parts.speed,
         h('button', { class: 'chip', onclick: () => this.cb.onHelp(), title: '操作説明' }, '?'),
-        h('button', { class: 'chip menu', onclick: () => this.cb.onMenu(), title: '経営メニュー (Tab)' }, '☰ 経営'),
+        (this.menuBtn = h('button', { class: 'chip menu', onclick: () => this.cb.onMenu(), title: '経営メニュー (Tab)' }, '☰ 経営')),
       ),
     );
+    this.setTutorialHighlight(this.tutorialUi);
     return parts;
   }
 
@@ -372,11 +384,15 @@ export class Hud {
   }
 
   private updateCta(s: GameState): void {
-    const key = `${s.phase}|${this.host.isHost}|${s.paused}`;
+    // チュートリアル中は「開店」の手順になるまで開店ボタンを出さない
+    const tutStep = s.tutorial && !s.tutorial.finished ? currentTutorialStep(s)?.id ?? '' : '';
+    const key = `${s.phase}|${this.host.isHost}|${s.paused}|${tutStep}`;
     if (key === this.lastCtaKey) return;
     this.lastCtaKey = key;
     if (s.paused) {
       replace(this.cta, h('div', { class: 'cta-info' }, 'ホストの再接続を待っています（一時停止中）'));
+    } else if (s.phase === 'prep' && tutStep && tutStep !== 'open') {
+      replace(this.cta);
     } else if (s.phase === 'prep') {
       replace(
         this.cta,
@@ -389,6 +405,7 @@ export class Hud {
     } else {
       replace(this.cta);
     }
+    this.setTutorialHighlight(this.tutorialUi);
   }
 
   private updateDetail(s: GameState, t: Target | null): void {

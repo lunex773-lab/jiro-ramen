@@ -18,6 +18,8 @@ async function startNewGame(page: Page) {
   const input = page.locator('.modal input');
   await input.fill('テスト亭');
   await page.getByRole('button', { name: '決定' }).click();
+  // チュートリアルを受けるか聞かれる（ここではスキップ）
+  await page.getByRole('button', { name: 'スキップして1日目から' }).click();
   // 初回は遊び方が出る
   await expect(page.getByText('ラーメンができるまで')).toBeVisible();
   await page.getByRole('button', { name: '閉じる' }).click();
@@ -152,5 +154,98 @@ test.describe('縦向きのスマホ', () => {
     await page.waitForTimeout(1500);
     const t1 = await page.evaluate(() => (window as unknown as { __jiro: { host: { state: { t: number } } } }).__jiro.host.state.t);
     expect(t1).toBe(t0);
+  });
+});
+
+test.describe('チュートリアル', () => {
+  type TutJiro = Jiro & { host: { state: { day: number; tutorial: { step: number; finished: boolean } | null; equipment: { id: string; type: string }[] } } };
+  const tut = (page: Page) => page.evaluate(() => (window as unknown as { __jiro: TutJiro }).__jiro.host.state.tutorial);
+
+  test('新しく始めるときに選ぶと営業0日目の案内が出て、操作で手順が進み、やめると1日目になる', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await page.getByText('ひとりで経営する').click();
+    await page.getByRole('button', { name: '新しく始める' }).first().click();
+    await page.locator('.modal input').fill('練習亭');
+    await page.getByRole('button', { name: '決定' }).click();
+    await page.getByRole('button', { name: 'チュートリアルから始める' }).click();
+    const panel = page.locator('.tutorial-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('ようこそ');
+    await expect(page.locator('.hud-top')).toContainText('0日目');
+    await shot(page, '10-tutorial-welcome');
+    await press(panel.getByRole('button', { name: 'はじめる' }));
+    await expect(panel).toContainText('移動と視点');
+    // 歩くと次へ（ここでは仕込み台の前へ移動させる）
+    await face(page, 'prep_table');
+    await expect(panel).toContainText('豚を切る');
+    await page.waitForTimeout(600);
+    await shot(page, '11-tutorial-prep');
+    // 長押しで豚を切ると、経営メニューの手順へ
+    const slice = page.locator('.act', { hasText: '豚を切る' });
+    await expect(slice).toBeVisible();
+    const box = (await slice.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    // 押している間に、描画の速さに左右されないようゲーム内時間を進める（作業は6秒）
+    await expect(page.locator('.work-bar')).toBeVisible();
+    await page.evaluate(() => {
+      const host = (window as unknown as { __jiro: { host: { tick(dt: number): void } } }).__jiro.host;
+      for (let i = 0; i < 80; i++) host.tick(0.1);
+    });
+    await expect(panel).toContainText('在庫と発注');
+    await page.mouse.up();
+    // 「☰ 経営」が目立ち、在庫・発注タブを開くと次へ
+    await expect(page.locator('.chip.menu')).toHaveClass(/tut-pulse/);
+    await page.locator('.chip.menu').click();
+    await page.getByRole('button', { name: '在庫・発注' }).click();
+    await expect(panel).toContainText('どれか1つ仕入れて');
+    await expect(panel).toHaveClass(/docked/);
+    await shot(page, '12-tutorial-stock');
+    // やめると、練習をリセットして1日目から
+    await panel.getByRole('button', { name: 'やめる' }).click();
+    await page.getByRole('button', { name: 'やめる' }).last().click();
+    await expect(page.locator('.hud-top')).toContainText('1日目');
+    expect(await tut(page)).toBeNull();
+    await expect(panel).toBeHidden();
+  });
+
+  test('3日目に従業員のチュートリアルを受けるか聞かれ、雇わずに終えられる', async ({ page }) => {
+    await startNewGame(page);
+    // 3日目のセーブを作って続きから始める
+    await page.evaluate(() => {
+      const app = (window as unknown as { __jiro: { host: { state: { day: number } }; saveNow(n: boolean): void } }).__jiro;
+      app.host.state.day = 3;
+      app.saveNow(false);
+    });
+    await page.reload();
+    await page.getByText('ひとりで経営する').click();
+    await page.getByRole('button', { name: '続きから' }).first().click();
+    await expect(page.locator('.modal')).toContainText('従業員のチュートリアル');
+    await page.getByRole('button', { name: '受ける' }).click();
+    const panel = page.locator('.tutorial-panel');
+    await expect(panel).toContainText('従業員を雇う');
+    await press(panel.getByRole('button', { name: 'はじめる' }));
+    await expect(page.locator('.chip.menu')).toHaveClass(/tut-pulse/);
+    await page.locator('.chip.menu').click();
+    await page.getByRole('button', { name: '従業員' }).click();
+    await expect(panel).toContainText('候補者の見方');
+    await shot(page, '13-tutorial-staff');
+    await panel.getByRole('button', { name: '次へ' }).click();
+    await panel.getByRole('button', { name: '今は雇わない' }).click();
+    await expect(panel).toContainText('またいつでも');
+    await panel.getByRole('button', { name: 'わかった' }).click();
+    await expect(panel).toBeHidden();
+    expect(await tut(page)).toBeNull();
+  });
+
+  test('タイトルの「チュートリアル」から始めて、やめるとタイトルに戻る', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /チュートリアル/ }).click();
+    await expect(page.locator('.tutorial-panel')).toContainText('ようこそ');
+    await page.locator('.tutorial-panel').getByRole('button', { name: 'やめる' }).click();
+    await page.getByRole('button', { name: 'やめる' }).last().click();
+    await expect(page.getByText('ひとりで経営する')).toBeVisible();
   });
 });

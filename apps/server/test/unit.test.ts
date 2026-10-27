@@ -83,6 +83,8 @@ describe('メッセージ検証', () => {
     expect(parseAction({ type: 'interact', targetId: 'e1', verb: 'use', args: { a: { nested: 1 } } })).toBeNull();
     expect(parseAction({ type: 'hack' })).toBeNull();
     expect(parseAction({ type: 'giveUp' })).toEqual({ type: 'giveUp' });
+    // チュートリアルはひとりプレイのみ
+    expect(parseAction({ type: 'tutorial', op: 'next' })).toBeNull();
   });
 
   it('クライアントメッセージの形を検証する', () => {
@@ -99,6 +101,13 @@ describe('メッセージ検証', () => {
     const dup = createGame({ seed: 1 });
     dup.players.push({ ...dup.players[0]! });
     expect(checkHostState(dup)).toMatch(/プレイヤー/);
+    // 練習の日（営業0日目）からは始められない。従業員の回の途中なら外して始める
+    expect(checkHostState(createGame({ seed: 1, tutorial: true }))).toMatch(/チュートリアル/);
+    const staff = createGame({ seed: 1 });
+    staff.day = 3;
+    staff.tutorial = { kind: 'staff', step: 1, mark: {}, entered: true, finished: false };
+    const st = checkHostState(staff);
+    expect(typeof st === 'object' && st.tutorial).toBeNull();
   });
 });
 

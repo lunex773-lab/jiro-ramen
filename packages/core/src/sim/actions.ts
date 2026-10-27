@@ -16,7 +16,7 @@ import { cancelWork, dropHand, getActor, interact, type Args } from './interact'
 import { placeOrder } from './inventory';
 import { autoPlace, expand, placeEquipment, storeEquipment } from './layout';
 import { emit, type SimCtx } from './notices';
-import { inBasicsTutorial, tutorialAction, type TutorialOp } from './tutorial';
+import { currentTutorialStep, inBasicsTutorial, tutorialAction, type TutorialOp } from './tutorial';
 
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
@@ -110,6 +110,8 @@ export function applyAction(s: GameState, actorId: Id, a: Action, ctx: SimCtx, n
       return { ok: true };
     }
     case 'openShop':
+      // チュートリアル中は「開店」の手順になるまで開店しない（値段の変更などが営業中はできなくなるため）
+      if (s.tutorial && !s.tutorial.finished && currentTutorialStep(s)?.id !== 'open') return fail('チュートリアルの案内に沿って進めてください（開店はあとで案内します）');
       return openShop(s, ctx);
     case 'nextDay':
       // 練習の日の結果は本番に残さない（1日目は画面側で新しく始める）

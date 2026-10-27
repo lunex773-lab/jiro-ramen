@@ -78,6 +78,12 @@ export class World {
   private bob = 0;
   private overlayAcc = 0;
   private quality: Quality;
+  /** チュートリアルの目印（対象の上で上下する矢印。物に隠れても見える） */
+  private tutMarker: THREE.Group;
+  private tutTargetId: string | null = null;
+  private tutPos: THREE.Vector3 | null = null;
+  /** 目印が画面の外にあるときに、画面の端で向きを示す矢印 */
+  private tutEdge: HTMLElement;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -108,7 +114,73 @@ export class World {
     sun.shadow.camera.bottom = -14;
     this.scene.add(sun);
     this.scene.add(sun.target);
+    this.tutMarker = makeTutorialMarker();
+    this.tutMarker.visible = false;
+    this.scene.add(this.tutMarker);
+    this.tutEdge = document.createElement('div');
+    this.tutEdge.className = 'tut-edge';
+    this.tutEdge.textContent = '➤';
+    this.overlay.appendChild(this.tutEdge);
     this.resize();
+  }
+
+  /** チュートリアルで見てほしい物（設備・席・床の汚れの ID）。null で消す */
+  setTutorialTarget(id: string | null): void {
+    this.tutTargetId = id;
+  }
+
+  private tutorialTargetPos(s: GameState): THREE.Vector3 | null {
+    const id = this.tutTargetId;
+    if (!id) return null;
+    const e = s.equipment.find((x) => x.id === id && x.placed);
+    if (e) {
+      const c = equipmentCenter(e);
+      return new THREE.Vector3(c.x, (EQUIPMENT[e.type]?.h ?? 1) + 0.45, c.z);
+    }
+    const seat = s.seats.find((x) => x.id === id);
+    if (seat) {
+      const c = seatCounterPoint(s, seat);
+      return new THREE.Vector3(c.x, 1.45, c.z);
+    }
+    const d = s.dirt.find((x) => x.id === id);
+    if (d) return new THREE.Vector3(d.pos.x, 0.7, d.pos.z);
+    return null;
+  }
+
+  private updateTutorialMarker(s: GameState, t: number): void {
+    this.tutPos = this.tutorialTargetPos(s);
+    this.tutMarker.visible = !!this.tutPos;
+    if (!this.tutPos) return;
+    this.tutMarker.position.copy(this.tutPos);
+    this.tutMarker.position.y += Math.sin(t * 4) * 0.06;
+    this.tutMarker.rotation.y = t * 1.5;
+  }
+
+  /** 目印が画面の外（後ろ・横）にあるときは、画面の端に向きを示す矢印を出す */
+  private updateTutorialEdge(): void {
+    const p = this.tutPos;
+    if (!p) {
+      this.tutEdge.style.display = 'none';
+      return;
+    }
+    const v = p.clone().project(this.camera);
+    const behind = v.z > 1;
+    let x = behind ? -v.x : v.x;
+    let y = behind ? -v.y : v.y;
+    if (!behind && Math.abs(x) <= 0.92 && Math.abs(y) <= 0.86) {
+      this.tutEdge.style.display = 'none';
+      return;
+    }
+    if (behind && Math.abs(x) < 0.05) x = 0.05; // 真後ろなら横に寄せて向きを示す
+    const k = 1 / Math.max(Math.abs(x) / 0.88, Math.abs(y) / 0.78, 1e-6);
+    x *= k;
+    y *= k;
+    const w = this.canvas.clientWidth;
+    const hgt = this.canvas.clientHeight;
+    this.tutEdge.style.display = 'block';
+    this.tutEdge.style.left = `${((x + 1) / 2) * w}px`;
+    this.tutEdge.style.top = `${((1 - y) / 2) * hgt}px`;
+    this.tutEdge.style.transform = `translate(-50%, -50%) rotate(${-Math.atan2(y, x)}rad)`;
   }
 
   setQuality(q: Quality): void {
@@ -452,12 +524,14 @@ export class World {
     this.syncBowls(s, myId);
     this.syncDirtAndLost(s);
     this.syncViewModel(s, s.players.find((p) => p.id === myId), t);
+    this.updateTutorialMarker(s, t);
     for (const m of this.bowls.values()) (m as BowlModel & { tick?: (t: number) => void }).tick?.(t);
     tickModels(t);
     this.overlayAcc += dt;
     if (this.overlayAcc > 0.08) {
       this.overlayAcc = 0;
       this.updateOverlay(s);
+      this.updateTutorialEdge();
     }
   }
 
@@ -514,8 +588,27 @@ export class World {
     for (const b of this.bowls.values()) b.dispose();
     this.shell?.dispose();
     for (const b of this.bubbles.values()) b.el.remove();
+    this.tutEdge.remove();
     this.renderer.dispose();
   }
+}
+
+/** チュートリアルの目印: 下を向いた黄色い矢印と輪。物に隠れても見えるよう最前面に描く */
+function makeTutorialMarker(): THREE.Group {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: '#ffd21f', depthTest: false, transparent: true, opacity: 0.95 });
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.24, 16), mat);
+  cone.rotation.x = Math.PI; // 先を下に
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.18, 10), mat);
+  stem.position.y = 0.2;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.018, 8, 32), mat);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = -0.2;
+  for (const m of [cone, stem, ring]) {
+    m.renderOrder = 999;
+    g.add(m);
+  }
+  return g;
 }
 
 function heldKind(h: Hand): HeldKind | null {

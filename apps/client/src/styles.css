@@ -595,6 +595,47 @@ input, select { font: inherit; }
 .toast.good { border-left-color: var(--good); }
 .toast.out { opacity: 0; transform: translateY(-10px); }
 
+/* ───────── チュートリアル ───────── */
+.tutorial-panel {
+  position: absolute;
+  top: calc(var(--sat) + 48px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(40vw, 520px);
+  z-index: 40;
+  display: none;
+  background: rgba(24, 19, 15, 0.95);
+  border: 2px solid var(--yellow);
+  border-radius: 12px;
+  padding: 8px 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+/* 経営メニュー・レイアウト編集・結果画面の上では下にずらす（タブや見出しを隠さない） */
+.tutorial-panel.docked { top: auto; bottom: calc(var(--sab) + 8px); width: min(60vw, 560px); }
+.tut-head { display: flex; align-items: center; gap: 8px; }
+.tut-badge { background: var(--yellow); color: #1a1407; font-size: 11px; font-weight: 900; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.tut-title { flex: 1; min-width: 0; font-weight: 900; font-size: 15px; color: var(--yellow); }
+.tut-prog { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.tut-head { cursor: pointer; }
+.tut-fold { font-size: 12px; color: var(--muted); transition: transform 0.2s; }
+.tutorial-panel.collapsed .tut-fold { transform: rotate(180deg); }
+.tutorial-panel.collapsed .tut-text, .tutorial-panel.collapsed .tut-guide, .tutorial-panel.collapsed .tut-buttons { display: none; }
+.tut-text { margin-top: 4px; font-size: 13px; line-height: 1.5; }
+.tut-guide { margin-top: 4px; font-size: 12px; color: #ffe27a; }
+.tut-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.tut-btn { min-height: 36px; padding: 6px 14px; font-size: 14px; }
+.tut-quit { margin-left: auto; padding: 6px; border: none; background: none; color: var(--muted); font-size: 12px; text-decoration: underline; cursor: pointer; }
+/* 押してほしいボタン・タブ */
+.tut-pulse { box-shadow: 0 0 0 3px var(--yellow); animation: tut-pulse 1.1s ease-in-out infinite; }
+@keyframes tut-pulse { 50% { box-shadow: 0 0 0 7px rgba(242, 194, 0, 0.35); } }
+/* 目印が画面の外にあるときの、向きを示す矢印 */
+.tut-edge { position: absolute; display: none; z-index: 5; color: var(--yellow); font-size: 34px; line-height: 1; text-shadow: 0 0 6px #000, 0 0 2px #000; pointer-events: none; }
+/* チュートリアル中: 左の列を細くし、手元の表示は左下へ、右の列は案内パネルの下から使う */
+.tutorial-on .hud-left { width: min(28vw, 360px); }
+.tutorial-on .hud-center { top: auto; bottom: calc(var(--sab) + 70px); left: calc(var(--sal) + 8px); transform: none; align-items: flex-start; width: min(28vw, 360px); }
+.tutorial-on .hud-right { top: calc(var(--hud-top) + var(--tut-h, 0px) + 6px); }
+.tutorial-on .manage-body, .tutorial-on .layout-side, .tutorial-on .screen { padding-bottom: 170px; }
+
 /* 高さの低い画面（iPhone の横向き: Safari で約 750×342、ホーム画面から開くと約 844×390） */
 @media (max-height: 500px) {
   .hud { --hud-top: calc(var(--sat) + 42px); }
@@ -647,6 +688,12 @@ input, select { font: inherit; }
   .manage-title { font-size: 16px; }
   .tabs { padding: 4px 0; }
   .tab { min-height: 34px; padding: 4px 12px; font-size: 13px; }
+  .tutorial-panel { top: calc(var(--sat) + 42px); padding: 6px 10px; }
+  .tut-title { font-size: 13px; }
+  .tut-text { font-size: 12px; line-height: 1.45; }
+  .tut-guide { font-size: 11px; }
+  .tut-btn { min-height: 32px; padding: 4px 12px; font-size: 13px; }
+  .tut-edge { font-size: 28px; }
 }
 
 /* 縦向きのスマホ: このゲームは横向き専用なので、横向きにするよう案内する（ゲームは一時停止） */

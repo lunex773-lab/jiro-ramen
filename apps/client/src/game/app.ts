@@ -7,6 +7,7 @@ import {
   resolveTarget,
   seatCounterPoint,
   targetPoints,
+  tutorialTarget,
   deleteSlot,
   listSlots,
   loadFromSlot,
@@ -21,6 +22,7 @@ import { confirmDialog, h, replace, toast } from '../ui/dom';
 import { Hud } from '../ui/hud';
 import { LayoutEditor } from '../ui/layout-editor';
 import { ManageMenu } from '../ui/manage';
+import { TutorialPanel } from '../ui/tutorial';
 import { bankruptScreen, helpScreen, resultScreen, settingsScreen, slotScreen, titleScreen } from '../ui/screens';
 import { Controls } from './controls';
 import { nextHint } from './guide';
@@ -84,6 +86,9 @@ export class App {
   private moveSendAcc = 0;
   private unsub: (() => void)[] = [];
   private onLeaveGame: (() => void) | null = null;
+  private tutorial: TutorialPanel | null = null;
+  /** チュートリアルで目立たせている対象（変わったときだけ画面を更新する） */
+  private tutorialHi = '';
   /** 縦向きのスマホ（横向き専用なので案内を出してゲームを止める。表示は CSS の同じ条件で切り替わる） */
   private portrait = matchMedia('(orientation: portrait) and (pointer: coarse)');
 
@@ -137,6 +142,7 @@ export class App {
       titleScreen(
         {
           onSingle: () => this.showSlots(),
+          onTutorial: () => this.startTutorialOnly(),
           onMulti: () => this.showLobby(),
           onHelp: () => this.showHelp(() => this.showTitle()),
           onSettings: () => this.showSettings(() => this.showTitle()),
@@ -165,13 +171,24 @@ export class App {
           if (r.migrated) toast(this.uiLayer, '古いバージョンのデータを変換しました', 'info');
           this.startLocal(r.file.state, slot);
         },
-        onNew: (slot, shopName) => {
-          const s = createGame({ shopName, playerName: this.settings.playerName });
+        onNew: async (slot, shopName) => {
+          const tutorial = await confirmDialog(
+            this.uiLayer,
+            'チュートリアル（営業0日目）',
+            'ラーメンの作り方と店の経営を、手順に沿って練習できます（10分ほど）。練習の売上や評判は本番に残りません。タイトルの「チュートリアル」からいつでもやり直せます。',
+            'チュートリアルから始める',
+            false,
+            'スキップして1日目から',
+          );
+          const s = createGame({ shopName, playerName: this.settings.playerName, tutorial });
           this.slot = slot;
           const r = saveToSlot(this.store, slot, s);
           if (!r.ok) toast(this.uiLayer, r.error, 'danger');
           this.startLocal(s, slot);
-          if (!this.settings.tutorialSeen) {
+          if (tutorial) {
+            this.settings.tutorialSeen = true;
+            saveSettings(this.settings);
+          } else if (!this.settings.tutorialSeen) {
             this.settings.tutorialSeen = true;
             saveSettings(this.settings);
             this.showHelp(() => this.show(null));
@@ -209,8 +226,10 @@ export class App {
 
   startLocal(state: GameState, slot: number): void {
     this.slot = slot;
-    this.settings.lastSlot = slot;
-    saveSettings(this.settings);
+    if (slot > 0) {
+      this.settings.lastSlot = slot;
+      saveSettings(this.settings);
+    }
     // ローカルでは自分が唯一のプレイヤー
     const me = state.players[0];
     if (me) {
@@ -236,6 +255,10 @@ export class App {
       onHelp: () => this.showHelp(() => this.show(null)),
     });
     this.hud.attachHint(this.hintEl);
+    this.tutorial = new TutorialPanel(this.uiLayer, host, {
+      onQuit: () => void this.quitTutorial(),
+      onFinished: () => this.finishTutorial(),
+    });
     this.manage = new ManageMenu(this.uiLayer, host, {
       onClose: () => this.closeManage(),
       onLayoutEditor: () => this.openEditor(),
@@ -286,6 +309,9 @@ export class App {
     this.manage?.close();
     this.editor?.close();
     this.hud?.dispose();
+    this.tutorial?.dispose();
+    this.tutorial = null;
+    this.tutorialHi = '';
     this.controls?.dispose();
     this.world?.dispose();
     this.host?.dispose();
@@ -371,6 +397,7 @@ export class App {
       world.render();
     }
     this.hud?.update(dt);
+    this.updateTutorial(s, dt);
     this.updateHint(s, dt);
     this.checkPhaseScreens(false);
   }
@@ -381,7 +408,7 @@ export class App {
     this.hintAcc += dt;
     if (this.hintAcc < 0.25 || !this.host) return;
     this.hintAcc = 0;
-    const show = s.career.daysPlayed < 3 && !this.screenEl && !this.manage?.isOpen;
+    const show = s.career.daysPlayed < 3 && !this.screenEl && !this.manage?.isOpen && !s.tutorial;
     const text = show ? nextHint(s, this.host.playerId) : null;
     this.hintEl.textContent = text ? `💡 ${text}` : '';
     this.hintEl.style.display = text ? 'block' : 'none';
@@ -415,6 +442,7 @@ export class App {
       this.show(null);
       const me = s.players.find((p) => p.id === host.playerId);
       if (me) this.localPos = { ...me.pos };
+      void this.offerStaffTutorial();
     }
   }
 
@@ -430,6 +458,11 @@ export class App {
     this.show(
       resultScreen(s, r, host.isHost, {
         onNextDay: async () => {
+          // 練習の日（営業0日目）の結果は残さず、1日目を新しく始める
+          if (s.tutorial?.kind === 'basics') {
+            this.finishTutorial();
+            return;
+          }
           const res = await host.act({ type: 'nextDay' });
           if (!res.ok) {
             toast(this.uiLayer, res.reason ?? '進めません', 'danger', 5000);
@@ -485,6 +518,81 @@ export class App {
     if (r && !r.ok) toast(this.uiLayer, r.reason ?? '開店できません', 'warn');
   }
 
+  // ───────────────── チュートリアル ─────────────────
+
+  /** タイトルから: 営業0日目の練習だけを遊ぶ（セーブしない。終わったらタイトルへ） */
+  private startTutorialOnly(): void {
+    this.startLocal(createGame({ playerName: this.settings.playerName, tutorial: true }), 0);
+  }
+
+  private updateTutorial(s: GameState, dt: number): void {
+    const panel = this.tutorial;
+    if (!panel) return;
+    const manageOpen = !!this.manage?.isOpen;
+    panel.update(dt, {
+      manageOpen,
+      manageTab: manageOpen ? this.manage!.currentTab : null,
+      editorOpen: !!this.editor,
+      covered: !!this.screenEl || manageOpen || !!this.editor,
+    });
+    const tg = s.tutorial && !s.tutorial.finished ? tutorialTarget(s) : null;
+    const id = tg && 'id' in tg ? tg.id : null;
+    const ui = tg && 'ui' in tg && (tg.ui === 'menu' || tg.ui === 'open') ? tg.ui : null;
+    const tab = s.tutorial ? panel.highlightTab : null;
+    const key = `${id}|${ui}|${tab}|${manageOpen ? this.manage!.currentTab : ''}`;
+    if (key === this.tutorialHi) return;
+    this.tutorialHi = key;
+    this.world?.setTutorialTarget(id);
+    this.hud?.setTutorialHighlight(ui);
+    this.manage?.highlightTab(tab);
+  }
+
+  /** 最後の手順まで終えた: 営業0日目なら練習をリセットして1日目を始める（タイトルからならタイトルへ） */
+  private finishTutorial(): void {
+    const s = this.host?.state;
+    if (!s) return;
+    if (this.slot === 0) {
+      this.showTitle();
+      toast(this.uiLayer, 'チュートリアルを終えました', 'good', 3000);
+      return;
+    }
+    const n = createGame({ shopName: s.shopName, playerName: this.settings.playerName });
+    const r = saveToSlot(this.store, this.slot, n);
+    if (!r.ok) toast(this.uiLayer, r.error, 'danger');
+    this.startLocal(n, this.slot);
+    toast(this.uiLayer, '1日目の営業を始めます。資金は¥300,000です', 'good', 4000);
+  }
+
+  private async quitTutorial(): Promise<void> {
+    const s = this.host?.state;
+    if (!s?.tutorial) return;
+    if (s.tutorial.kind === 'staff') {
+      await this.host?.act({ type: 'tutorial', op: 'quit' });
+      return;
+    }
+    const body = this.slot === 0 ? 'タイトルに戻ります。' : '練習を終えて、1日目から始めます（練習の結果は残りません）。';
+    if (!(await confirmDialog(this.uiLayer, 'チュートリアルをやめますか？', body, 'やめる'))) return;
+    this.finishTutorial();
+  }
+
+  /** 3日目（以降）の準備時間に、従業員のチュートリアルを受けるかを聞く（ひとりプレイで一度だけ） */
+  private async offerStaffTutorial(): Promise<void> {
+    const host = this.host;
+    if (!host || host.mode !== 'local') return;
+    const s = host.state;
+    if (s.tutorial || s.day < 3 || s.phase !== 'prep' || s.career.staffTutorialOffered) return;
+    const take = await confirmDialog(
+      this.uiLayer,
+      '従業員のチュートリアル',
+      '従業員の雇い方と、仕事の任せ方を案内します。受けますか？（雇うかどうかは途中で選べます）',
+      '受ける',
+      false,
+      '受けない',
+    );
+    if (this.host !== host) return;
+    await host.act({ type: 'tutorial', op: take ? 'staffStart' : 'staffDecline' });
+  }
+
   // ───────────────── テスト用 ─────────────────
 
   /** E2E テスト用: 自分を対象の正面に立たせ、対象の方を向かせる */
@@ -513,6 +621,10 @@ export class App {
   saveNow(notify: boolean): void {
     const host = this.host;
     if (!host) return;
+    if (this.slot === 0) {
+      if (notify) toast(this.uiLayer, 'タイトルから始めたチュートリアルは保存されません', 'info');
+      return;
+    }
     if (host.mode === 'remote') {
       const rh = host as GameHost & { requestSave?: () => Promise<GameState | null> };
       void rh.requestSave?.().then((st) => {
@@ -530,7 +642,7 @@ export class App {
   }
 
   private autosave(reason: 'dayEnd' | 'hidden'): void {
-    if (!this.host || this.host.mode !== 'local') return;
+    if (!this.host || this.host.mode !== 'local' || this.slot === 0) return;
     const r = saveToSlot(this.store, this.slot, this.host.state);
     if (!r.ok && reason === 'dayEnd') toast(this.uiLayer, `自動保存に失敗: ${r.error}`, 'danger', 5000);
   }

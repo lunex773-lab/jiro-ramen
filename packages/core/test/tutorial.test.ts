@@ -93,8 +93,10 @@ describe('チュートリアル（営業0日目）', () => {
     s.players[0]!.pos = { x: s.players[0]!.pos.x + 1.5, z: s.players[0]!.pos.z };
     run(s, ctx, 0.2);
 
-    // 仕込み
+    // 仕込み（開店はまだできない）
     expect(stepId(s)).toBe('prep_pork');
+    expect(applyAction(s, 'p1', { type: 'openShop' }, ctx).ok).toBe(false);
+    expect(s.phase).toBe('prep');
     const prepTable = eqByType(s, 'prep_table');
     expect(tutorialTarget(s)).toEqual({ id: prepTable.id });
     act(s, ctx, prepTable.id, 'prep:slice_pork');
