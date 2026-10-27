@@ -46,4 +46,5 @@
 
 - CI（GitHub Actions）: push で型チェック・単体テスト（core / server）・ビルド・E2E（iPhone 相当＋PC）
 - GitHub Pages への自動公開（Pages の公開元が「GitHub Actions」でない間は公開をスキップして案内）
+- Cloudflare へのデプロイ: リポジトリのルートで `wrangler deploy` すると失敗していたため、デプロイ先を `apps/server` に向けるスクリプト（`npm run deploy:server`、ダッシュボードの GitHub 連携用の `npm run deploy:migrate`）と手順を追加
 - ドキュメント: 設計書、ADR-001、Phase 0 レポート、バランス記録、Cloudflare 手順書、本ファイル、[TASKS.md](TASKS.md)

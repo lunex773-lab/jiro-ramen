@@ -26,13 +26,14 @@
 | T14 | 遅い端末でタップが外れる不具合 | 高 | T13 | `apps/client/src/ui/{manage,hud}.ts`, `apps/client/src/game/app.ts` | 経営メニューのタブと HUD 上部を作り直さず文字だけ更新、押下中は再描画を保留、メニュー表示中は 3D 描画を停止 | CI の E2E で発見 → CPU を 6 倍遅くして再現 → 修正後に解消を確認 | CI（GitHub Actions）全ジョブ合格 | — |
 | T15 | ゲームタイトルと初期店名の確定 | 中 | T00 | `docs/PHASE0_REPORT.md` | タイトル「次郎系ラーメン屋 経営シミュレーター」、初期店名「ラーメン まし屋」で確定（オーナー確認済み。コードは変更なし） | — | 完了 | — |
 | T16 | iPhone の横向き専用にする | 高 | T12 | `apps/client/src/ui/hud.ts`, `apps/client/src/styles.css`, `apps/client/src/game/app.ts`, `apps/client/src/render/world.ts`, `apps/client/public/manifest.webmanifest`, `apps/client/playwright.config.ts`, `apps/client/e2e/game.spec.ts` | 横画面の HUD（上: 状態 / 左: 伝票・通知 / 上中央: 案内・手元 / 右: 詳細＋操作ボタン / 下中央: 開店）、タイトル・スロット・経営メニューの横画面配置、縦向きでは「横向きにしてください」を表示してゲームを一時停止、横長の画面で左右が引き伸ばされないよう画角を調整、マニフェストを横向きに | E2E を iPhone 13 横向きの Safari 相当（750×342）で実行、縦向きの案内と一時停止のテストを追加、750×342・844×390・1280×800 のスクリーンショット確認 | 合格 | iOS の Safari は画面の向きを固定できないため、縦向きでは案内で対応（実機での確認が必要） |
+| T17 | Cloudflare のデプロイ先を `apps/server` に向ける | 高 | T09 | `package.json`, `apps/server/package.json`, `docs/CLOUDFLARE_SETUP.md`, `README.md` | ルートで `wrangler deploy` すると設定ファイルがなく自動構成がワークスペースのルートで止まっていた。ルートに `deploy:server`・`deploy:server:dry`、サーバーに `deploy:migrate`（D1 のテーブル作成→デプロイ）を追加し、ダッシュボードの GitHub 連携の設定手順を記載 | エラーをルートで再現、`apps/server` とルートのスクリプトで `wrangler deploy --dry-run` 成功、新しく複製したリポジトリで `npm ci`→dry-run 成功、`deploy:migrate` と同じ手順を `--local`・`--dry-run` で非対話に実行して成功 | 修正済み（本番デプロイは未実施） | U02 |
 
 ## 残課題
 
 | ID | 概要 | 優先度 | 状態・必要な作業 |
 | --- | --- | --- | --- |
 | U01 | iPhone 実機（Safari）での確認 | 高 | 自動テストは Chromium の iPhone 相当画面で実施。実機での操作感・性能・音声は未確認 |
-| U02 | Cloudflare への本番デプロイ | 高 | このクラウド環境からは Cloudflare に接続できない。手順は [CLOUDFLARE_SETUP.md](CLOUDFLARE_SETUP.md)。デプロイ後にリポジトリの Variables へ `VITE_SERVER_URL` を登録 |
+| U02 | Cloudflare への本番デプロイ | 高 | デプロイ方法は Cloudflare ダッシュボードの GitHub 連携（オーナー確認済み）。ルートで実行して失敗していた原因は修正済み（T17）。残りはダッシュボードでの作業: D1 `jiro-db` と R2 `jiro-saves` の作成、D1 の ID のコミット、ビルド用トークンへの D1 権限の追加、ビルド設定（Root directory `apps/server`・Deploy command `npm run deploy:migrate`）、`SESSION_SECRET` の設定。手順は [CLOUDFLARE_SETUP.md](CLOUDFLARE_SETUP.md) の 2.10。デプロイ後にリポジトリの Variables へ `VITE_SERVER_URL` を登録 |
 | U04 | 長時間プレイでのバランス調整 | 中 | シミュレーションでは 1 人営業で 1 日 +6,000〜12,000 円程度（[BALANCE.md](BALANCE.md)）。実プレイでの調整が必要 |
 | U05 | App Store 公開 | 低 | 将来の目標。Capacitor 等でのネイティブ化、Apple Developer Program、Mac と Xcode が必要 |
 | U06 | クライアントのバンドルサイズ | 低 | Three.js を含むチャンクが gzip 約 220KB。必要なら分割読み込みを検討 |
