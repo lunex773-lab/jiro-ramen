@@ -2,7 +2,8 @@
 // 設計書 2.2 / 17 / 18 に対応。デプロイ手順は docs/CLOUDFLARE_SETUP.md を参照。
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  // Cloudflare ダッシュボードで GitHub と連携している Worker の名前に合わせる（Workers Builds はダッシュボード上の名前でデプロイする）
+  // Worker の名前。GitHub Actions（.github/workflows/deploy-server.yml）がこの名前でデプロイし、
+  // ブラウザ版のビルド（pages.yml）はこの名前から URL（https://jiro-ramen.<サブドメイン>.workers.dev）を求める
   "name": "jiro-ramen",
   "main": "src/index.ts",
   // テストで使う vitest-pool-workers 同梱の workerd（1.20260815）でも動く日付にしている。
@@ -25,8 +26,10 @@
     {
       "binding": "DB",
       "database_name": "jiro-db",
-      // ★ 要置き換え: ダッシュボードの D1 で jiro-db を作り、表示される Database ID（8-4-4-4-12 の形式）を貼り付けること。
-      //   テーブルは Worker が自分で作る（src/schema.ts）。ローカル開発・テスト（--local / vitest）はこのままの値でも動く。
+      // この値のままにしておく。GitHub Actions のデプロイが、アカウントの jiro-db（なければ作る）の ID に実行時だけ置き換える
+      //   （apps/server/scripts/cloudflare.mjs。リポジトリには書き戻さない）。
+      //   パソコンから手でデプロイするときだけ、D1 の画面の Database ID（8-4-4-4-12 の形式）に置き換える。
+      //   テーブルは Worker が自分で作る（src/schema.ts）。ローカル開発・テスト（--local / vitest）はこのままの値で動く。
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
@@ -40,6 +43,6 @@
     "ALLOWED_ORIGINS": "https://lunex773-lab.github.io,http://localhost:5173"
   }
   // 秘密情報（SESSION_SECRET: 参加トークンの HMAC 鍵）は vars に書かない。
-  //   本番: `npx wrangler secret put SESSION_SECRET`
+  //   本番: GitHub Actions のデプロイが、未登録ならランダムな値を作って登録する（手でデプロイするなら `npx wrangler secret put SESSION_SECRET`）
   //   ローカル: apps/server/.dev.vars（.dev.vars.example をコピー）
 }

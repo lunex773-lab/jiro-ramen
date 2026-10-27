@@ -8,9 +8,9 @@
 > - サーバーのコードは、この開発環境のローカル（workerd / Miniflare）で動作を確認済みです。
 >   自動テスト 58 件（HTTP API・セーブ・ルーム・WebSocket・永続化）、`wrangler dev` 上での疎通確認スクリプト、
 >   `wrangler deploy --dry-run`（バンドルの確認）が通っています。
-> - **本番の Cloudflare へのデプロイは未検証です。** 開発に使った Claude Code のクラウド環境からは
->   `api.cloudflare.com`・`developers.cloudflare.com` への通信がネットワーク設定で遮断されていたため、
->   デプロイも公式ドキュメントの閲覧もできませんでした（第6章）。
+> - **本番の Cloudflare へのデプロイは未検証です。** デプロイは GitHub Actions で行う設定にしました（2.10）。
+>   GitHub に Cloudflare の API トークンを登録すると動きます。開発に使った Claude Code のクラウド環境からは
+>   `developers.cloudflare.com`（公式ドキュメント）への通信が遮断されていて、閲覧できませんでした（第6章）。
 > - API の使い方は、インストールした `wrangler` 4.151.3・`@cloudflare/workers-types`・`@cloudflare/vitest-pool-workers`
 >   に同梱の型定義と設定スキーマで確認しました。**料金・無料枠・プランの条件の数値は確認できていません。**
 >   本文中の「（要確認）」の箇所は、デプロイ前に公式ドキュメント（https://developers.cloudflare.com/ ）で確かめてください。
@@ -37,7 +37,8 @@ Wrangler の設定ファイルは `apps/server/wrangler.jsonc` の1つだけで�
 - ルートで `npx wrangler` を実行すると、テスト用パッケージ（`@cloudflare/vitest-pool-workers`）の依存として入った
   別のバージョンの Wrangler が使われます（2026-10-27 時点で 4.124.0）。`apps/server` で実行するか `npm run deploy:server` を使うと、
   `apps/server/package.json` で指定したバージョン（4.151.3）が使われます。
-- **このリポジトリは Cloudflare のダッシュボードの GitHub 連携でデプロイします。手順は 2.10 です（3つだけ）。** 2.1〜2.8 はパソコンからコマンドでデプロイする場合の手順です。
+- **このリポジトリは GitHub Actions でデプロイします。手順は 2.10 です**（API トークンを作って GitHub に登録するだけ。D1 の作成・ID の設定・秘密鍵の登録は自動）。
+  2.1〜2.8 はパソコンからコマンドでデプロイする場合、2.11 はダッシュボードの GitHub 連携（Workers Builds）でデプロイする場合の手順です。
 
 ---
 
@@ -169,59 +170,101 @@ node scripts/smoke.mjs https://jiro-ramen.<サブドメイン>.workers.dev
 # → ホストとゲストで接続し、操作・保存・退出まで行って "smoke test passed" と表示されれば OK
 ```
 
-### 2.10 ダッシュボードから GitHub 連携でデプロイする場合（Workers Builds）
+### 2.10 GitHub Actions でデプロイする（このリポジトリの方法）
 
-**このリポジトリのデプロイ方法です**（オーナー確認済み）。パソコンでコマンドを打たずに、Cloudflare のダッシュボードだけで準備できます。
-やることは 3 つです。ダッシュボードの画面名は変わることがあるので、見つからないときは近い名前の項目を探してください。
+**このリポジトリのデプロイ方法です**（オーナー確認済み）。Cloudflare の API トークン（操作用の鍵）を GitHub に預けると、
+`SecondAKIRA` ブランチに push するたびに、GitHub Actions の「Cloudflare（サーバー）」（`.github/workflows/deploy-server.yml`）が次を自動で行います。
 
-#### (1) D1 データベースを作り、ID を設定ファイルに書く
+1. サーバーの型チェックとテスト
+2. D1 データベース `jiro-db` を探す（なければ作る）。その ID を、実行中だけ `wrangler.jsonc` に入れる（リポジトリには書かない）
+3. 秘密鍵 `SESSION_SECRET` が未登録なら、ランダムな値を作ってデプロイと一緒に登録する（登録済みなら変えない。値はどこにも表示しない）
+4. `apps/server` で `wrangler deploy`
+5. `https://jiro-ramen.<サブドメイン>.workers.dev/api/v1/game-version` が応答するか確認
 
-1. ダッシュボード → **Storage & Databases → D1 SQL Database → Create** で、名前を `jiro-db` にして作成します。
-2. 作成した `jiro-db` の画面に出る **Database ID** をコピーします。
-   - 形式は `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`（**8-4-4-4-12 文字、全部で36文字**）です。
+2〜3 は `apps/server/scripts/cloudflare.mjs` が Cloudflare API を呼んで行います。
+ブラウザ版（GitHub Pages）のビルドも同じ鍵でサーバーの URL を求めて埋め込むので、`VITE_SERVER_URL` の登録は要りません（3章）。
+開発に使っている Claude Code は、GitHub に push するだけで Cloudflare を更新でき、トークンそのものは見ません（6章）。
+
+あなたの作業は (1)〜(5) です。ダッシュボードの画面名は表示言語や時期で変わることがあるので、見つからないときは近い名前の項目を探してください。
+
+#### (1) API トークンを作る
+
+1. Cloudflare のダッシュボード → 右上の人のアイコン → **My Profile（プロファイル）→ API Tokens（API トークン）→ Create Token（トークンを作成する）**
+2. 一番下の **Custom token（カスタム トークン）** の **Get started（開始する）** を押す
+3. 次のように入力する
+
+| 項目 | 設定 |
+| --- | --- |
+| Token name | `jiro-ramen GitHub Actions` など、分かる名前 |
+| Permissions（権限） | 次の3行（「+ Add more」で行を増やす）<br>`Account`・`Workers Scripts`・`Edit`<br>`Account`・`D1`・`Edit`<br>`Account`・`Account Settings`・`Read` |
+| Account Resources | `Include`・自分のアカウント |
+| Client IP Address Filtering | 空欄（GitHub Actions の IP アドレスは毎回変わる） |
+| TTL（有効期限） | 任意。期限を付けた場合は、切れたら作り直して (3) で登録し直す |
+
+4. **Continue to summary → Create Token** を押し、表示されたトークンをコピーする（この画面を閉じると二度と表示されない）
+
+- トークンは**チャット・Issue・コミットに貼らないでください**。(3) の GitHub の画面にだけ貼ります。
+- うまくいかないときは、テンプレート「Edit Cloudflare Workers（Cloudflare Workers を編集する）」に `Account`・`D1`・`Edit` を足したトークンで作り直してください
+  （ゾーンのリソースは「All zones from an account」で構いません。独自ドメインは使いません）。
+- トークンが漏れた・不要になったときは、同じ画面から **Roll（再発行）** または **Delete（削除）** できます。
+
+#### (2) アカウント ID を調べる
+
+ダッシュボードを開いたときのアドレス `https://dash.cloudflare.com/xxxxxxxx…/…` の、`dash.cloudflare.com/` の直後にある
+**32 文字の英数字**がアカウント ID です（**Workers & Pages** の画面の右側にも「Account ID」として表示されます）。
+
+#### (3) GitHub に登録する
+
+GitHub のリポジトリ → **Settings → Secrets and variables → Actions** → **Secrets** タブ → **New repository secret** で、次の 2 つを登録します。
+
+| Name | Secret |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | (1) のトークン |
+| `CLOUDFLARE_ACCOUNT_ID` | (2) のアカウント ID |
+
+- 「Variables」タブではなく **「Secrets」タブ**に登録してください。Secrets は実行ログでも伏せ字になり、登録した後は誰も中身を見られません。
+- このリポジトリは公開されていますが、Secrets は他人の Pull Request（fork）から動く実行には渡されません。
+  デプロイが動くのは、書き込み権限のある人が `SecondAKIRA` に push したときと、Actions の画面から実行したときだけです。
+
+#### (4) ダッシュボードの GitHub 連携（Workers Builds）を外す
+
+以前の方法（2.11）で Worker `jiro-ramen` を GitHub とつないでいる場合は、二重にデプロイしないよう外します。
+
+- Worker `jiro-ramen` → **Settings → Build（ビルド）→ Git repository** の **Disconnect（切断）**
+
+Worker 自体・D1・登録済みの `SESSION_SECRET` は残り、GitHub Actions のデプロイで更新されます。
+外さないと、push のたびに Workers Builds も動き、`database_id` が `00000000-...` のままなので失敗の印（「Workers Builds: jiro-ramen」）が付きます。
+
+#### (5) デプロイと確認
+
+1. GitHub のリポジトリ → **Actions → 「Cloudflare（サーバー）」→ Run workflow**（ブランチは `SecondAKIRA`）で実行します。
+   「smoke」に印を付けると、ルームの作成・参加・操作・保存までの通しの確認も行います（確認用のアカウントとルームが D1 に記録されます）。
+   以後は `apps/server`・`packages/core` を変えて push するたびに自動で動きます。
+2. 成功すると、実行結果のまとめ（Summary）にサーバーの URL が出ます。ブラウザで `https://jiro-ramen.<サブドメイン>.workers.dev/api/v1/game-version` を開き、
+   `{"gameVersion":"0.9.0",...}` と表示されれば動いています。
+3. **Actions → 「GitHub Pages」→ Run workflow** でブラウザ版を作り直すと、サーバーの URL が埋め込まれます（以後の push では自動）。
+
+### 2.11 ダッシュボードの GitHub 連携（Workers Builds）でデプロイする場合
+
+以前の方法です（2.10 を使う場合は不要。外し方は 2.10 (4)）。Workers Builds は D1 の作成・ID の設定・秘密鍵の登録をしないので、次を手で行います。
+
+1. ダッシュボード → **Storage & Databases → D1 SQL Database → Create** で `jiro-db` を作り、画面の **Database ID** で
+   `apps/server/wrangler.jsonc` の `database_id` を置き換えてコミットします（秘密情報ではありません）。
+   - Database ID は `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`（**8-4-4-4-12 文字、全部で36文字**）の形式です。
    - `00000000-00000006-00005111-…` のような **8-8-8-32 文字の値は「ブックマーク」**（バックアップの時点を表す値）で、Database ID ではありません。
-3. `apps/server/wrangler.jsonc` の `"database_id"` をその値に書き換えてコミットします（秘密情報ではありません）。
-   `00000000-...` のままだとデプロイに失敗します。
-4. テーブルは Worker が最初の要求のときに自分で作るので、D1 の画面で SQL を実行する必要はありません。
-
-#### (2) ビルドの設定を変える
-
-Worker `jiro-ramen` の **Settings → Build → Build configuration** の **Edit** で、次のようにして保存します。
+2. Worker の **Settings → Variables and Secrets → Add** で、Type `Secret`・名前 `SESSION_SECRET`・値は32文字以上のランダムな英数字を追加します
+   （ビルド用の「Build variables and secrets」ではない方）。
+3. Worker の **Settings → Build → Build configuration** を次のようにします。
 
 | 項目 | 設定値 | 理由 |
 | --- | --- | --- |
-| Root directory（Path） | `apps/server` | Wrangler の設定ファイルがある場所。既定のルート（`/`）のままだと、0章のエラーになる |
+| Root directory（Path） | `apps/server` | Wrangler の設定ファイルがある場所。既定のルート（`/`）のままだと、0章のエラーになる（ルートのままにするなら Deploy command を `npm run deploy:server`） |
 | Build command | 空欄 | Worker は `wrangler deploy` がまとめてくれる。ルートの `npm run build` はゲーム画面（GitHub Pages 用）のビルドで、Worker には不要 |
 | Deploy command | `npx wrangler deploy`（既定のまま） | Root directory で実行され、`apps/server/package.json` の Wrangler が使われる |
-| Preview（プレビュー）用のコマンド | 既定のまま | 本番ブランチ以外のプレビュー |
 | Build watch paths | 既定（すべて）のまま | サーバーは `packages/core` も使うので、`apps/server` だけに絞らない |
 
-- 依存パッケージは、ルートの `package-lock.json` を使って入ります（npm は `apps/server` からでもワークスペースのルートを見つけてインストールします）。
-- **Worker の名前**: Workers Builds は、ダッシュボード上の Worker の名前でデプロイします（`wrangler.jsonc` の `name` より優先）。
-  このリポジトリと連携している Worker は `jiro-ramen` なので、`wrangler.jsonc` の `name` も `jiro-ramen` にそろえています。
-  URL は `https://jiro-ramen.<サブドメイン>.workers.dev` です。
-
-#### (3) 秘密鍵（SESSION_SECRET）を設定する
-
-共同経営のルームに入るための「入場券」に署名する鍵です。Worker の **Settings → Variables and Secrets → Add** で、
-
-- **Type**: `Secret`
-- **Variable name**: `SESSION_SECRET`
-- **Value**: 32文字以上のランダムな英数字（パスワード管理アプリの「パスワードを生成」機能などで作る）
-
-を追加して保存します。ビルド用の「Build variables and secrets」ではなく、こちらに追加してください。デプロイしても消えません。
-
-#### (4) デプロイと確認
-
-1. Worker の **Deployments**（または **Builds**）で、失敗したビルドを **Retry** するか、GitHub に push します。
-2. 成功したら、ブラウザで `https://jiro-ramen.<サブドメイン>.workers.dev/api/v1/game-version` を開き、
-   `{"gameVersion":"0.9.0",...}` と表示されれば動いています。
-3. GitHub のリポジトリ → **Settings → Secrets and variables → Actions → Variables** に `VITE_SERVER_URL`（上の URL のうち
-   `https://…workers.dev` まで。末尾のスラッシュなし）を追加し、Actions の「GitHub Pages」を **Run workflow** で実行し直します（3章）。
-
-#### ルートのまま使いたい場合
-
-Root directory を `/` のままにする場合は、Deploy command を `npm run deploy:server` にします。
+- Workers Builds は、ダッシュボード上の Worker の名前でデプロイします（`wrangler.jsonc` の `name` より優先）。`name` は `jiro-ramen` にそろえています。
+- この方法では GitHub に Cloudflare の鍵がないので、ブラウザ版にサーバーの URL を入れるには、リポジトリの Variables に `VITE_SERVER_URL` を登録します（3章）。
 
 ---
 
@@ -233,8 +276,10 @@ Root directory を `/` のままにする場合は、Deploy command を `npm run
 VITE_SERVER_URL=https://jiro-ramen.<サブドメイン>.workers.dev
 ```
 
-- **GitHub Pages で公開する場合**: GitHub のリポジトリ → **Settings → Secrets and variables → Actions → Variables** に
-  `VITE_SERVER_URL` を追加し、「GitHub Pages」ワークフローを実行し直します（`.github/workflows/pages.yml` が読み込みます）。
+- **GitHub Pages で公開する場合**: 2.10 の鍵（`CLOUDFLARE_API_TOKEN`・`CLOUDFLARE_ACCOUNT_ID`）を登録していれば、
+  「GitHub Pages」ワークフロー（`.github/workflows/pages.yml`）が `https://jiro-ramen.<サブドメイン>.workers.dev` を自動で求めて埋め込みます。
+  別の URL（独自ドメインなど）を使う場合や、鍵を登録しない場合（2.11）は、GitHub のリポジトリ → **Settings → Secrets and variables → Actions → Variables** に
+  `VITE_SERVER_URL` を追加します（こちらが優先）。どちらも、変えたら「GitHub Pages」を実行し直します。
 - **ローカル開発**: `apps/client/.env.local` に `VITE_SERVER_URL=http://localhost:8787` と書き、`npm run dev:server` と `npm run dev` を両方起動します。
 - ビルドに埋め込まなくても、ゲームのロビー画面でサーバーの URL を入力できます（入力した URL はブラウザに記憶されます）。
 - GitHub Pages は https なので、サーバーも https（`workers.dev` は https）である必要があります。
@@ -309,27 +354,17 @@ npx wrangler d1 execute jiro-db --remote --command "SELECT ts, kind, player_id, 
 
 ---
 
-## 6. Claude Code のクラウド環境からデプロイする場合
+## 6. Claude Code（開発に使っている AI）から Cloudflare を操作する
 
-開発に使った Claude Code のクラウド環境（claude.ai/code）では、次のホストへの通信がネットワーク設定で遮断されていたため、
-デプロイできませんでした（2026-10-27 時点では `api.cloudflare.com` には到達できるようになりましたが、
-Cloudflare の認証情報（API トークン）が環境に設定されていないため、引き続きデプロイはできません）。
+2.10 の設定をすると、Claude Code はコードや設定を GitHub の `SecondAKIRA` に push するだけで Cloudflare を更新できます。
+操作は GitHub Actions が GitHub の Secrets の鍵で行い、Claude Code はトークンを見ません。結果は Actions の実行ログ（GitHub）で確認します。
+D1 の作成やテーブルの変更、秘密鍵の登録なども、ワークフローやスクリプト（`apps/server/scripts/cloudflare.mjs`）を変えて push すれば行えます。
+すべてコミットと実行の記録として GitHub に残ります。
 
-- `api.cloudflare.com`（デプロイ・D1 の操作に必要）
-- `developers.cloudflare.com`（公式ドキュメント）
-- `workers.cloudflare.com`（`wrangler dev` が `Request.cf` の見本を取りに行く先。遮断されていても警告が出るだけで動きます）
-
-方法は2つあります。
-
-1. **ご自身のパソコンからデプロイする（おすすめ）**: 第2章の手順をそのまま実行してください。トークンをクラウドに置かずに済みます。
-2. **クラウド環境の設定を変える**: セッションのタイトルバーにあるクラウド環境のメニュー → **Edit** で
-   - **Network access** を広いレベルにするか、**Allowed domains** に `api.cloudflare.com`（必要なら `developers.cloudflare.com`、
-     デプロイ後の確認用に `*.workers.dev`）を追加します（「Allow package managers」はチェックしたまま）。
-     手順: https://code.claude.com/docs/en/cloud-environments#network-access
-   - API トークン（2.2 B の権限）を環境の **Network secrets**（古いアプリでは API credentials）か環境変数
-     `CLOUDFLARE_API_TOKEN`・`CLOUDFLARE_ACCOUNT_ID` として登録します。新しいセッションから使えるようになります。
-   - トークンはデプロイ（書き込み）ができる強い権限なので、対象アカウントを絞り、不要になったら削除してください。
-     チャットにトークンを貼り付けないでください。
+- Claude Code のクラウド環境に API トークンを登録して、そこから直接 `wrangler` を実行する方法もありますが、
+  このリポジトリでは使いません（オーナーの判断。鍵を GitHub だけに置くため）。
+- 開発に使った Claude Code のクラウド環境からは、`developers.cloudflare.com`（公式ドキュメント）と
+  `workers.cloudflare.com`（`wrangler dev` が `Request.cf` の見本を取りに行く先。遮断されていても警告が出るだけで動く）への通信が遮断されていました。
 
 ---
 
@@ -337,12 +372,17 @@ Cloudflare の認証情報（API トークン）が環境に設定されてい�
 
 | 症状 | 原因と対処 |
 | --- | --- |
-| `The Cloudflare application detection logic has been run in the root of a workspace instead of targeting a specific project.` | リポジトリのルートで `wrangler deploy` を実行している（0章）。`apps/server` で実行するか、ルートで `npm run deploy:server`。ダッシュボードの GitHub 連携なら Root directory を `apps/server` にする（2.10） |
-| ダッシュボードの GitHub 連携で `Missing entry-point` | Root directory が `apps/server` になっていない（2.10） |
-| `wrangler deploy` で D1 のエラー（database not found など） | `wrangler.jsonc` の `database_id` が `00000000-...` のまま、またはブックマーク（8-8-8-32 文字）を入れている。D1 の画面の Database ID（8-4-4-4-12 文字）に置き換える（2.10 (1)） |
+| Actions の「Cloudflare（サーバー）」が「Cloudflare の鍵が未登録です」と表示してデプロイしない | 2.10 (3) の Secrets が未登録か、名前が違う（「Variables」タブに入れていないか確認） |
+| 「準備」のステップで `[10000] Authentication error` などの権限エラー | トークンの権限か対象アカウントが足りない。2.10 (1) の3つの権限と、`CLOUDFLARE_ACCOUNT_ID` が同じアカウントのものか確認 |
+| 「準備」のステップで「wrangler.jsonc の database_id が…と違います」 | `database_id` に別の ID がコミットされている。2.10 では `00000000-0000-0000-0000-000000000000` のままにする |
+| 「Workers Builds: jiro-ramen」の失敗の印が付く | ダッシュボードの GitHub 連携が残っている。2.10 (4) で外す |
+| `workers.dev` のサブドメインに関するエラー | アカウントで一度も Workers を使っていない。ダッシュボードの **Workers & Pages** を開いてサブドメインを登録してから、もう一度実行する |
+| `The Cloudflare application detection logic has been run in the root of a workspace instead of targeting a specific project.` | リポジトリのルートで `wrangler deploy` を実行している（0章）。`apps/server` で実行するか、ルートで `npm run deploy:server`。ダッシュボードの GitHub 連携なら Root directory を `apps/server` にする（2.11） |
+| ダッシュボードの GitHub 連携で `Missing entry-point` | Root directory が `apps/server` になっていない（2.11） |
+| 手でのデプロイや Workers Builds で D1 のエラー（database not found など） | `wrangler.jsonc` の `database_id` が `00000000-...` のまま、またはブックマーク（8-8-8-32 文字）を入れている。D1 の画面の Database ID（8-4-4-4-12 文字）に置き換える（2.11）。GitHub Actions（2.10）では自動 |
 | `no such table: players` などのエラー | 通常は Worker が自分でテーブルを作る。続く場合はログ（4章）の `schema_migrated` を確認するか、`npx wrangler d1 migrations apply jiro-db --remote` で作る |
 | Durable Objects に有料プランが必要と言われる | `migrations` が `new_sqlite_classes` になっているか確認。それでも出る場合はプランの条件を公式で確認（有料プランへの変更が必要な可能性） |
-| API が `{"error":"SESSION_SECRET が設定されていません…","code":"server_misconfigured"}` を返す | 2.6 の `wrangler secret put SESSION_SECRET` を実行（32文字以上） |
+| API が `{"error":"SESSION_SECRET が設定されていません…","code":"server_misconfigured"}` を返す | GitHub Actions（2.10）なら「Cloudflare（サーバー）」を実行し直す（未登録なら登録する）。手でデプロイした場合は 2.6 の `wrangler secret put SESSION_SECRET`（32文字以上） |
 | ブラウザで CORS エラー / 403 `origin_not_allowed` | `ALLOWED_ORIGINS` にページのオリジン（`https://…` のホスト部分だけ、末尾スラッシュなし）を追加して再デプロイ |
 | ブラウザから接続できない（Mixed Content） | https のページから http のサーバーには接続できない。`VITE_SERVER_URL` を https の URL にする |
 | WebSocket が 401 で切れる | 参加トークンの期限切れ（10分）。クライアントは自動で `session/join` し直します。繰り返す場合はサーバーの `SESSION_SECRET` を変えていないか確認 |
@@ -357,9 +397,10 @@ Cloudflare の認証情報（API トークン）が環境に設定されてい�
 
 ## 8. 運用メモ
 
-- **更新**: コードを変更したら `cd apps/server && npx wrangler deploy`。デプロイすると接続中の WebSocket は切れますが、
+- **更新**: コードを変更して `SecondAKIRA` に push すると、GitHub Actions がデプロイします（2.10。手元からなら `cd apps/server && npx wrangler deploy`）。デプロイすると接続中の WebSocket は切れますが、
   クライアントは自動で再接続し、ルームは約10秒ごとのチェックポイントから再開します（最大で約10秒分の進行が戻る可能性があります）。
-- **テーブルの変更**: `apps/server/migrations/0002_*.sql` を追加し、`npx wrangler d1 migrations apply jiro-db --remote`。
+- **テーブルの変更**: `apps/server/migrations/0002_*.sql` を追加し、`npm run schema:gen -w @jiro/server` を実行してコミットします。
+  デプロイ後、Worker が最初の要求のときに適用します（`npx wrangler d1 migrations apply jiro-db --remote` で先に適用しても二重には適用しません）。
 - **クライアントの最低バージョン**: 互換性のない変更をしたら `wrangler.jsonc` の `MIN_CLIENT_VERSION` を上げてデプロイ。
   古いクライアントは共同経営に接続できなくなります（`client_outdated`）。
 - **レート制限**: HTTP API の制限は Worker のメモリ上のトークンバケットで、データセンター・インスタンスごとに数えるため

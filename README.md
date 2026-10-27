@@ -49,7 +49,7 @@ npm test             # core と server のテスト
 npm run typecheck    # 型チェック
 npm run build        # クライアントの本番ビルド（apps/client/dist）
 npm run dev:server   # Cloudflare バックエンドをローカルで起動（wrangler dev）
-npm run deploy:server   # バックエンドを Cloudflare にデプロイ（apps/server の Wrangler で実行。ルートで npx wrangler deploy は使わない）
+npm run deploy:server   # 手元からバックエンドを Cloudflare にデプロイ（apps/server の Wrangler で実行。ルートで npx wrangler deploy は使わない）
 
 # E2E（Playwright, iPhone 13 を横向きにした Safari 相当の画面 750×342＋タッチ、PC）
 cd apps/client && npx playwright test
@@ -60,7 +60,7 @@ cd apps/client && npx playwright test
 1. リポジトリの **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にする（設定済み）
 2. `SecondAKIRA` ブランチに push すると `.github/workflows/pages.yml` がビルドして公開する（公開元が GitHub Actions でない間は公開をスキップし、実行結果に案内を出す）
 3. 同時に `.github/workflows/ci.yml` が型チェック・テスト・ビルド・E2E を実行する
-3. 共同経営サーバーを使う場合は、**Settings → Secrets and variables → Actions → Variables** に `VITE_SERVER_URL`（例: `https://jiro-ramen.<アカウント>.workers.dev`）を登録すると埋め込まれる（ゲーム内のオンライン画面からも入力できる）
+4. 共同経営サーバー（Cloudflare）は `.github/workflows/deploy-server.yml` がデプロイする。**Settings → Secrets and variables → Actions → Secrets** に `CLOUDFLARE_API_TOKEN`・`CLOUDFLARE_ACCOUNT_ID` を登録すると動き、D1 の用意・秘密鍵の登録も自動で行う。ブラウザ版にはサーバーの URL（`https://jiro-ramen.<サブドメイン>.workers.dev`）が自動で埋め込まれる（手順: [docs/CLOUDFLARE_SETUP.md](docs/CLOUDFLARE_SETUP.md) の 2.10。ゲーム内のオンライン画面からも URL を入力できる）
 
 ## ライセンス・注意
 

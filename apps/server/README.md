@@ -99,6 +99,11 @@ node scripts/smoke.mjs             # 別ターミナルで疎通確認（ホス�
 npm run deploy:dry                 # バンドルの確認（ネットワーク不要）
 ```
 
+本番へのデプロイは GitHub Actions（`.github/workflows/deploy-server.yml`）が行います。`SecondAKIRA` に push すると、
+`scripts/cloudflare.mjs prepare` が D1 `jiro-db` を用意し（なければ作る）、実行中だけ `wrangler.jsonc` の `database_id` を実際の ID にして、
+`SESSION_SECRET` が未登録ならランダムな値を作り、`wrangler deploy --secrets-file` で一緒に登録します。
+準備（API トークンを GitHub の Secrets に登録）は [docs/CLOUDFLARE_SETUP.md](../../docs/CLOUDFLARE_SETUP.md) の 2.10 にあります。
+
 テストは `test/` にあります（HTTP・セーブ・セッション・ルームの WebSocket・単体テスト）。
 ルームのテストは実際に WebSocket で接続し、受信したパッチを core の `applyPatch` で当てた結果が `full` と一致するか、
 同じ requestId の再送で資金が二重に減らないか、ホスト切断で一時停止・再開するか、Durable Object の退避後に復元できるか、などを確認しています。
