@@ -3,7 +3,7 @@
 一人称視点で次郎系ラーメン店を切り盛りする 3D 経営シミュレーションゲームです。
 ブラウザ（iPhone の Safari を主対象）で動き、GitHub Pages で公開します。最大4人のオンライン共同経営（Cloudflare）にも対応しています。
 
-- 遊ぶ: GitHub Pages を有効にすると `https://lunex773-lab.github.io/jiro-ramen/` で公開されます（下の「公開」を参照）
+- 遊ぶ: https://lunex773-lab.github.io/jiro-ramen/ （`SecondAKIRA` ブランチへの push で自動更新。iPhone ではホーム画面に追加するとアプリのように使えます）
 - 設計書: [docs/DESIGN_SPEC.md](docs/DESIGN_SPEC.md) / 技術判断: [docs/adr](docs/adr) / Phase 0 レポート: [docs/PHASE0_REPORT.md](docs/PHASE0_REPORT.md)
 - 変更履歴: [docs/CHANGELOG.md](docs/CHANGELOG.md) / タスクと残課題: [docs/TASKS.md](docs/TASKS.md) / バランス: [docs/BALANCE.md](docs/BALANCE.md)
 - Cloudflare の設定: [docs/CLOUDFLARE_SETUP.md](docs/CLOUDFLARE_SETUP.md)
@@ -55,8 +55,9 @@ cd apps/client && npx playwright test
 
 ## 公開（GitHub Pages）
 
-1. リポジトリの **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にする
-2. `SecondAKIRA` ブランチに push すると `.github/workflows/pages.yml` がビルドして公開する
+1. リポジトリの **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にする（設定済み）
+2. `SecondAKIRA` ブランチに push すると `.github/workflows/pages.yml` がビルドして公開する（公開元が GitHub Actions でない間は公開をスキップし、実行結果に案内を出す）
+3. 同時に `.github/workflows/ci.yml` が型チェック・テスト・ビルド・E2E を実行する
 3. 共同経営サーバーを使う場合は、**Settings → Secrets and variables → Actions → Variables** に `VITE_SERVER_URL`（例: `https://jiro-ramen-server.<アカウント>.workers.dev`）を登録すると埋め込まれる（ゲーム内のオンライン画面からも入力できる）
 
 ## ライセンス・注意
