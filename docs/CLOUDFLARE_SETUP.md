@@ -17,6 +17,30 @@
 
 ---
 
+## 0. Wrangler を実行する場所（重要）
+
+このリポジトリは npm workspaces のモノレポです。Cloudflare にデプロイするのは **`apps/server`（Worker）だけ**で、
+ブラウザ版クライアント（`apps/client` のビルド結果 `apps/client/dist`）は GitHub Pages で公開します（`.github/workflows/pages.yml`）。
+Wrangler の設定ファイルは `apps/server/wrangler.jsonc` の1つだけです。
+
+| やりたいこと | 実行する場所とコマンド |
+| --- | --- |
+| サーバーをデプロイする | `apps/server` で `npx wrangler deploy`、またはリポジトリのルートで `npm run deploy:server` |
+| デプロイ前の確認（アップロードしない） | `apps/server` で `npx wrangler deploy --dry-run --outdir dist`、またはルートで `npm run deploy:server:dry` |
+| その他の Wrangler コマンド（`d1`・`r2`・`secret`・`tail`） | `cd apps/server` してから実行 |
+
+- リポジトリの**ルートで `npx wrangler deploy` を実行しないでください**。ルートには Wrangler の設定ファイルがないため、
+  Wrangler の自動構成（フレームワークの検出）が動き、次のエラーで止まります。
+  ```
+  ✘ [ERROR] The Cloudflare application detection logic has been run in the root of a workspace instead of targeting a specific project. Change your working directory to one of the applications in the workspace and try again.
+  ```
+- ルートで `npx wrangler` を実行すると、テスト用パッケージ（`@cloudflare/vitest-pool-workers`）の依存として入った
+  別のバージョンの Wrangler が使われます（2026-10-27 時点で 4.124.0）。`apps/server` で実行するか `npm run deploy:server` を使うと、
+  `apps/server/package.json` で指定したバージョン（4.151.3）が使われます。
+- Cloudflare のダッシュボードから GitHub と連携してデプロイする場合は、2.10 の設定にしてください。
+
+---
+
 ## 1. 必要なもの
 
 | もの | 内容 |
@@ -127,8 +151,15 @@ GitHub Pages の `https://lunex773-lab.github.io/jiro-ramen/` から使う場合
 ### 2.8 デプロイする
 
 ```bash
-npx wrangler deploy
+npx wrangler deploy                 # apps/server で実行する
+# または、リポジトリのルートで
+npm run deploy:server
 ```
+
+- 先に `npx wrangler deploy --dry-run --outdir dist`（ルートでは `npm run deploy:server:dry`）で、アップロードせずに設定とバンドルを確認できます。
+- `wrangler deploy` は、同じ名前（`wrangler.jsonc` の `name` = `jiro-ramen-server`）の Worker のコードを置き換えます。
+  ダッシュボードの **Workers & Pages** で、同じ名前の Worker を別の用途に使っていないか確認してください。
+- ダッシュボードで追加した**平文の変数**は、デプロイのたびに `wrangler.jsonc` の `vars` で置き換えられます（Secret は残ります）。
 
 初回は `workers.dev` のサブドメイン登録を聞かれることがあります。完了すると次のような URL が表示されます。
 
@@ -145,6 +176,28 @@ curl https://jiro-ramen-server.<サブドメイン>.workers.dev/api/v1/game-vers
 node scripts/smoke.mjs https://jiro-ramen-server.<サブドメイン>.workers.dev
 # → ホストとゲストで接続し、操作・保存・退出まで行って "smoke test passed" と表示されれば OK
 ```
+
+### 2.10 ダッシュボードから GitHub 連携でデプロイする場合（Workers Builds）
+
+Cloudflare のダッシュボードで Worker に GitHub リポジトリを接続した場合、ビルドとデプロイは既定で**リポジトリのルート**で
+`npx wrangler deploy` を実行するため、0章のエラーになります。Worker の **Settings → Build → Build configuration** を次のようにしてください。
+
+| 項目 | 設定値 | 理由 |
+| --- | --- | --- |
+| Root directory（Path） | `apps/server` | Wrangler の設定ファイルがある場所。Cloudflare の公式手順でも、モノレポでは Worker ごとに設定ファイルのある場所を指定する |
+| Build command | 空欄 | Worker は `wrangler deploy` がバンドルする。ルートの `npm run build` はクライアント（GitHub Pages 用）のビルドで、Worker には不要 |
+| Deploy command | `npx wrangler deploy`（既定のまま） | Root directory で実行され、`apps/server/package.json` の Wrangler が使われる |
+| Preview（プレビュー）用のコマンド | 既定のまま | Root directory で実行される |
+
+- 依存パッケージは、ルートの `package-lock.json` を使って入ります（npm は `apps/server` からでもワークスペースのルートを見つけてインストールします）。
+- Root directory をルート（`/`）のままにしたい場合は、Deploy command を `npm run deploy:server` にしてください。
+- **Worker の名前**: Workers Builds は、ダッシュボード上の Worker の名前でデプロイします（`wrangler.jsonc` の `name` より優先）。
+  `jiro-ramen-server` 以外の名前（例: リポジトリ名の `jiro-ramen`）で Worker を作った場合は、その名前の Worker にデプロイされ、
+  URL も `https://<その名前>.<サブドメイン>.workers.dev` になります。`VITE_SERVER_URL`（3章）にはその URL を設定してください。
+- デプロイの前に、2.3〜2.6（D1 の作成と `database_id` の書き換え・コミット、R2 バケット、テーブル作成、`SESSION_SECRET`）を済ませてください。
+  `database_id` が `00000000-...` のままだとデプロイに失敗します。
+  `SESSION_SECRET` はダッシュボードの Worker → **Settings → Variables and Secrets** で **Secret** として追加することもできます
+  （ビルド用の変数 Build variables ではありません）。
 
 ---
 
@@ -236,7 +289,8 @@ npx wrangler d1 execute jiro-db --remote --command "SELECT ts, kind, player_id, 
 ## 6. Claude Code のクラウド環境からデプロイする場合
 
 開発に使った Claude Code のクラウド環境（claude.ai/code）では、次のホストへの通信がネットワーク設定で遮断されていたため、
-デプロイできませんでした。
+デプロイできませんでした（2026-10-27 時点では `api.cloudflare.com` には到達できるようになりましたが、
+Cloudflare の認証情報（API トークン）が環境に設定されていないため、引き続きデプロイはできません）。
 
 - `api.cloudflare.com`（デプロイ・D1・R2 の操作に必要）
 - `developers.cloudflare.com`（公式ドキュメント）
@@ -260,6 +314,8 @@ npx wrangler d1 execute jiro-db --remote --command "SELECT ts, kind, player_id, 
 
 | 症状 | 原因と対処 |
 | --- | --- |
+| `The Cloudflare application detection logic has been run in the root of a workspace instead of targeting a specific project.` | リポジトリのルートで `wrangler deploy` を実行している（0章）。`apps/server` で実行するか、ルートで `npm run deploy:server`。ダッシュボードの GitHub 連携なら Root directory を `apps/server` にする（2.10） |
+| ダッシュボードの GitHub 連携で `Missing entry-point` | Root directory が `apps/server` になっていない（2.10） |
 | `wrangler deploy` で D1 のエラー（database not found など） | `wrangler.jsonc` の `database_id` が `00000000-...` のまま。2.3 の値に置き換える |
 | `no such table: players` などのエラー | 本番のマイグレーション未実行。`npx wrangler d1 migrations apply jiro-db --remote` |
 | R2 のエラー（R2 を有効にしてください、など） | ダッシュボードで R2 を有効化してから `wrangler r2 bucket create jiro-saves` |

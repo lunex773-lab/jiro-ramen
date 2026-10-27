@@ -48,6 +48,7 @@ npm test             # core と server のテスト
 npm run typecheck    # 型チェック
 npm run build        # クライアントの本番ビルド（apps/client/dist）
 npm run dev:server   # Cloudflare バックエンドをローカルで起動（wrangler dev）
+npm run deploy:server   # バックエンドを Cloudflare にデプロイ（apps/server の Wrangler で実行。ルートで npx wrangler deploy は使わない）
 
 # E2E（Playwright, iPhone 相当の画面＋タッチ）
 cd apps/client && npx playwright test
