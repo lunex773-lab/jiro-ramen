@@ -123,3 +123,34 @@ test('保存して再読み込みしても続きから遊べる', async ({ page 
   await page.getByRole('button', { name: '続きから' }).first().click();
   await expect(page.locator('.hud-top')).toContainText('1日目');
 });
+
+test.describe('縦向きのスマホ', () => {
+  // 横向き専用なので、縦向きでは案内を出してゲームを止める
+  test.use({ viewport: { width: 390, height: 664 } });
+
+  test('縦向きでは「横向きにしてください」が出て、横にすると消える', async ({ page }) => {
+    test.skip(!test.info().project.use.hasTouch, 'タッチ端末だけの動作');
+    await page.goto('/');
+    const hint = page.locator('.rotate-hint');
+    await expect(hint).toBeVisible();
+    await expect(hint).toContainText('横向きにしてください');
+    await shot(page, '00-portrait');
+    await page.setViewportSize({ width: 750, height: 342 });
+    await expect(hint).toBeHidden();
+    await expect(page.getByText('ひとりで経営する')).toBeVisible();
+  });
+
+  test('縦向きの間はゲームの時間が止まる', async ({ page }) => {
+    test.skip(!test.info().project.use.hasTouch, 'タッチ端末だけの動作');
+    await page.setViewportSize({ width: 750, height: 342 });
+    await startNewGame(page);
+    await page.getByRole('button', { name: /開店する/ }).click();
+    await expect.poll(async () => page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.host.state.phase)).toBe('open');
+    await page.setViewportSize({ width: 390, height: 664 });
+    await expect(page.locator('.rotate-hint')).toBeVisible();
+    const t0 = await page.evaluate(() => (window as unknown as { __jiro: { host: { state: { t: number } } } }).__jiro.host.state.t);
+    await page.waitForTimeout(1500);
+    const t1 = await page.evaluate(() => (window as unknown as { __jiro: { host: { state: { t: number } } } }).__jiro.host.state.t);
+    expect(t1).toBe(t0);
+  });
+});

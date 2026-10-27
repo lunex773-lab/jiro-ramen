@@ -1,7 +1,7 @@
 # 次郎系ラーメン屋 経営シミュレーター
 
 一人称視点で次郎系ラーメン店を切り盛りする 3D 経営シミュレーションゲームです。
-ブラウザ（iPhone の Safari を主対象）で動き、GitHub Pages で公開します。最大4人のオンライン共同経営（Cloudflare）にも対応しています。
+ブラウザ（iPhone の Safari を主対象）で動き、GitHub Pages で公開します。**iPhone を横向きにして遊ぶ横画面専用**です（縦向きにすると「横向きにしてください」と表示され、ゲームは一時停止します）。最大4人のオンライン共同経営（Cloudflare）にも対応しています。
 
 - 遊ぶ: https://lunex773-lab.github.io/jiro-ramen/ （`SecondAKIRA` ブランチへの push で自動更新。iPhone ではホーム画面に追加するとアプリのように使えます）
 - 設計書: [docs/DESIGN_SPEC.md](docs/DESIGN_SPEC.md) / 技術判断: [docs/adr](docs/adr) / Phase 0 レポート: [docs/PHASE0_REPORT.md](docs/PHASE0_REPORT.md)
@@ -20,7 +20,7 @@
 
 ## 操作
 
-| | スマホ | PC |
+| | スマホ（横向き） | PC |
 | --- | --- | --- |
 | 移動 | 画面左側をなぞる | WASD / 矢印キー |
 | 視点 | 画面右側をなぞる | 画面をクリック後マウス |
@@ -50,7 +50,7 @@ npm run build        # クライアントの本番ビルド（apps/client/dist�
 npm run dev:server   # Cloudflare バックエンドをローカルで起動（wrangler dev）
 npm run deploy:server   # バックエンドを Cloudflare にデプロイ（apps/server の Wrangler で実行。ルートで npx wrangler deploy は使わない）
 
-# E2E（Playwright, iPhone 相当の画面＋タッチ）
+# E2E（Playwright, iPhone 13 を横向きにした Safari 相当の画面 750×342＋タッチ、PC）
 cd apps/client && npx playwright test
 ```
 

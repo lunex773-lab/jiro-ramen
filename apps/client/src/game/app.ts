@@ -84,6 +84,8 @@ export class App {
   private moveSendAcc = 0;
   private unsub: (() => void)[] = [];
   private onLeaveGame: (() => void) | null = null;
+  /** 縦向きのスマホ（横向き専用なので案内を出してゲームを止める。表示は CSS の同じ条件で切り替わる） */
+  private portrait = matchMedia('(orientation: portrait) and (pointer: coarse)');
 
   constructor(mount: HTMLElement) {
     this.root = mount;
@@ -92,9 +94,18 @@ export class App {
     this.overlay = h('div', { class: 'overlay3d' });
     this.uiLayer = h('div', { class: 'ui-layer' });
     this.hintEl = h('div', { class: 'hint' });
-    this.root.append(this.canvas, this.overlay, this.uiLayer);
+    const rotateHint = h(
+      'div',
+      { class: 'rotate-hint', role: 'alert' },
+      h('div', { class: 'rotate-icon', 'aria-hidden': 'true' }, '📱'),
+      h('div', { class: 'rotate-title' }, '横向きにしてください'),
+      h('div', { class: 'rotate-sub' }, 'このゲームは横画面専用です。向きが変わらないときは、コントロールセンターの「画面縦向きのロック」をオフにしてください。'),
+    );
+    this.root.append(this.canvas, this.overlay, this.uiLayer, rotateHint);
     this.applySettings();
     window.addEventListener('resize', () => this.world?.resize());
+    // 向きを変えた直後は resize が来ない端末があるので、向きの変化でも描画サイズを合わせ直す
+    this.portrait.addEventListener('change', () => this.world?.resize());
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') this.autosave('hidden');
     });
@@ -307,7 +318,7 @@ export class App {
     const c = this.controls;
     if (!host || !world || !c) return;
     const s = host.state;
-    const blocking = !!this.screenEl || this.manage?.isOpen || !!this.editor;
+    const blocking = !!this.screenEl || this.manage?.isOpen || !!this.editor || this.portrait.matches;
     c.enabled = !blocking;
     // シングルプレイではメニュー中は時間を止める
     const pauseLocal = host.mode === 'local' && (blocking || s.phase === 'closed');
@@ -360,14 +371,16 @@ export class App {
       world.render();
     }
     this.hud?.update(dt);
-    this.updateHint(s);
+    this.updateHint(s, dt);
     this.checkPhaseScreens(false);
   }
 
   private hintAcc = 0;
-  private updateHint(s: GameState): void {
-    this.hintAcc++;
-    if (this.hintAcc % 15 !== 0 || !this.host) return;
+  /** 案内は 0.25 秒ごとに更新する（フレーム数で数えると、描画の遅い端末で古い案内が長く残る） */
+  private updateHint(s: GameState, dt: number): void {
+    this.hintAcc += dt;
+    if (this.hintAcc < 0.25 || !this.host) return;
+    this.hintAcc = 0;
     const show = s.career.daysPlayed < 3 && !this.screenEl && !this.manage?.isOpen;
     const text = show ? nextHint(s, this.host.playerId) : null;
     this.hintEl.textContent = text ? `💡 ${text}` : '';

@@ -1,6 +1,7 @@
 // 3D シーン: ゲーム状態を描画オブジェクトへ同期する。ゲームのルールはここに置かない（設計書 3）。
 
 import * as THREE from 'three';
+
 import {
   CELL,
   EQUIPMENT,
@@ -33,6 +34,9 @@ import {
   type HeldKind,
   type ShopShell,
 } from './models';
+
+/** 横の画角（度）。縦の画角はこれと画面の縦横比から決める */
+const HORIZONTAL_FOV = 100;
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -120,6 +124,10 @@ export class World {
     this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(w, hgt, false);
     this.camera.aspect = w / Math.max(1, hgt);
+    // 横に長い画面（iPhone の横向きは約 2.2:1）で縦の画角を固定すると左右が大きく引き伸ばされるので、
+    // 横の画角を約 100° に保つよう縦の画角を決める（PC の 16:10 では従来とほぼ同じ 73°）
+    const halfH = Math.atan(Math.tan(THREE.MathUtils.degToRad(HORIZONTAL_FOV / 2)) / this.camera.aspect);
+    this.camera.fov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(halfH * 2), 55, 75);
     this.camera.updateProjectionMatrix();
   }
 

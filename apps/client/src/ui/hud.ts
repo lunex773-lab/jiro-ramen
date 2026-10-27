@@ -59,8 +59,8 @@ export class Hud {
   private hand: HTMLElement;
   private cta: HTMLElement;
   private crosshair: HTMLElement;
-  /** 上部の積み上げ（状態・伝票・案内・通知）。縦に並べて重ならないようにする */
-  private head: HTMLElement;
+  /** 上部中央（初心者向けの案内） */
+  private center: HTMLElement;
   private lastTopKey = '';
   private lastRailKey = '';
   private lastActionsKey = '';
@@ -93,11 +93,13 @@ export class Hud {
     this.workBar = h('div', { class: 'work-bar' }, this.workLabel, h('div', { class: 'work-track' }, this.workFill));
     this.hand = h('div', { class: 'hud-hand' });
     this.cta = h('div', { class: 'hud-cta' });
-    // 開店ボタンは PC では画面下中央（fixed）、縦長のスマホでは上部の積み上げに入る（CSS で切り替え）
-    this.head = h('div', { class: 'hud-head' }, this.top, this.rail, this.cta, this.notices);
-    // 注視中の設備の詳細は、スマホでは操作ボタンの真上に積む
-    const br = h('div', { class: 'hud-br' }, this.detail, this.actions);
-    this.el = h('div', { class: 'hud' }, this.head, this.crosshair, this.focusLabel, this.workBar, this.hand, br);
+    // 横向きの画面: 上に状態の行、左の列に伝票と通知、上部中央に案内、右の列に詳細と操作ボタン（右手の親指で押す）、
+    // 下中央に開店ボタン。左半分は移動スティック用に空けておく
+    const left = h('div', { class: 'hud-left' }, this.rail, this.notices);
+    // 上部中央: 案内と手に持っている物（照準の近くで目に入る）
+    this.center = h('div', { class: 'hud-center' }, this.hand);
+    const right = h('div', { class: 'hud-right' }, this.detail, this.actions);
+    this.el = h('div', { class: 'hud' }, this.top, left, this.center, right, this.crosshair, this.focusLabel, this.workBar, this.cta);
     // HUD 上のタッチを 3D 操作に渡さない
     for (const el of [this.top, this.rail, this.detail, this.actions, this.cta, this.notices]) {
       el.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -110,9 +112,9 @@ export class Hud {
     root.appendChild(this.el);
   }
 
-  /** 初心者向けの案内を伝票と通知の間に置く */
+  /** 初心者向けの案内を上部中央に置く */
   attachHint(el: HTMLElement): void {
-    this.head.insertBefore(el, this.notices);
+    this.center.insertBefore(el, this.hand);
   }
 
   get currentVerbs(): VerbInfo[] {
@@ -378,7 +380,7 @@ export class Hud {
     } else if (s.phase === 'prep') {
       replace(
         this.cta,
-        // 縦長の画面ではボタンだけで伝わるので説明を省く
+        // 高さの低い画面（スマホの横向き）では案内と重複するので説明を省く
         h('div', { class: 'cta-info redundant' }, '開店前の仕込み時間です。準備ができたら開店しましょう'),
         h('button', { class: 'btn big primary', onclick: () => this.cb.onOpenShop() }, '🏮 開店する'),
       );

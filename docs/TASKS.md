@@ -3,7 +3,7 @@
 設計書 23.1 の項目（タスクID・概要・優先度・依存・変更ファイル・実装内容・テスト・結果・未解決事項）で記録します。
 「結果」は自動テスト・ビルド・画面確認で確かめた内容だけを書いています。
 
-最終確認（2026-10-27）: 型チェック OK、単体テスト core 63 件・server 58 件・client 4 件 合格、E2E 10 件（iPhone 相当 5・PC 5）合格、本番ビルド OK。GitHub Actions の CI（同じ内容）合格、GitHub Pages への公開ジョブ成功。
+最終確認（2026-10-27）: 型チェック OK、単体テスト core 63 件・server 58 件・client 4 件 合格、E2E 12 件（iPhone 横向き相当 7・PC 5）合格、本番ビルド OK。GitHub Actions の CI（同じ内容）合格、GitHub Pages への公開ジョブ成功。
 
 ## 完了したタスク
 
@@ -21,10 +21,11 @@
 | T09 | Cloudflare バックエンド | 高 | T08 | `apps/server/src/**`, `apps/server/wrangler.jsonc`, `migrations/0001_init.sql` | 匿名認証・ルーム・クラウドセーブ（D1・R2）、レート制限、オリジン制限 | `apps/server/test/*`（workerd 上で実行） | 合格 | 本番デプロイは未実施（下の U02） |
 | T10 | 共同経営（最大4人） | 高 | T09 | `apps/server/src/room.ts`, `packages/core/src/net.ts`, `apps/client/src/net/*` | Durable Object の権威サーバー、パッチ同期、requestId の重複排除、再接続、ホスト離脱時の一時停止 | `net.test.ts`, `room.test.ts`, `apps/client/test/remote.integration.test.ts`（ローカルの wrangler dev と結合） | 合格 | 実ネットワーク（遅延・回線切替）での検証は未実施 |
 | T11 | 3D モデル・音 | 中 | T01 | `apps/client/src/render/models/*`, `apps/client/src/audio/sfx.ts` | 丼（コールどおりの盛り）・人物・全設備・店舗・小物をコードで生成、湯気・湯面、効果音と読み上げ | 型チェック、`scripts/shots.mjs` のスクリーンショット確認 | 合格（ゲーム中の描画呼び出し 約50 回） | プロシージャルのため写実性に限界 |
-| T12 | HUD のスマホ縦画面対応 | 高 | T01 | `apps/client/src/ui/hud.ts`, `apps/client/src/styles.css` | 上部（状態・伝票・案内・通知）と右下（詳細・操作ボタン）を積み上げ式にして重なりを解消 | E2E のスクリーンショット確認（390×844） | 合格 | — |
+| T12 | HUD のスマホ縦画面対応 | 高 | T01 | `apps/client/src/ui/hud.ts`, `apps/client/src/styles.css` | 上部（状態・伝票・案内・通知）と右下（詳細・操作ボタン）を積み上げ式にして重なりを解消 | E2E のスクリーンショット確認（390×844） | 合格（T16 で横向き専用に置き換え） | — |
 | T13 | CI・公開 | 高 | T12 | `.github/workflows/{ci,pages}.yml` | push で型チェック・テスト・ビルド・E2E、GitHub Pages へ自動公開 | GitHub Actions | 公開ジョブ成功 | — |
 | T14 | 遅い端末でタップが外れる不具合 | 高 | T13 | `apps/client/src/ui/{manage,hud}.ts`, `apps/client/src/game/app.ts` | 経営メニューのタブと HUD 上部を作り直さず文字だけ更新、押下中は再描画を保留、メニュー表示中は 3D 描画を停止 | CI の E2E で発見 → CPU を 6 倍遅くして再現 → 修正後に解消を確認 | CI（GitHub Actions）全ジョブ合格 | — |
 | T15 | ゲームタイトルと初期店名の確定 | 中 | T00 | `docs/PHASE0_REPORT.md` | タイトル「次郎系ラーメン屋 経営シミュレーター」、初期店名「ラーメン まし屋」で確定（オーナー確認済み。コードは変更なし） | — | 完了 | — |
+| T16 | iPhone の横向き専用にする | 高 | T12 | `apps/client/src/ui/hud.ts`, `apps/client/src/styles.css`, `apps/client/src/game/app.ts`, `apps/client/src/render/world.ts`, `apps/client/public/manifest.webmanifest`, `apps/client/playwright.config.ts`, `apps/client/e2e/game.spec.ts` | 横画面の HUD（上: 状態 / 左: 伝票・通知 / 上中央: 案内・手元 / 右: 詳細＋操作ボタン / 下中央: 開店）、タイトル・スロット・経営メニューの横画面配置、縦向きでは「横向きにしてください」を表示してゲームを一時停止、横長の画面で左右が引き伸ばされないよう画角を調整、マニフェストを横向きに | E2E を iPhone 13 横向きの Safari 相当（750×342）で実行、縦向きの案内と一時停止のテストを追加、750×342・844×390・1280×800 のスクリーンショット確認 | 合格 | iOS の Safari は画面の向きを固定できないため、縦向きでは案内で対応（実機での確認が必要） |
 
 ## 残課題
 

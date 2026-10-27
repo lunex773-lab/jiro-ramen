@@ -22,12 +22,13 @@ export default defineConfig({
     {
       name: 'iphone',
       use: {
-        // iPhone 相当の画面・タッチ（エンジンは Chromium。実機 Safari の検証は別途必要）
-        viewport: { width: 390, height: 844 },
+        // iPhone 13 を横向きにした Safari の表示領域（750×342）とタッチ。横向き専用のゲームなので一番狭い条件で試す
+        // （エンジンは Chromium。実機 Safari の検証は別途必要）
+        viewport: devices['iPhone 13 landscape'].viewport,
         deviceScaleFactor: 3,
         isMobile: true,
         hasTouch: true,
-        userAgent: devices['iPhone 13'].userAgent,
+        userAgent: devices['iPhone 13 landscape'].userAgent,
       },
     },
     {
