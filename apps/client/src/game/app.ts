@@ -353,8 +353,12 @@ export class App {
       const f = findFocus(s, actor, eye, world.viewDir());
       this.hud?.setFocus(f?.target ?? null);
     } else this.hud?.setFocus(null);
-    world.update(s, host.playerId, t, dt, host.mode === 'remote');
-    world.render();
+    // 経営メニューとレイアウト編集は画面全体を覆うので、その間は 3D を描かない（電池と CPU の節約）
+    const covered = this.manage?.isOpen || !!this.editor;
+    if (!covered) {
+      world.update(s, host.playerId, t, dt, host.mode === 'remote');
+      world.render();
+    }
     this.hud?.update(dt);
     this.updateHint(s);
     this.checkPhaseScreens(false);

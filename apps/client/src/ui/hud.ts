@@ -65,6 +65,8 @@ export class Hud {
   private lastRailKey = '';
   private lastActionsKey = '';
   private lastDetailKey = '';
+  /** 詳細パネルを押している最中は中身を差し替えない（タップが外れるため） */
+  private detailPressed = false;
   private lastNoticeId = '';
   private lastCtaKey = '';
   private seenNotices = new Set<string>();
@@ -100,6 +102,11 @@ export class Hud {
     for (const el of [this.top, this.rail, this.detail, this.actions, this.cta, this.notices]) {
       el.addEventListener('pointerdown', (e) => e.stopPropagation());
     }
+    this.detail.addEventListener('pointerdown', () => (this.detailPressed = true));
+    const release = () => (this.detailPressed = false);
+    this.detail.addEventListener('pointerup', release);
+    this.detail.addEventListener('pointercancel', release);
+    this.detail.addEventListener('pointerleave', release);
     root.appendChild(this.el);
   }
 
@@ -135,39 +142,73 @@ export class Hud {
     return this.host.state.players.find((p) => p.id === this.host.playerId);
   }
 
-  private updateTop(s: GameState): void {
-    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}`;
-    if (key === this.lastTopKey) return;
-    this.lastTopKey = key;
-    const speedBtn =
-      this.host.mode === 'local'
-        ? h(
-            'button',
-            {
-              class: 'chip',
-              title: 'ゲーム速度',
-              onclick: () => {
-                this.host.speed = this.host.speed >= 3 ? 1 : this.host.speed + 1;
-                this.lastTopKey = '';
+  /** 上部の表示は一度だけ作り、文字だけ更新する（押している最中のボタンを差し替えない） */
+  private topParts: {
+    day: HTMLElement;
+    clock: HTMLElement;
+    money: HTMLElement;
+    rep: HTMLElement;
+    queue: HTMLElement;
+    speed: HTMLElement;
+  } | null = null;
+
+  private buildTop(): NonNullable<Hud['topParts']> {
+    const parts = {
+      day: h('div', { class: 'day' }),
+      clock: h('div', { class: 'clock' }),
+      money: h('div', { class: 'money' }),
+      rep: h('div', { class: 'rep' }),
+      queue: h('div', { class: 'queue', title: '行列（店外 / 店内）' }),
+      speed:
+        this.host.mode === 'local'
+          ? h(
+              'button',
+              {
+                class: 'chip',
+                title: 'ゲーム速度',
+                onclick: () => {
+                  this.host.speed = this.host.speed >= 3 ? 1 : this.host.speed + 1;
+                  this.lastTopKey = '';
+                },
               },
-            },
-            `×${this.host.speed}`,
-          )
-        : h('span', { class: `chip conn ${this.host.conn}` }, this.host.conn === 'online' ? `オンライン ${this.host.peers.filter((p) => p.connected).length}人` : connLabel(this.host.conn));
+            )
+          : h('span', { class: 'chip conn' }),
+    };
     replace(
       this.top,
-      h('div', { class: 'top-left' }, h('div', { class: 'day' }, `${s.day}日目`), h('div', { class: `clock ${s.phase}` }, clockText(s))),
+      h('div', { class: 'top-left' }, parts.day, parts.clock),
       h(
         'div',
         { class: 'top-right' },
-        h('div', { class: `money ${s.money < 0 ? 'neg' : ''}` }, yenStr(s.money)),
-        h('div', { class: 'rep', title: `評判 ${s.reputation.toFixed(2)}` }, stars(s.reputation)),
-        h('div', { class: 'queue', title: '行列（店外 / 店内）' }, `🚶${s.queue.length}/${s.insideQueue.length}`),
-        speedBtn,
+        parts.money,
+        parts.rep,
+        parts.queue,
+        parts.speed,
         h('button', { class: 'chip', onclick: () => this.cb.onHelp(), title: '操作説明' }, '?'),
         h('button', { class: 'chip menu', onclick: () => this.cb.onMenu(), title: '経営メニュー (Tab)' }, '☰ 経営'),
       ),
     );
+    return parts;
+  }
+
+  private updateTop(s: GameState): void {
+    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}`;
+    if (key === this.lastTopKey) return;
+    this.lastTopKey = key;
+    const t = (this.topParts ??= this.buildTop());
+    t.day.textContent = `${s.day}日目`;
+    t.clock.className = `clock ${s.phase}`;
+    t.clock.textContent = clockText(s);
+    t.money.className = `money ${s.money < 0 ? 'neg' : ''}`;
+    t.money.textContent = yenStr(s.money);
+    t.rep.title = `評判 ${s.reputation.toFixed(2)}`;
+    t.rep.textContent = stars(s.reputation);
+    t.queue.textContent = `🚶${s.queue.length}/${s.insideQueue.length}`;
+    if (this.host.mode === 'local') t.speed.textContent = `×${this.host.speed}`;
+    else {
+      t.speed.className = `chip conn ${this.host.conn}`;
+      t.speed.textContent = this.host.conn === 'online' ? `オンライン ${this.host.peers.filter((p) => p.connected).length}人` : connLabel(this.host.conn);
+    }
   }
 
   private updateRail(s: GameState): void {
@@ -456,7 +497,7 @@ export class Hud {
         t.seat.dirt > 0.05 ? h('div', { class: 'slot warn' }, `カウンターの汚れ ${Math.round(t.seat.dirt * 100)}%`) : null,
       );
     }
-    if (key === this.lastDetailKey) return;
+    if (key === this.lastDetailKey || this.detailPressed) return;
     this.lastDetailKey = key;
     if (content) {
       replace(this.detail, content);

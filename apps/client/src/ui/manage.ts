@@ -66,13 +66,25 @@ export class ManageMenu {
   private tab: ManageTab = 'dash';
   private timer: number | null = null;
   private expandedEmp: string | null = null;
+  private tabButtons = new Map<ManageTab, HTMLElement>();
+  /** 押している最中は自動更新しない（押した要素が差し替わるとタップが外れる） */
+  private pressing = false;
 
   constructor(
     private root: HTMLElement,
     private host: GameHost,
     private cb: ManageCallbacks,
   ) {
-    this.tabsEl = h('div', { class: 'tabs' });
+    // タブは一度だけ作り、選択中の表示だけ切り替える
+    this.tabsEl = h(
+      'div',
+      { class: 'tabs' },
+      TABS.map(([id, label]) => {
+        const b = h('button', { class: 'tab', onclick: () => { this.tab = id; this.render(); this.body.scrollTop = 0; } }, label);
+        this.tabButtons.set(id, b);
+        return b;
+      }),
+    );
     this.body = h('div', { class: 'manage-body' });
     this.el = h(
       'div',
@@ -86,18 +98,30 @@ export class ManageMenu {
       this.tabsEl,
       this.body,
     );
-    this.el.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.el.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this.pressing = true;
+    });
   }
+
+  private release = (): void => {
+    this.pressing = false;
+  };
 
   open(tab: ManageTab = this.tab): void {
     this.tab = tab;
     this.root.appendChild(this.el);
     this.render();
     if (this.timer === null) this.timer = window.setInterval(() => this.render(true), 1000);
+    window.addEventListener('pointerup', this.release);
+    window.addEventListener('pointercancel', this.release);
   }
 
   close(): void {
     this.el.remove();
+    this.pressing = false;
+    window.removeEventListener('pointerup', this.release);
+    window.removeEventListener('pointercancel', this.release);
     if (this.timer !== null) window.clearInterval(this.timer);
     this.timer = null;
   }
@@ -118,13 +142,9 @@ export class ManageMenu {
     // 入力中は再描画しない
     if (live && (this.tab !== 'dash' && this.tab !== 'staff')) return;
     if (live && this.el.contains(document.activeElement) && document.activeElement?.tagName === 'INPUT') return;
+    if (live && this.pressing) return;
     const scroll = this.body.scrollTop;
-    replace(
-      this.tabsEl,
-      TABS.map(([id, label]) =>
-        h('button', { class: `tab ${id === this.tab ? 'on' : ''}`, onclick: () => { this.tab = id; this.render(); this.body.scrollTop = 0; } }, label),
-      ),
-    );
+    for (const [id, b] of this.tabButtons) b.classList.toggle('on', id === this.tab);
     const s = this.host.state;
     const content =
       this.tab === 'dash' ? this.dash(s)
