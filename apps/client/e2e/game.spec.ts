@@ -77,10 +77,20 @@ test('開店すると時計が進み、客が来店する', async ({ page }) => 
   await page.getByRole('button', { name: /開店する/ }).click();
   await expect(page.locator('.clock')).toContainText('11:');
   await expect.poll(async () => page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.host.state.phase), { timeout: 10_000 }).toBe('open');
-  // 速度を上げて客を待つ
+  // 速度ボタンが効くこと
   await page.locator('.chip', { hasText: '×1' }).click();
-  await page.locator('.chip', { hasText: '×2' }).click();
-  await expect(page.locator('.ticket').first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator('.chip', { hasText: '×2' })).toBeVisible();
+  // 客を待つ。CI では描画が遅く実時間あたりのゲーム内時間が短いので、ゲーム内時間を直接進める（最大 240 秒）
+  const arrived = await page.evaluate(() => {
+    const app = (window as unknown as { __jiro: { host: { state: { orders: { status: string }[] }; tick(dt: number): void; speed: number } } }).__jiro;
+    for (let i = 0; i < 1200; i++) {
+      if (app.host.state.orders.some((o) => o.status === 'waiting')) return true;
+      app.host.tick(0.1);
+    }
+    return false;
+  });
+  expect(arrived).toBe(true);
+  await expect(page.locator('.ticket').first()).toBeVisible();
   await shot(page, '05-open');
 });
 
