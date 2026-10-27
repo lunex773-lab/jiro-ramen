@@ -2,8 +2,10 @@ name: GitHub Pages
 
 # クライアント（ブラウザ版）を GitHub Pages に公開する。
 # 事前に リポジトリの Settings → Pages → Build and deployment → Source を「GitHub Actions」にしてください。
-# 開発中は手動実行のみ（クライアントとサーバーのビルドが通るようになったら push で自動実行にする）
+# Pages が無効のあいだはビルドだけ行い、公開はスキップする（実行結果に案内を表示）
 on:
+  push:
+    branches: [SecondAKIRA]
   workflow_dispatch:
 
 permissions:
@@ -18,7 +20,20 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.pages.outputs.enabled }}
     steps:
+      - name: GitHub Pages が有効か確認
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" --silent 2>/dev/null; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=GitHub Pages が無効です::Settings → Pages → Build and deployment → Source を「GitHub Actions」にすると、次の push から公開されます"
+          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -32,11 +47,13 @@ jobs:
           VITE_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
         run: npm run build
       - uses: actions/upload-pages-artifact@v3
+        if: steps.pages.outputs.enabled == 'true'
         with:
           path: apps/client/dist
 
   deploy:
     needs: build
+    if: needs.build.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

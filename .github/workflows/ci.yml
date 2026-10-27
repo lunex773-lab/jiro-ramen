@@ -1,7 +1,9 @@
 name: CI
 
-# 開発中は手動実行のみ（クライアントとサーバーのビルドが通るようになったら push で自動実行にする）
 on:
+  push:
+    branches: [SecondAKIRA, main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -20,3 +22,26 @@ jobs:
         run: npm test
       - name: クライアントのビルド
         run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Playwright 用ブラウザ
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/client
+      - name: E2E（iPhone 相当の画面＋タッチ / PC）
+        run: npx playwright test
+        working-directory: apps/client
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: apps/client/test-results
+          retention-days: 7
