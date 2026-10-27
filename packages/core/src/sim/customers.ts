@@ -589,6 +589,27 @@ function leaveQueue(s: GameState, c: Customer, ctx: SimCtx, closing: boolean): v
   startLeaving(s, c, ctx, 'abandoned');
 }
 
+/**
+ * 返金を受けて、食べずに帰る客。提供した丼は手を付けないまま席に残るので、ほかの丼と同じく下げて洗う。
+ * 席を空け、来店の評価（口コミ・常連）も通常の退店と同じく行う。
+ */
+export function leaveWithoutEating(s: GameState, c: Customer, ctx: SimCtx): void {
+  const seat = s.seats.find((x) => x.id === c.seatId);
+  const b = seat ? s.bowls.find((x) => x.id === seat.bowlId) : undefined;
+  if (b) {
+    b.state = 'dirty';
+    b.contents = null;
+  }
+  finalizeVisit(s, c, ctx, false);
+  startLeaving(s, c, ctx, 'left');
+}
+
+/** 店内の待ち列から帰る客（忘れ物を受け取った人など）。待ち列の場所を空ける */
+export function leaveFromInsideQueue(s: GameState, c: Customer, ctx: SimCtx): void {
+  removeFromInsideQueue(s, c.id);
+  startLeaving(s, c, ctx, 'left');
+}
+
 function startLeaving(s: GameState, c: Customer, ctx: SimCtx, endState: 'left' | 'abandoned'): void {
   const seat = s.seats.find((x) => x.id === c.seatId);
   if (seat && seat.customerId === c.id) seat.customerId = null;

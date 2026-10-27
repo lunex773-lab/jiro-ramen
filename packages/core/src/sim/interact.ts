@@ -38,7 +38,7 @@ import {
 } from './equipment';
 import { addLot, addTrash, consume, discardWaste, stockOf } from './inventory';
 import { emit, notify, type SimCtx } from './notices';
-import { onServed } from './customers';
+import { leaveFromInsideQueue, leaveWithoutEating, onServed } from './customers';
 
 export type Actor = Player | Employee;
 
@@ -750,9 +750,7 @@ const VERBS: VerbDef[] = [
       owner.sat.service = 1;
       owner.say = 'ありがとうございます！助かりました';
       owner.sayUntil = s.t + 3;
-      owner.state = 'leaving';
-      owner.stateTime = 0;
-      owner.path = [];
+      leaveFromInsideQueue(s, owner, ctx);
       emit(ctx, { type: 'lostReturned', text: `忘れ物（${item.kind}）を返した` });
       notify(s, ctx, `lost:${item.id}`, 'good', `忘れ物（${item.kind}）を持ち主に返しました。評判が上がりました`);
       s.todayReviews.push({
@@ -1149,9 +1147,7 @@ function handleComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Actor, mode: 
     cust.sat.value = Math.max(cust.sat.value, 0.8);
     cust.say = 'まあ、返金してくれるなら…';
     cust.sayUntil = s.t + 3;
-    cust.state = 'leaving';
-    cust.stateTime = 0;
-    cust.path = [];
+    leaveWithoutEating(s, cust, ctx);
     emit(ctx, { type: 'complaintRefund', targetId: seat.id, value: o.price });
   }
 }

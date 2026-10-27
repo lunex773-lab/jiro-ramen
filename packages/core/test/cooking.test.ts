@@ -8,26 +8,8 @@ import {
   noodleQualityFor,
   stockOf,
   type GameState,
-  type Order,
 } from '../src';
-import { eqByType, newGame, run, standAt } from './helpers';
-
-/** テスト用に客と注文を直接作る（席に座った状態） */
-function seatCustomer(s: GameState, seatIndex: number, menuId = 'small', call = { ...DEFAULT_CALL, ninniku: 1, abura: 1 }): Order {
-  const seat = s.seats[seatIndex]!;
-  const cid = `ctest${seatIndex}`;
-  s.customers.push({
-    id: cid, traits: { patience: 1, priceSensitivity: 0.3, tasteCritic: 0.5, serviceSensitivity: 0.5, eatSpeed: 0.6, orderComplexity: 0.5, cleanlinessDemand: 0.5, reviewPropensity: 0, loyaltyPropensity: 0, complaintPropensity: 0, manners: 1, appetite: 0.5 },
-    regularId: null, appearance: 1, state: 'seated', pos: { x: 2, z: 1.55 }, path: [], stateTime: 0, arrivedAt: 0, queueWait: 0, seatWait: 0,
-    patience: 999, seatId: seat.id, orderId: null, menuId, call, stockout: false, eatLeft: 0,
-    sat: { taste: 0.5, speed: 1, service: 0.6, cleanliness: 1, accuracy: 1, stock: 1, value: 0.7, comfort: 0.7 }, say: '', sayUntil: 0, complaintReason: null, slot: 0, forLostItem: null,
-  });
-  seat.customerId = cid;
-  const o: Order = { id: `otest${seatIndex}`, customerId: cid, seatId: seat.id, menuId, call, callRevealed: false, callAskedAt: null, createdAt: s.t, status: 'waiting', servedAt: null, price: s.prices[menuId]!, quality: null, mistakes: [], remakes: 0, cookId: null };
-  s.orders.push(o);
-  s.customers[s.customers.length - 1]!.orderId = o.id;
-  return o;
-}
+import { eqByType, newGame, run, seatCustomer, standAt } from './helpers';
 
 function act(s: GameState, ctx: ReturnType<typeof newGame>['ctx'], targetId: string, verb: string, args?: Record<string, number>) {
   const r = applyAction(s, 'p1', { type: 'interact', targetId, verb, args }, ctx);
