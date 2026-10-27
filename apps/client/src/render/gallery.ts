@@ -31,6 +31,8 @@ renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 
 const scene = new THREE.Scene();
+// デバッグ用（ブラウザのコンソールから参照）
+(window as unknown as { __scene: THREE.Scene }).__scene = scene;
 const camera = new THREE.PerspectiveCamera(45, 1, 0.02, 200);
 
 // ───────────────────────── UI ─────────────────────────
@@ -67,6 +69,7 @@ function addLabel(text: string, pos: THREE.Vector3): void {
 // ───────────────────────── カメラ操作（自作の簡易オービット） ─────────────────────────
 
 const orbit = { target: new THREE.Vector3(), dist: 3, yaw: 0, pitch: 0.5, minDist: 0.2, maxDist: 60 };
+(window as unknown as { __orbit: typeof orbit }).__orbit = orbit;
 function applyOrbit(): void {
   const cp = Math.cos(orbit.pitch);
   camera.position.set(
@@ -244,7 +247,7 @@ function buildCloseup(): void {
 
 function buildPeople(): void {
   scene.background = new THREE.Color('#8fa4b4');
-  addLights({ sunPos: new THREE.Vector3(-3, 6, -4), extent: 5 });
+  addLights({ sunPos: new THREE.Vector3(2, 6, 5), extent: 5 });
   floorPlane(30, '#7c7468');
   const poses: Models.CharacterPose[] = ['stand', 'walk', 'sit', 'eat', 'work', 'carry', 'stand', 'walk'];
   const held: (Models.HeldKind | null)[] = [null, null, null, null, null, 'clean', 'mop', 'trash'];
@@ -264,14 +267,14 @@ function buildPeople(): void {
     addLabel(`客 seed${i + 1} ${pose}`, new THREE.Vector3(-(i - 3.5) * 0.85, 2.05, 0));
   }
   const emp = Models.createCharacter({ kind: 'employee', seed: 3 });
-  emp.group.position.set(1.7, 0, 1.6);
+  emp.group.position.set(1.7, 0, -1.6);
   emp.setHeld('dirty');
   scene.add(emp.group);
   row.push({ m: emp, pose: 'carry' });
-  addLabel('従業員', new THREE.Vector3(1.7, 2.05, 1.6));
+  addLabel('従業員', new THREE.Vector3(1.7, 2.05, -1.6));
   PLAYER_COLORS.forEach((col, i) => {
     const p = Models.createCharacter({ kind: 'player', seed: 10 + i, color: col });
-    p.group.position.set(0.85 - i * 0.85, 0, 1.6);
+    p.group.position.set(0.85 - i * 0.85, 0, -1.6);
     p.setLabel(['店主', 'たろう', 'はなこ', 'ジロ吉'][i] ?? 'P');
     if (i === 1) p.setHeld('bowl');
     scene.add(p.group);
@@ -280,10 +283,10 @@ function buildPeople(): void {
   tickers.push((t, dt) => {
     for (const r of row) r.m.update(r.pose, t, dt);
   });
-  orbit.target.set(0, 0.9, 0.6);
-  orbit.dist = 7.2;
+  orbit.target.set(0, 0.9, -0.6);
+  orbit.dist = 6.4;
   orbit.pitch = 0.22;
-  orbit.yaw = 0;
+  orbit.yaw = Math.PI;
 }
 
 function fakeState(): GameState {
@@ -362,6 +365,13 @@ function buildEquipment(): void {
   orbit.dist = 15;
   orbit.pitch = 0.62;
   orbit.yaw = 0;
+  const fm = focus ? models.find((x) => x.e.type === focus) : undefined;
+  if (fm) {
+    orbit.target.copy(fm.m.group.position).add(new THREE.Vector3(0, 0.7, 0));
+    orbit.dist = 2.8;
+    orbit.pitch = 0.5;
+    orbit.yaw = 0.35;
+  }
 }
 
 function buildShop(): void {
@@ -372,6 +382,9 @@ function buildShop(): void {
   addLights({ sunPos: new THREE.Vector3(-4, 14, -10), target: new THREE.Vector3(4, 0, 3), extent: 12, hemi: 0.75, sun: 1.3 });
   const shell = Models.createShopShell(st, s.shopName);
   scene.add(shell.group);
+  // 俯瞰で中が見えるように天井を隠す（?ceiling で表示）
+  const ceil = shell.group.getObjectByName('ceiling');
+  if (ceil && !location.search.includes('ceiling')) ceil.visible = false;
   for (const p of shell.lightSpots.slice(0, 4)) {
     const l = new THREE.PointLight('#ffe2b8', 6, 9, 1.6);
     l.position.copy(p);
@@ -411,6 +424,15 @@ function buildShop(): void {
     b.group.position.set(cp.x, Models.COUNTER_TOP_Y, cp.z - 0.06);
     scene.add(b.group);
   });
+  // 席3（seat2）の前に一杯（客目線の確認用）
+  {
+    const cp = seatCounterPoint(s, s.seats[2]!);
+    const b = Models.createBowl();
+    b.setDetail('high');
+    b.setContents(contents({ yasai: 2, ninniku: 1, abura: 1, ichimi: 1, buta: 3 }));
+    b.group.position.set(cp.x, Models.COUNTER_TOP_Y, cp.z - 0.06);
+    scene.add(b.group);
+  }
   // 上げ台に返された丼
   {
     const seat = s.seats[6]!;
@@ -454,15 +476,32 @@ function buildShop(): void {
     emp.update('work', t, dt);
     me.update('stand', t, dt);
   });
-  orbit.target.set((st.w * CELL) / 2, 0.8, (st.d * CELL) / 2 - 0.5);
-  orbit.dist = 11;
-  orbit.pitch = 0.72;
-  orbit.yaw = 0.35;
+  // 視点: 既定=厨房側の上から俯瞰, street=通りから, seat=席に座った客の目線, kitchen=厨房で立った店主の目線
+  const lookFrom = (cam: THREE.Vector3, target: THREE.Vector3) => {
+    const d = cam.clone().sub(target);
+    orbit.target.copy(target);
+    orbit.dist = d.length();
+    orbit.pitch = Math.asin(d.y / orbit.dist);
+    orbit.yaw = Math.atan2(d.x, -d.z);
+  };
+  const seat2 = s.seats[2]!;
+  const sp2 = seatPos(s, seat2);
+  if (focus === 'street') lookFrom(new THREE.Vector3(st.w * CELL * 0.75, 3.2, -6.5), new THREE.Vector3((st.w * CELL) / 2, 1.6, 0));
+  else if (focus === 'seat') lookFrom(new THREE.Vector3(sp2.x, 1.27, sp2.z + 0.05), new THREE.Vector3(sp2.x + 0.05, 1.02, sp2.z + 0.75));
+  else if (focus === 'kitchen') lookFrom(new THREE.Vector3(3.2, 1.58, 3.05), new THREE.Vector3(3.6, 1.15, 4.0));
+  else lookFrom(new THREE.Vector3((st.w * CELL) / 2 + 1.0, 7.2, st.d * CELL + 2.6), new THREE.Vector3((st.w * CELL) / 2, 0.6, 2.6));
+  if (focus === 'seat' || focus === 'kitchen') {
+    camera.near = 0.05;
+    if (ceil) ceil.visible = true;
+    for (const c of sitters) if (c.group.position.distanceTo(new THREE.Vector3(sp2.x, 0, sp2.z)) < 0.1) c.group.visible = false;
+  }
 }
 
 // ───────────────────────── 起動 ─────────────────────────
 
-const section = (location.hash.replace('#', '') || 'bowls') as Section;
+// #equipment:noodle_boiler のように「:種類」を付けるとその設備に寄る
+const [sectionRaw, focus] = location.hash.replace('#', '').split(':');
+const section = (sectionRaw || 'bowls') as Section;
 window.addEventListener('hashchange', () => location.reload());
 
 switch (section) {
@@ -501,7 +540,7 @@ let t = 0;
 const tmpV = new THREE.Vector3();
 function frame(now: number): void {
   timer.update(now);
-  const dt = Math.min(0.05, timer.getDelta());
+  const dt = Math.max(0, Math.min(0.05, timer.getDelta()));
   t += dt;
   for (const f of tickers) f(t, dt);
   Models.tickModels(t);

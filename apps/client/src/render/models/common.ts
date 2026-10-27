@@ -94,10 +94,11 @@ export function xformMatrix(xf: XForm, out = _m4): THREE.Matrix4 {
  * 結合できるように属性を揃える（position / normal / uv だけ残し、index を必ず持たせる）。
  * extraColor を渡すと頂点カラー属性を付ける。
  */
-export function normalizeGeometry(g: THREE.BufferGeometry, color?: THREE.Color): THREE.BufferGeometry {
+export function normalizeGeometry(g: THREE.BufferGeometry, color?: THREE.Color, keepColor = false): THREE.BufferGeometry {
   for (const name of Object.keys(g.attributes)) {
-    if (name !== 'position' && name !== 'normal' && name !== 'uv') g.deleteAttribute(name);
+    if (name !== 'position' && name !== 'normal' && name !== 'uv' && !(keepColor && name === 'color')) g.deleteAttribute(name);
   }
+  if (keepColor && !color && !g.attributes.color) color = new THREE.Color(1, 1, 1);
   const n = g.attributes.position!.count;
   if (!g.attributes.normal) g.computeVertexNormals();
   if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2));
@@ -154,6 +155,12 @@ export interface AddOpts extends XForm {
   uv?: number;
 }
 
+/** 頂点カラー用マテリアルの取得関数（materials.ts から登録。循環参照を避けるため） */
+let vcHook: ((roughness: number) => THREE.Material) | null = null;
+export function setVcMaterialHook(f: (roughness: number) => THREE.Material): void {
+  vcHook = f;
+}
+
 /**
  * マテリアルごとに部品をまとめて1メッシュに結合するビルダー。
  * 設備や店舗のような静的モデルの draw call を「使うマテリアル数」まで減らす。
@@ -162,7 +169,25 @@ export class GeoBuilder {
   private parts = new Map<THREE.Material, THREE.BufferGeometry[]>();
 
   add(mat: THREE.Material, geo: THREE.BufferGeometry, o?: AddOpts): this {
-    const g = normalizeGeometry(geo.index ? geo.clone() : geo.clone());
+    // 単色プラスチックは頂点カラーの共有マテリアルへまとめる
+    const vc = mat.userData.vc as { color: string; roughness: number } | undefined;
+    if (vc && vcHook) {
+      const g = normalizeGeometry(geo.clone(), new THREE.Color(vc.color));
+      return this.push(vcHook(vc.roughness), g, o);
+    }
+    // 同じ系統（例: ステンレスの明暗）は頂点カラーの濃淡で1つのマテリアルにまとめる
+    const fam = mat.userData.family as { base: THREE.Material; tint: string } | undefined;
+    if (fam) {
+      const g = normalizeGeometry(geo.clone(), new THREE.Color(fam.tint));
+      return this.push(fam.base, g, o);
+    }
+    // 頂点カラーを使うマテリアルへ直接追加する場合は色を保つ（無ければ白）
+    const usesVc = (mat as THREE.MeshStandardMaterial).vertexColors === true;
+    const g = normalizeGeometry(geo.clone(), undefined, usesVc);
+    return this.push(mat, g, o);
+  }
+
+  private push(mat: THREE.Material, g: THREE.BufferGeometry, o?: AddOpts): this {
     if (o) {
       g.applyMatrix4(xformMatrix(o));
       if (o.uv) boxProjectUV(g, o.uv);
