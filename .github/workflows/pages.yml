@@ -28,11 +28,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh api "repos/${{ github.repository }}/pages" --silent 2>/dev/null; then
+          # 公開元が「GitHub Actions」（build_type=workflow）のときだけ公開する
+          build_type=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type 2>/dev/null || true)
+          if [ "$build_type" = "workflow" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=GitHub Pages が無効です::Settings → Pages → Build and deployment → Source を「GitHub Actions」にすると、次の push から公開されます"
+            echo "::notice title=GitHub Pages の公開元が GitHub Actions ではありません::Settings → Pages → Build and deployment → Source を「GitHub Actions」にすると、次の push から公開されます"
           fi
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
