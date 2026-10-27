@@ -1,4 +1,4 @@
-// 次郎系ラーメン経営ゲームのバックエンド（Cloudflare Workers + Durable Objects + D1 + R2）。
+// 次郎系ラーメン経営ゲームのバックエンド（Cloudflare Workers + Durable Objects + D1。R2 は使わない: docs/adr/ADR-002-no-r2.md）。
 // 設計書 2.2 / 17 / 18 に対応。デプロイ手順は docs/CLOUDFLARE_SETUP.md を参照。
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
@@ -25,15 +25,12 @@
     {
       "binding": "DB",
       "database_name": "jiro-db",
-      // ★ 要置き換え: `npx wrangler d1 create jiro-db` を実行して表示された database_id を貼り付けること。
-      //   ローカル開発・テスト（--local / vitest）はこのままの値でも動く。
+      // ★ 要置き換え: ダッシュボードの D1 で jiro-db を作り、表示される Database ID（8-4-4-4-12 の形式）を貼り付けること。
+      //   テーブルは Worker が自分で作る（src/schema.ts）。ローカル開発・テスト（--local / vitest）はこのままの値でも動く。
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
   ],
-
-  // セーブのスナップショット（設計書 2.2: 大きなデータは R2、メタデータは D1）
-  "r2_buckets": [{ "binding": "SAVES", "bucket_name": "jiro-saves" }],
 
   "vars": {
     "GAME_VERSION": "0.9.0",

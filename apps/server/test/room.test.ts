@@ -371,7 +371,7 @@ describe('切断と再接続', () => {
     expect(full.state.players.filter((p) => p.id === g.id)).toHaveLength(1);
   });
 
-  it('ホストが退出（leave）するとルームを終了し、最終状態を R2 に残す', async () => {
+  it('ホストが退出（leave）するとルームを終了し、最終状態を D1 に残す', async () => {
     const { room, host } = await startRoom();
     const g = await addGuest(room, 'ゲスト');
     const res = await fetchLeave(host, room.roomId);
@@ -379,13 +379,18 @@ describe('切断と再接続', () => {
     const err = await g.c.next('error', (m) => m.code === 'room_closed');
     expect(err.message).toMatch(/終了/);
     expect((await g.c.waitClose()).code).toBe(4004);
-    const list = await env.SAVES.list({ prefix: `rooms/${room.roomId}/` });
-    expect(list.objects.length).toBe(1);
+    expect(await snapshotKinds(room.roomId)).toEqual(['final']);
     // 終了したルームには接続できない
     const c = await open(room.roomId, room.joinToken);
     expect((await c.next('error')).code).toBe('room_closed');
   });
 });
+
+/** ルームの保存の控え（D1 の room_snapshots）の種類 */
+async function snapshotKinds(roomId: string): Promise<string[]> {
+  const r = await env.DB.prepare('SELECT kind FROM room_snapshots WHERE room_id = ? ORDER BY kind, revision').bind(roomId).all<{ kind: string }>();
+  return r.results.map((x) => x.kind);
+}
 
 async function fetchLeave(p: TestPlayer, roomId: string): Promise<{ ok: boolean; ended: boolean }> {
   const { callJson } = await import('./helpers');
@@ -426,7 +431,7 @@ describe('レイアウト編集の排他', () => {
 });
 
 describe('保存', () => {
-  it('ホストの保存要求で検証済みの状態を返し、R2 に控えを置く。同じ rid の再送では保存し直さない', async () => {
+  it('ホストの保存要求で検証済みの状態を返し、D1 に控えを置く。同じ rid の再送では保存し直さない', async () => {
     const { room, hc } = await startRoom();
     const g = await addGuest(room, 'ゲスト');
     g.c.send({ t: 'save', rid: 'guest-save' });
@@ -444,8 +449,7 @@ describe('保存', () => {
     const again = await hc.next('saved');
     expect(again.ok).toBe(true);
     expect(again.checksum).toBe(saved.checksum);
-    const list = await env.SAVES.list({ prefix: `rooms/${room.roomId}/` });
-    expect(list.objects).toHaveLength(1);
+    expect(await snapshotKinds(room.roomId)).toEqual(['save']);
     const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE room_id = ? AND kind = 'room_save'").bind(room.roomId).first<{ n: number }>();
     expect(row?.n).toBe(1);
   });
@@ -560,7 +564,6 @@ describe('永続化と復旧', () => {
     const row = await env.DB.prepare('SELECT status FROM rooms WHERE id = ?').bind(room.roomId).first<{ status: string }>();
     expect(row?.status).toBe('ended');
     expect(await inRoom(room.roomId, (r) => r.meta!.ended)).toBe(true);
-    const list = await env.SAVES.list({ prefix: `rooms/${room.roomId}/` });
-    expect(list.objects).toHaveLength(1);
+    expect(await snapshotKinds(room.roomId)).toEqual(['final']);
   });
 });

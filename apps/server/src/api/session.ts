@@ -7,6 +7,9 @@ import { HttpError, json, readJson } from '../http';
 import { IDENTITY_HEADERS } from '../room';
 import { isObj, isUuid, log, normalizeRoomCode, randomRoomCode } from '../util';
 
+/** ルームの保存の控えを残す日数 */
+const ROOM_SNAPSHOT_DAYS = 30;
+
 export const SESSION_BODY_LIMIT = 1024;
 
 function roomStub(env: Env, roomId: string) {
@@ -47,6 +50,14 @@ export async function createSession(req: Request, env: Env, ctx: ExecutionContex
   }
   const { token, exp } = await signJoinToken(env, { roomId, playerId: player.id, name: player.name, host: true });
   ctx.waitUntil(audit(env.DB, { kind: 'room_create', playerId: player.id, roomId }));
+  // 30日より古いルームの保存の控えを消す（D1 の容量を使い切らないように）
+  ctx.waitUntil(
+    env.DB.prepare('DELETE FROM room_snapshots WHERE created_at < ?')
+      .bind(now - ROOM_SNAPSHOT_DAYS * 86_400_000)
+      .run()
+      .then(() => undefined)
+      .catch((e: unknown) => log('warn', 'room_snapshot_cleanup_failed', { error: String(e) })),
+  );
   return json({ roomId, code, joinToken: token, expiresAt: exp * 1000, isHost: true });
 }
 

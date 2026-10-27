@@ -6,13 +6,13 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "deploy:migrate": "wrangler d1 migrations apply jiro-db --remote && wrangler deploy",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "db:migrate:local": "wrangler d1 migrations apply jiro-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply jiro-db --remote",
     "deploy:dry": "wrangler deploy --dry-run --outdir dist",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "schema:gen": "node scripts/gen-schema.mjs"
   },
   "dependencies": {
     "@jiro/core": "0.1.0"

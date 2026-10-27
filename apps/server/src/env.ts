@@ -5,10 +5,8 @@ import type { GameRoom } from './room';
 export interface Env {
   /** 共同経営ルーム（1ルーム = 1 Durable Object） */
   ROOMS: DurableObjectNamespace<GameRoom>;
-  /** プロフィール・セーブのメタデータ・ルーム記録・監査記録 */
+  /** プロフィール・セーブ（本体も）・ルーム記録と保存の控え・監査記録（R2 は使わない） */
   DB: D1Database;
-  /** セーブのスナップショット本体 */
-  SAVES: R2Bucket;
   GAME_VERSION: string;
   MIN_CLIENT_VERSION: string;
   /** CORS を許可するオリジン（カンマ区切り） */

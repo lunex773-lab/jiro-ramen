@@ -8,6 +8,7 @@ import { requirePlayer } from './auth';
 import type { Env } from './env';
 import { allowedOrigins, corsHeaders, errorResponse, HttpError, withCors } from './http';
 import { HTTP_LIMITS, type KeyedLimiter } from './ratelimit';
+import { ensureSchema } from './schema';
 import { log } from './util';
 
 export { GameRoom } from './room';
@@ -33,6 +34,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     limit(HTTP_LIMITS.api, ip);
     return gameVersion(env);
   }
+  // ここから先は D1 を使う。テーブルがまだ無ければ作る（インスタンスごとに最初の1回だけ確認する）
+  await ensureSchema(env.DB);
   if (path === '/api/v1/auth/anonymous' && m === 'POST') {
     limit(HTTP_LIMITS.auth, ip);
     return createAnonymous(req, env, ctx);

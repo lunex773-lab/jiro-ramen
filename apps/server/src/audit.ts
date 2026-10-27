@@ -1,6 +1,7 @@
 // 監査記録（D1 の audit_log）。不正操作・重要イベントを残す（設計書 2.2 / 18.3）。
 // 失敗してもゲームの処理は止めない。トークンなどの機密情報は detail に入れないこと。
 
+import { ensureSchema } from './schema';
 import { log } from './util';
 
 export type AuditKind =
@@ -37,6 +38,7 @@ export async function audit(db: D1Database, e: AuditEntry): Promise<void> {
     if (detail.length > 1000) detail = `${detail.slice(0, 1000)}…`;
   }
   try {
+    await ensureSchema(db);
     await db
       .prepare('INSERT INTO audit_log (ts, player_id, room_id, kind, detail) VALUES (?, ?, ?, ?, ?)')
       .bind(Date.now(), e.playerId ?? null, e.roomId ?? null, e.kind, detail)

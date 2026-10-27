@@ -18,9 +18,12 @@ async function upload(token: string, slot: number, save: unknown, baseRevision: 
   });
 }
 
-async function r2Keys(playerId: string, slot: number): Promise<string[]> {
-  const l = await env.SAVES.list({ prefix: `saves/${playerId}/${slot}/` });
-  return l.objects.map((o) => o.key).sort();
+/** D1 に残っているセーブ本体の世代番号 */
+async function bodyRevisions(playerId: string, slot: number): Promise<number[]> {
+  const r = await env.DB.prepare('SELECT revision FROM save_bodies WHERE player_id = ? AND slot = ? ORDER BY revision')
+    .bind(playerId, slot)
+    .all<{ revision: number }>();
+  return r.results.map((x) => x.revision);
 }
 
 describe('クラウドセーブ', () => {
@@ -81,7 +84,7 @@ describe('クラウドセーブ', () => {
     const again = await upload(p.token, 3, f, null);
     expect(again.status).toBe(200);
     expect(again.body.revision).toBe(1);
-    expect(await r2Keys(p.playerId, 3)).toHaveLength(1);
+    expect(await bodyRevisions(p.playerId, 3)).toEqual([1]);
   });
 
   it('チェックサムが合わない・形式が違うデータは拒否する', async () => {
@@ -107,7 +110,7 @@ describe('クラウドセーブ', () => {
     expect(r.status).toBe(413);
   });
 
-  it('R2 には直近3世代だけを残す', async () => {
+  it('セーブ本体は直近3世代だけを残す（D1）', async () => {
     const p = await newPlayer();
     let prev: SaveFile | null = null;
     let rev: number | null = null;
@@ -119,9 +122,9 @@ describe('クラウドセーブ', () => {
       prev = { ...f, revision: rev };
     }
     expect(rev).toBe(5);
-    expect(await r2Keys(p.playerId, 1)).toEqual([3, 4, 5].map((n) => `saves/${p.playerId}/1/${n}.json`));
-    const row = await env.DB.prepare('SELECT revision, r2_key FROM save_slots WHERE player_id = ? AND slot = 1').bind(p.playerId).first<{ revision: number; r2_key: string }>();
-    expect(row).toEqual({ revision: 5, r2_key: `saves/${p.playerId}/1/5.json` });
+    expect(await bodyRevisions(p.playerId, 1)).toEqual([3, 4, 5]);
+    const row = await env.DB.prepare('SELECT revision FROM save_slots WHERE player_id = ? AND slot = 1').bind(p.playerId).first<{ revision: number }>();
+    expect(row).toEqual({ revision: 5 });
   });
 
   it('スロットを削除できる（他のスロットは残る）', async () => {
@@ -130,7 +133,8 @@ describe('クラウドセーブ', () => {
     await upload(p.token, 2, saveFile(9), null);
     const del = await call('/api/v1/save/1', { token: p.token, method: 'DELETE' });
     expect(del.status).toBe(200);
-    expect(await r2Keys(p.playerId, 1)).toEqual([]);
+    expect(await bodyRevisions(p.playerId, 1)).toEqual([]);
+    expect(await bodyRevisions(p.playerId, 2)).toEqual([1]);
     expect((await call('/api/v1/save/1', { token: p.token })).status).toBe(404);
     expect((await call('/api/v1/save/2', { token: p.token })).status).toBe(200);
     expect((await call('/api/v1/save/1', { token: p.token, method: 'DELETE' })).status).toBe(404);

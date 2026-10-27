@@ -42,13 +42,18 @@ import {
   type ServerMsg,
   type SimCtx,
 } from '@jiro/core';
+import { MAX_STORED_BYTES } from './api/saves';
 import { audit, type AuditEntry } from './audit';
 import { decodeCheckpoint, encodeCheckpoint, RidCache, type CheckpointData } from './checkpoint';
 import type { Env } from './env';
 import { LAYOUT_ACTIONS, MAX_HOST_INIT_BYTES, MAX_MSG_BYTES, parseClientMsg } from './protocol';
 import { TokenBucket, WS_MSG_COST, WS_MSG_RATE } from './ratelimit';
 import { cleanName, isObj, log, safeJsonParse } from './util';
+import { ensureSchema } from './schema';
 import { isClientSupported } from './version';
+
+/** 保存の控えをルームごとに何世代残すか */
+const KEEP_ROOM_SAVES = 3;
 
 // ───────────────────────── 定数 ─────────────────────────
 
@@ -102,7 +107,7 @@ export interface RoomMeta {
   hostActorId: string | null;
   createdAt: number;
   ended: boolean;
-  /** ルームでの保存回数（R2 に置くスナップショットの revision） */
+  /** ルームでの保存回数（D1 の room_snapshots に置く控えの revision） */
   saveRevision: number;
   /** 最後に誰かが切断した時刻（無人ルームの期限切れ判定） */
   lastActivityAt: number;
@@ -680,7 +685,7 @@ export class GameRoom extends DurableObject<Env> {
     return this.meta.ended;
   }
 
-  /** ルームを終了する。最終状態を R2 に保存し、全員を切断する */
+  /** ルームを終了する。最終状態を D1 に控えとして残し、全員を切断する */
   async endRoom(reason: string): Promise<void> {
     const meta = this.meta;
     if (!meta || meta.ended) return;
@@ -696,7 +701,16 @@ export class GameRoom extends DurableObject<Env> {
       file.revision = meta.saveRevision + 1;
       file.createdAt = meta.createdAt;
       try {
-        await this.env.SAVES.put(`rooms/${meta.roomId}/final-${now}.json`, JSON.stringify(file), { httpMetadata: { contentType: 'application/json' } });
+        const body = JSON.stringify(file);
+        if (new TextEncoder().encode(body).length > MAX_STORED_BYTES) throw new Error('snapshot too large');
+        await ensureSchema(this.env.DB);
+        // 最終状態だけを残し、途中の保存の控えは消す
+        await this.env.DB.batch([
+          this.env.DB.prepare(
+            "INSERT INTO room_snapshots (room_id, kind, revision, body, created_at) VALUES (?, 'final', ?, ?, ?) ON CONFLICT(room_id, kind, revision) DO UPDATE SET body = excluded.body, created_at = excluded.created_at",
+          ).bind(meta.roomId, file.revision, body, now),
+          this.env.DB.prepare("DELETE FROM room_snapshots WHERE room_id = ? AND kind = 'save'").bind(meta.roomId),
+        ]);
       } catch (e) {
         log('error', 'room_archive_failed', { roomId: meta.roomId, error: String(e) });
       }
@@ -885,7 +899,7 @@ export class GameRoom extends DurableObject<Env> {
     }
   }
 
-  /** ホストの保存要求（設計書 16.4）。検証した確定状態を返し、R2 にも控えを置く */
+  /** ホストの保存要求（設計書 16.4）。検証した確定状態を返し、D1 にも控えを置く */
   private async onSave(ws: WebSocket, a: Attachment, m: Extract<ClientMsg, { t: 'save' }>): Promise<void> {
     const meta = this.meta!;
     if (!this.isHost(a.pid)) {
@@ -901,10 +915,15 @@ export class GameRoom extends DurableObject<Env> {
     const hit = cache.get(m.rid);
     if (hit) {
       // 同じ保存要求の再送: もう一度保存せず、前回の内容を返す
-      const key = (hit.data as { key?: string } | undefined)?.key;
-      const obj = hit.ok && key ? await this.env.SAVES.get(key) : null;
-      if (obj) {
-        const file = JSON.parse(await obj.text()) as { state: GameState; checksum: string };
+      const revision = (hit.data as { revision?: number } | undefined)?.revision;
+      const row =
+        hit.ok && typeof revision === 'number'
+          ? await this.env.DB.prepare("SELECT body FROM room_snapshots WHERE room_id = ? AND kind = 'save' AND revision = ?")
+              .bind(meta.roomId, revision)
+              .first<{ body: string }>()
+          : null;
+      if (row) {
+        const file = JSON.parse(row.body) as { state: GameState; checksum: string };
         this.send(ws, { t: 'saved', rid: m.rid, ok: true, state: file.state, checksum: file.checksum });
       } else {
         this.send(ws, { t: 'saved', rid: m.rid, ok: false, error: hit.reason ?? '前回の保存結果が見つかりません' });
@@ -929,18 +948,28 @@ export class GameRoom extends DurableObject<Env> {
     file.saveId = `room-${meta.roomId}`;
     file.revision = ++meta.saveRevision;
     file.createdAt = meta.createdAt;
-    const key = `rooms/${meta.roomId}/final-${now}.json`;
-    cache.set(m.rid, { ok: true, data: { key, checksum: file.checksum } });
+    cache.set(m.rid, { ok: true, data: { revision: file.revision, checksum: file.checksum } });
     this.checkpoint('save');
     const job = (async (): Promise<string> => {
       try {
-        await this.env.SAVES.put(key, JSON.stringify(file), { httpMetadata: { contentType: 'application/json' } });
+        const body = JSON.stringify(file);
+        if (new TextEncoder().encode(body).length > MAX_STORED_BYTES) throw new Error('snapshot too large');
+        await ensureSchema(this.env.DB);
+        await this.env.DB.batch([
+          this.env.DB.prepare("INSERT INTO room_snapshots (room_id, kind, revision, body, created_at) VALUES (?, 'save', ?, ?, ?)").bind(
+            meta.roomId,
+            file.revision,
+            body,
+            now,
+          ),
+          this.env.DB.prepare("DELETE FROM room_snapshots WHERE room_id = ? AND kind = 'save' AND revision <= ?").bind(meta.roomId, file.revision - KEEP_ROOM_SAVES),
+        ]);
       } catch (e) {
         log('error', 'room_save_failed', { roomId: meta.roomId, error: String(e) });
         cache.set(m.rid, fail('クラウドへの保存に失敗しました'));
         return JSON.stringify({ t: 'saved', rid: m.rid, ok: false, error: 'クラウドへの保存に失敗しました' } satisfies ServerMsg);
       }
-      this.auditLater({ kind: 'room_save', playerId: a.pid, detail: { key, revision: file.revision, day: file.meta.day } });
+      this.auditLater({ kind: 'room_save', playerId: a.pid, detail: { revision: file.revision, day: file.meta.day } });
       return JSON.stringify({ t: 'saved', rid: m.rid, ok: true, state: file.state, checksum: file.checksum } satisfies ServerMsg);
     })();
     this.saving.set(m.rid, job);
