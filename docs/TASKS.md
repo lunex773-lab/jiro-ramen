@@ -3,7 +3,7 @@
 設計書 23.1 の項目（タスクID・概要・優先度・依存・変更ファイル・実装内容・テスト・結果・未解決事項）で記録します。
 「結果」は自動テスト・ビルド・画面確認で確かめた内容だけを書いています。
 
-最終確認（2026-10-27）: 型チェック OK、単体テスト core 63 件・server 58 件・client 4 件 合格、E2E 10 件（iPhone 相当 5・PC 5）合格、本番ビルド OK、GitHub Pages への公開ジョブ成功。
+最終確認（2026-10-27）: 型チェック OK、単体テスト core 63 件・server 58 件・client 4 件 合格、E2E 10 件（iPhone 相当 5・PC 5）合格、本番ビルド OK。GitHub Actions の CI（同じ内容）合格、GitHub Pages への公開ジョブ成功。
 
 ## 完了したタスク
 
@@ -23,6 +23,7 @@
 | T11 | 3D モデル・音 | 中 | T01 | `apps/client/src/render/models/*`, `apps/client/src/audio/sfx.ts` | 丼（コールどおりの盛り）・人物・全設備・店舗・小物をコードで生成、湯気・湯面、効果音と読み上げ | 型チェック、`scripts/shots.mjs` のスクリーンショット確認 | 合格（ゲーム中の描画呼び出し 約50 回） | プロシージャルのため写実性に限界 |
 | T12 | HUD のスマホ縦画面対応 | 高 | T01 | `apps/client/src/ui/hud.ts`, `apps/client/src/styles.css` | 上部（状態・伝票・案内・通知）と右下（詳細・操作ボタン）を積み上げ式にして重なりを解消 | E2E のスクリーンショット確認（390×844） | 合格 | — |
 | T13 | CI・公開 | 高 | T12 | `.github/workflows/{ci,pages}.yml` | push で型チェック・テスト・ビルド・E2E、GitHub Pages へ自動公開 | GitHub Actions | 公開ジョブ成功 | — |
+| T14 | 遅い端末でタップが外れる不具合 | 高 | T13 | `apps/client/src/ui/{manage,hud}.ts`, `apps/client/src/game/app.ts` | 経営メニューのタブと HUD 上部を作り直さず文字だけ更新、押下中は再描画を保留、メニュー表示中は 3D 描画を停止 | CI の E2E で発見 → CPU を 6 倍遅くして再現 → 修正後に解消を確認 | CI（GitHub Actions）全ジョブ合格 | — |
 
 ## 残課題
 
