@@ -2,7 +2,8 @@
 // 設計書 2.2 / 17 / 18 に対応。デプロイ手順は docs/CLOUDFLARE_SETUP.md を参照。
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "jiro-ramen-server",
+  // Cloudflare ダッシュボードで GitHub と連携している Worker の名前に合わせる（Workers Builds はダッシュボード上の名前でデプロイする）
+  "name": "jiro-ramen",
   "main": "src/index.ts",
   // テストで使う vitest-pool-workers 同梱の workerd（1.20260815）でも動く日付にしている。
   // 日付を上げるときは apps/server と ルートの node_modules にある workerd の両方が対応しているか確認すること。

@@ -157,23 +157,23 @@ npm run deploy:server
 ```
 
 - 先に `npx wrangler deploy --dry-run --outdir dist`（ルートでは `npm run deploy:server:dry`）で、アップロードせずに設定とバンドルを確認できます。
-- `wrangler deploy` は、同じ名前（`wrangler.jsonc` の `name` = `jiro-ramen-server`）の Worker のコードを置き換えます。
+- `wrangler deploy` は、同じ名前（`wrangler.jsonc` の `name` = `jiro-ramen`。ダッシュボードで GitHub と連携している Worker と同じ名前）の Worker のコードを置き換えます。
   ダッシュボードの **Workers & Pages** で、同じ名前の Worker を別の用途に使っていないか確認してください。
 - ダッシュボードで追加した**平文の変数**は、デプロイのたびに `wrangler.jsonc` の `vars` で置き換えられます（Secret は残ります）。
 
 初回は `workers.dev` のサブドメイン登録を聞かれることがあります。完了すると次のような URL が表示されます。
 
 ```
-https://jiro-ramen-server.<あなたのサブドメイン>.workers.dev
+https://jiro-ramen.<あなたのサブドメイン>.workers.dev
 ```
 
 ### 2.9 動作確認
 
 ```bash
-curl https://jiro-ramen-server.<サブドメイン>.workers.dev/api/v1/game-version
+curl https://jiro-ramen.<サブドメイン>.workers.dev/api/v1/game-version
 # → {"gameVersion":"0.9.0","minClientVersion":"0.1.0","protocol":1}
 
-node scripts/smoke.mjs https://jiro-ramen-server.<サブドメイン>.workers.dev
+node scripts/smoke.mjs https://jiro-ramen.<サブドメイン>.workers.dev
 # → ホストとゲストで接続し、操作・保存・退出まで行って "smoke test passed" と表示されれば OK
 ```
 
@@ -217,7 +217,8 @@ Worker の **Settings → Build → Build configuration** を次のようにし�
 
 - 依存パッケージは、ルートの `package-lock.json` を使って入ります（npm は `apps/server` からでもワークスペースのルートを見つけてインストールします）。
 - **Worker の名前**: Workers Builds は、ダッシュボード上の Worker の名前でデプロイします（`wrangler.jsonc` の `name` より優先）。
-  URL は `https://<ダッシュボード上の Worker 名>.<サブドメイン>.workers.dev` になります。
+  このリポジトリと連携している Worker は `jiro-ramen` なので、`wrangler.jsonc` の `name` も `jiro-ramen` にそろえています
+  （パソコンから `wrangler tail` などを実行したときに同じ Worker を指すように）。URL は `https://jiro-ramen.<サブドメイン>.workers.dev` です。
 
 #### (5) 秘密鍵（SESSION_SECRET）を設定する
 
@@ -245,7 +246,7 @@ Root directory を `/` のままにする場合は、Deploy command を `npm run
 クライアントはサーバーの URL を `VITE_SERVER_URL`（ビルド時の環境変数）から読みます。**末尾のスラッシュなし**で指定します。
 
 ```
-VITE_SERVER_URL=https://jiro-ramen-server.<サブドメイン>.workers.dev
+VITE_SERVER_URL=https://jiro-ramen.<サブドメイン>.workers.dev
 ```
 
 - **GitHub Pages で公開する場合**: GitHub のリポジトリ → **Settings → Secrets and variables → Actions → Variables** に
@@ -277,7 +278,7 @@ npx wrangler tail                    # 本番のログをリアルタイムに�
 npx wrangler tail --format pretty
 ```
 
-- ダッシュボードの **Workers & Pages → jiro-ramen-server → Logs** でも見られます（`wrangler.jsonc` で `observability` を有効にしています）。
+- ダッシュボードの **Workers & Pages → jiro-ramen → Logs** でも見られます（`wrangler.jsonc` で `observability` を有効にしています）。
 - サーバーは JSON 形式でログを出します（例: `{"level":"error","msg":"checkpoint_corrupt",...}`）。トークンや Authorization ヘッダーは出力しません。
 - ただし WebSocket の接続 URL には参加トークン（`?token=`）が含まれるため、リクエストの URL を表示するログには写ります。
   有効期限10分・ルーム限定のトークンですが、ログを第三者に共有しないでください。

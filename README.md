@@ -59,7 +59,7 @@ cd apps/client && npx playwright test
 1. リポジトリの **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にする（設定済み）
 2. `SecondAKIRA` ブランチに push すると `.github/workflows/pages.yml` がビルドして公開する（公開元が GitHub Actions でない間は公開をスキップし、実行結果に案内を出す）
 3. 同時に `.github/workflows/ci.yml` が型チェック・テスト・ビルド・E2E を実行する
-3. 共同経営サーバーを使う場合は、**Settings → Secrets and variables → Actions → Variables** に `VITE_SERVER_URL`（例: `https://jiro-ramen-server.<アカウント>.workers.dev`）を登録すると埋め込まれる（ゲーム内のオンライン画面からも入力できる）
+3. 共同経営サーバーを使う場合は、**Settings → Secrets and variables → Actions → Variables** に `VITE_SERVER_URL`（例: `https://jiro-ramen.<アカウント>.workers.dev`）を登録すると埋め込まれる（ゲーム内のオンライン画面からも入力できる）
 
 ## ライセンス・注意
 

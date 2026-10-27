@@ -12,7 +12,7 @@ export function openLobby(app: App, onBack: () => void): HTMLElement {
   const el = h('div', { class: 'screen lobby' }, h('div', { class: 'screen-inner' }, h('h2', null, 'オンライン共同経営（最大4人）'), body, h('button', { class: 'btn ghost', onclick: onBack }, '← 戻る')));
   el.addEventListener('pointerdown', (e) => e.stopPropagation());
 
-  const urlInput = h('input', { class: 'input', value: defaultServerUrl(), placeholder: 'https://jiro-ramen-server.<アカウント>.workers.dev' }) as HTMLInputElement;
+  const urlInput = h('input', { class: 'input', value: defaultServerUrl(), placeholder: 'https://jiro-ramen.<アカウント>.workers.dev' }) as HTMLInputElement;
   const codeInput = h('input', { class: 'input code', placeholder: '参加コード（6文字）', maxLength: 6 }) as HTMLInputElement;
   const status = h('div', { class: 'note' });
   const slots = listSlots(app.store);
