@@ -35,7 +35,7 @@
 | --- | --- |
 | `packages/core` | ゲームルール本体（純粋な TypeScript。描画・通信に非依存）。調理・客AI・在庫・経済・設備・従業員AI・レイアウト・評判・キャリア・セーブ・同期プロトコル |
 | `apps/client` | Three.js の一人称 3D クライアント（Vite）。HUD・経営メニュー・レイアウト編集・音（WebAudio＋音声合成）・オンライン接続 |
-| `apps/server` | Cloudflare Workers / Durable Objects / D1 / R2 のバックエンド（認証・ルーム・共同経営の権威サーバー・クラウドセーブ） |
+| `apps/server` | Cloudflare Workers / Durable Objects / D1 のバックエンド（R2 は使わない）（認証・ルーム・共同経営の権威サーバー・クラウドセーブ） |
 | `docs` | 設計書・ADR・検証レポート・手順書 |
 
 同じ `@jiro/core` をブラウザ（シングルプレイ）とサーバー（共同経営）で動かします。クライアントは状態を直接書き換えず、必ず「操作要求（Action）」を送り、検証に通ったものだけが確定します。

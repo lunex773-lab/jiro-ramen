@@ -31,7 +31,7 @@
 | 3. 連続した移動・操作イベント | 同上 | 同上 |
 | 4. 遅延・重複への耐性 | requestId による重複排除、状態バージョン付きパッチ、ハッシュ照合 | core と server のテストで検証 |
 | 5. DO の CPU 制限内で動作 | シミュレーション1ステップの計算量を計測 | ローカルで計測（本番の制限値は未確認） |
-| 6. セーブを D1/R2 に安全に保存 | ローカル D1/R2（miniflare） | server テストで検証 |
+| 6. セーブを D1/R2 に安全に保存 | ローカル D1/R2（miniflare） | server テストで検証（2026-10-27 以降は R2 を使わず D1 に保存: ADR-002） |
 | 7. 切断・再接続で二重購入・二重売上が起きない | requestId 重複排除・取引キーの一意性 | core / server テストで検証 |
 | 8. 想定プレイ時間での料金 | 本番の請求データが必要 | **未検証**。DO はシミュレーション中ずっと稼働するため、稼働時間課金を要確認 |
 
@@ -75,7 +75,7 @@ core を先に作り、client と server は core の公開 API（`applyAction`�
 
 ## 7. 追加費用が発生しうる箇所
 
-- Cloudflare Workers / Durable Objects / D1 / R2 の利用料（無料枠・有料プランの条件は公式で要確認）
+- Cloudflare Workers / Durable Objects / D1 の利用料（無料枠・有料プランの条件は公式で要確認。R2 は使わない: ADR-002）
 - App Store 公開時: Apple Developer Program（年額）、Mac と Xcode、Capacitor 等でのネイティブ化作業
 - GitHub Pages は公開リポジトリなら無料
 

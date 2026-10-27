@@ -1,6 +1,6 @@
 # @jiro/server — 共同経営バックエンド（Cloudflare）
 
-Cloudflare Workers + Durable Objects + D1 + R2 で動く、次郎系ラーメン経営ゲームのバックエンドです。
+Cloudflare Workers + Durable Objects + D1 で動く、次郎系ラーメン経営ゲームのバックエンドです（R2 は使いません: [ADR-002](../../docs/adr/ADR-002-no-r2.md)）。
 設計書の 2.2 / 2.3 / 16.4 / 17 / 18 に対応します。デプロイ手順は [docs/CLOUDFLARE_SETUP.md](../../docs/CLOUDFLARE_SETUP.md) を参照してください。
 
 ## 構成
@@ -8,14 +8,14 @@ Cloudflare Workers + Durable Objects + D1 + R2 で動く、次郎系ラーメン
 ```
 クライアント ──HTTP──▶ Worker（src/index.ts）
                         ├─ 認証（匿名アカウント・Bearer トークン）……… D1 players
-                        ├─ クラウドセーブ ……………………………………… D1 save_slots + R2 saves/
+                        ├─ クラウドセーブ ……………………………………… D1 save_slots + save_bodies
                         ├─ ルーム作成・参加・退出 ……………………………… D1 rooms / room_members
                         ├─ CORS・本文サイズ制限・入力検証・レート制限・監査記録（D1 audit_log）
                         └─ WebSocket 接続: joinToken を検証して ──▶ GameRoom（Durable Object, src/room.ts）
                                                                      1ルーム = 1インスタンス（idFromName(roomId)）
                                                                      状態の確定・シミュレーション・差分配信
                                                                      チェックポイント（DO の SQLite）
-                                                                     ルームの保存（R2 rooms/）
+                                                                     ルームの保存の控え（D1 room_snapshots）
 ```
 
 | ファイル | 内容 |
@@ -61,7 +61,7 @@ Cloudflare Workers + Durable Objects + D1 + R2 で動く、次郎系ラーメン
   act{rid, a, v}                     ─▶  rid の重複検出 → 権限・ロック確認 → applyAction
                                      ◀─  res{rid, r}
   resync                             ─▶  ◀─ full
-  save{rid}（ホストのみ）             ─▶  ◀─ saved{rid, ok, state, checksum}（R2 rooms/<roomId>/ にも控え）
+  save{rid}（ホストのみ）             ─▶  ◀─ saved{rid, ok, state, checksum}（D1 room_snapshots にも控え）
   layoutLock{on}                     ─▶  ◀─ layoutLock{holder}（全員へ）
   ping{ts}                           ─▶  ◀─ pong{ts, serverTime}
 ```
@@ -78,14 +78,15 @@ Cloudflare Workers + Durable Objects + D1 + R2 で動く、次郎系ラーメン
 - **チェックポイント**: DO の SQLite に、状態の JSON を 64K 文字ごとの断片で保存（KV 型 API の 1 値 128 KiB 上限を避けるため）。
   約10秒ごと・閉店（closed）時・ホスト切断時・保存時・参加/切断時に書く。全体のチェックサムで破損を検出し、壊れていたら推測で続行せず、ホストにキャリアを持ち込み直してもらう（`needInit: true`）。
 - **休止（Hibernation）**: WebSocket は Hibernation API で受ける。ループ（`setInterval`）が動いている間は休止しないが、ホスト不在で一時停止中・無人のときはループを止めるので休止でき、実行時間の課金が止まる。復帰時はチェックポイントから戻して全員に `full` を送る。
-- **無人ルームの終了**: 誰も接続しないまま24時間たつとアラームで終了し、最終状態を R2 に残す。
+- **無人ルームの終了**: 誰も接続しないまま24時間たつとアラームで終了し、最終状態を D1 に残す。
+- **D1 のテーブル**: Worker が最初の要求のときに `src/schema.ts` で自分で作る（wrangler と同じ `d1_migrations` 表に記録）。`migrations/*.sql` を変えたら `npm run schema:gen -w @jiro/server` で `src/migrations.gen.ts` を作り直す（一致しないとテストが失敗する）。
 
 ## 開発・テスト
 
 ```bash
 # リポジトリのルートで
 npm ci
-npm test -w @jiro/server          # vitest + @cloudflare/vitest-pool-workers（workerd 上で実行。D1/R2/DO もローカル）
+npm test -w @jiro/server          # vitest + @cloudflare/vitest-pool-workers（workerd 上で実行。D1/DO もローカル）
 npm run typecheck -w @jiro/server
 
 # ローカルサーバー

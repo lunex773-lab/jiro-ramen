@@ -37,7 +37,7 @@ Wrangler の設定ファイルは `apps/server/wrangler.jsonc` の1つだけで�
 - ルートで `npx wrangler` を実行すると、テスト用パッケージ（`@cloudflare/vitest-pool-workers`）の依存として入った
   別のバージョンの Wrangler が使われます（2026-10-27 時点で 4.124.0）。`apps/server` で実行するか `npm run deploy:server` を使うと、
   `apps/server/package.json` で指定したバージョン（4.151.3）が使われます。
-- **このリポジトリは Cloudflare のダッシュボードの GitHub 連携でデプロイします。手順は 2.10 です。** 2.1〜2.8 はパソコンからコマンドでデプロイする場合の手順です。
+- **このリポジトリは Cloudflare のダッシュボードの GitHub 連携でデプロイします。手順は 2.10 です（3つだけ）。** 2.1〜2.8 はパソコンからコマンドでデプロイする場合の手順です。
 
 ---
 
@@ -47,8 +47,8 @@ Wrangler の設定ファイルは `apps/server/wrangler.jsonc` の1つだけで�
 | --- | --- |
 | Cloudflare アカウント | 無料で作成できます（https://dash.cloudflare.com/sign-up ）。独自ドメインは不要です（`*.workers.dev` の URL で動きます） |
 | Workers のプラン | Durable Objects は **SQLite ストレージ方式**（`wrangler.jsonc` の `new_sqlite_classes`）で登録しています。この方式は Workers 無料プランでも使える、というのが筆者の知識です（**要確認**）。旧来の KV ストレージ方式の Durable Objects は有料プラン（Workers Paid）が必要です |
-| D1 | 無料プランで使えます（データベース数・読み書き行数に上限あり。**要確認**） |
-| R2 | 初回はダッシュボードで R2 を有効化する必要があります。有効化の際に支払い情報の登録を求められることがあります（無料枠内なら課金されない、というのが筆者の知識です。**要確認**） |
+| D1 | 無料プランで使えます（無料プランは1データベース 500MB まで。セーブ本体も D1 に置きます） |
+| R2 | **使いません**（オーナーの判断。[ADR-002](adr/ADR-002-no-r2.md)） |
 | パソコン | Node.js 22 以上、Git。Windows / macOS / Linux のどれでも可 |
 
 ---
@@ -84,7 +84,6 @@ npx wrangler whoami             # アカウント名とアカウントID が表�
 2. 「Edit Cloudflare Workers」テンプレートを元に、次の権限を付けます（権限名は**要確認**）
    - Account → **Workers Scripts: Edit**（Worker と Durable Objects のデプロイ）
    - Account → **D1: Edit**
-   - Account → **Workers R2 Storage: Edit**
    - Account → **Account Settings: Read**
    - （ログを見るなら）Account → **Workers Tail: Read**
    - 対象アカウントは自分のアカウントだけに絞ってください
@@ -101,7 +100,7 @@ export CLOUDFLARE_ACCOUNT_ID=（ダッシュボードの Workers & Pages 画面�
 npx wrangler d1 create jiro-db
 ```
 
-表示される `database_id`（`xxxxxxxx-xxxx-...` の形式）を、`apps/server/wrangler.jsonc` の
+表示される `database_id`（`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` の形式。8-4-4-4-12 文字）を、`apps/server/wrangler.jsonc` の
 
 ```jsonc
 "database_id": "00000000-0000-0000-0000-000000000000",
@@ -109,21 +108,14 @@ npx wrangler d1 create jiro-db
 
 と置き換えて保存します（この値は秘密情報ではないので、コミットして構いません）。
 
-### 2.4 R2 バケットを作る
+### 2.4 （不要）R2 バケット
 
-初めて R2 を使う場合は、先にダッシュボードの **R2 Object Storage** を開いて有効化してください。
+R2 は使いません（[ADR-002](adr/ADR-002-no-r2.md)）。セーブ本体も D1 に置きます。
 
-```bash
-npx wrangler r2 bucket create jiro-saves
-```
+### 2.5 データベースのテーブル（自動）
 
-### 2.5 データベースのテーブルを作る
-
-```bash
-npx wrangler d1 migrations apply jiro-db --remote
-```
-
-`0001_init.sql` が ✅ になれば完了です。
+テーブルは Worker が最初の要求のときに自分で作ります（`apps/server/src/schema.ts`）。コマンドは不要です。
+先に作っておきたい場合は `npx wrangler d1 migrations apply jiro-db --remote` でも作れます（どちらで作っても二重には作りません）。
 
 ### 2.6 秘密鍵（SESSION_SECRET）を設定する
 
@@ -180,64 +172,56 @@ node scripts/smoke.mjs https://jiro-ramen.<サブドメイン>.workers.dev
 ### 2.10 ダッシュボードから GitHub 連携でデプロイする場合（Workers Builds）
 
 **このリポジトリのデプロイ方法です**（オーナー確認済み）。パソコンでコマンドを打たずに、Cloudflare のダッシュボードだけで準備できます。
-ダッシュボードの画面名は変わることがあるので、見つからないときは近い名前の項目を探してください。
+やることは 3 つです。ダッシュボードの画面名は変わることがあるので、見つからないときは近い名前の項目を探してください。
 
-#### (1) D1 データベースを作る
+#### (1) D1 データベースを作り、ID を設定ファイルに書く
 
 1. ダッシュボード → **Storage & Databases → D1 SQL Database → Create** で、名前を `jiro-db` にして作成します。
-2. 表示される **Database ID**（`xxxxxxxx-xxxx-...` の形式）を、`apps/server/wrangler.jsonc` の `"database_id"` に書いてコミットします
-   （秘密情報ではありません）。`00000000-...` のままだとデプロイに失敗します。
-3. テーブルは (4) のデプロイコマンドが自動で作ります（D1 の画面で SQL を実行する必要はありません）。
+2. 作成した `jiro-db` の画面に出る **Database ID** をコピーします。
+   - 形式は `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`（**8-4-4-4-12 文字、全部で36文字**）です。
+   - `00000000-00000006-00005111-…` のような **8-8-8-32 文字の値は「ブックマーク」**（バックアップの時点を表す値）で、Database ID ではありません。
+3. `apps/server/wrangler.jsonc` の `"database_id"` をその値に書き換えてコミットします（秘密情報ではありません）。
+   `00000000-...` のままだとデプロイに失敗します。
+4. テーブルは Worker が最初の要求のときに自分で作るので、D1 の画面で SQL を実行する必要はありません。
 
-#### (2) R2 バケットを作る
+#### (2) ビルドの設定を変える
 
-1. ダッシュボード → **R2 Object Storage**。初めてなら R2 を有効化します（支払い情報の登録を求められることがあります。料金は第5章）。
-2. **Create bucket** で、名前を `jiro-saves` にして作成します。
-
-#### (3) ビルド用の API トークンに D1 の権限を足す
-
-Workers Builds が自動で作る API トークンには、D1 の権限が含まれていません（Workers Scripts・KV・R2 の編集権限のみ）。
-テーブルを自動で作るために、D1 の編集権限を足してください。
-
-1. ダッシュボード右上のアイコン → **My Profile → API Tokens** で、Workers Builds 用に作られたトークンの **Edit** を開きます
-   （Worker の **Settings → Build** の「API token」に表示されているトークンです）。
-2. **Permissions** に **Account → D1 → Edit** を追加して保存します。
-
-#### (4) ビルドの設定
-
-Worker の **Settings → Build → Build configuration** を次のようにします。
+Worker `jiro-ramen` の **Settings → Build → Build configuration** の **Edit** で、次のようにして保存します。
 
 | 項目 | 設定値 | 理由 |
 | --- | --- | --- |
 | Root directory（Path） | `apps/server` | Wrangler の設定ファイルがある場所。既定のルート（`/`）のままだと、0章のエラーになる |
-| Build command | 空欄 | Worker は `wrangler deploy` がバンドルする。ルートの `npm run build` はクライアント（GitHub Pages 用）のビルドで、Worker には不要 |
-| Deploy command | `npm run deploy:migrate` | D1 のテーブルを最新にしてから（`wrangler d1 migrations apply jiro-db --remote`）デプロイする（`wrangler deploy`）。適用済みなら何もしない |
-| Preview（プレビュー）用のコマンド | 既定のまま | 本番ブランチ以外のプレビュー。Root directory で実行される |
+| Build command | 空欄 | Worker は `wrangler deploy` がまとめてくれる。ルートの `npm run build` はゲーム画面（GitHub Pages 用）のビルドで、Worker には不要 |
+| Deploy command | `npx wrangler deploy`（既定のまま） | Root directory で実行され、`apps/server/package.json` の Wrangler が使われる |
+| Preview（プレビュー）用のコマンド | 既定のまま | 本番ブランチ以外のプレビュー |
 | Build watch paths | 既定（すべて）のまま | サーバーは `packages/core` も使うので、`apps/server` だけに絞らない |
 
 - 依存パッケージは、ルートの `package-lock.json` を使って入ります（npm は `apps/server` からでもワークスペースのルートを見つけてインストールします）。
 - **Worker の名前**: Workers Builds は、ダッシュボード上の Worker の名前でデプロイします（`wrangler.jsonc` の `name` より優先）。
-  このリポジトリと連携している Worker は `jiro-ramen` なので、`wrangler.jsonc` の `name` も `jiro-ramen` にそろえています
-  （パソコンから `wrangler tail` などを実行したときに同じ Worker を指すように）。URL は `https://jiro-ramen.<サブドメイン>.workers.dev` です。
+  このリポジトリと連携している Worker は `jiro-ramen` なので、`wrangler.jsonc` の `name` も `jiro-ramen` にそろえています。
+  URL は `https://jiro-ramen.<サブドメイン>.workers.dev` です。
 
-#### (5) 秘密鍵（SESSION_SECRET）を設定する
+#### (3) 秘密鍵（SESSION_SECRET）を設定する
 
-Worker の **Settings → Variables and Secrets → Add** で、**Type: Secret**、**Variable name: `SESSION_SECRET`**、
-**Value: 32文字以上のランダムな英数字**（パスワード管理アプリの生成機能などで作る）を追加します。
-ビルド用の「Build variables and secrets」ではなく、こちらに追加してください。デプロイしても消えません。
+共同経営のルームに入るための「入場券」に署名する鍵です。Worker の **Settings → Variables and Secrets → Add** で、
 
-#### (6) デプロイと確認
+- **Type**: `Secret`
+- **Variable name**: `SESSION_SECRET`
+- **Value**: 32文字以上のランダムな英数字（パスワード管理アプリの「パスワードを生成」機能などで作る）
+
+を追加して保存します。ビルド用の「Build variables and secrets」ではなく、こちらに追加してください。デプロイしても消えません。
+
+#### (4) デプロイと確認
 
 1. Worker の **Deployments**（または **Builds**）で、失敗したビルドを **Retry** するか、GitHub に push します。
-2. 成功したら、ブラウザで `https://<Worker 名>.<サブドメイン>.workers.dev/api/v1/game-version` を開き、
+2. 成功したら、ブラウザで `https://jiro-ramen.<サブドメイン>.workers.dev/api/v1/game-version` を開き、
    `{"gameVersion":"0.9.0",...}` と表示されれば動いています。
 3. GitHub のリポジトリ → **Settings → Secrets and variables → Actions → Variables** に `VITE_SERVER_URL`（上の URL のうち
    `https://…workers.dev` まで。末尾のスラッシュなし）を追加し、Actions の「GitHub Pages」を **Run workflow** で実行し直します（3章）。
 
 #### ルートのまま使いたい場合
 
-Root directory を `/` のままにする場合は、Deploy command を `npm run deploy:server` にします（テーブルの自動作成は行わないので、
-別途 `apps/server` で `npm run db:migrate:remote` を実行してください）。
+Root directory を `/` のままにする場合は、Deploy command を `npm run deploy:server` にします。
 
 ---
 
@@ -318,8 +302,7 @@ npx wrangler d1 execute jiro-db --remote --command "SELECT ts, kind, player_id, 
 | サービス | 主な課金対象 | このゲームでの使い方 |
 | --- | --- | --- |
 | Workers | リクエスト数・CPU 時間 | API 呼び出し（ログイン、ルーム作成・参加、セーブ） |
-| D1 | 読み取り行数・書き込み行数・保存容量 | アカウント、セーブのメタデータ、ルーム記録、監査記録。リアルタイムの同期には使わない |
-| R2 | 保存容量・操作回数（取り出しの転送量は無料、というのが筆者の知識。要確認） | セーブ本体（1スロット直近3世代）、共同経営の保存の控え |
+| D1 | 読み取り行数・書き込み行数・保存容量 | アカウント、セーブ（本体も。1スロット直近3世代）、ルーム記録と保存の控え、監査記録。リアルタイムの同期には使わない |
 
 無料プランの Workers は 1 リクエストあたりの CPU 時間の上限が小さい（10ms、というのが筆者の知識。要確認）ため、
 非常に大きなセーブデータ（数百KB以上）のアップロードでは上限を超える可能性があります。通常のセーブは 20〜30KB 程度です。
@@ -332,7 +315,7 @@ npx wrangler d1 execute jiro-db --remote --command "SELECT ts, kind, player_id, 
 デプロイできませんでした（2026-10-27 時点では `api.cloudflare.com` には到達できるようになりましたが、
 Cloudflare の認証情報（API トークン）が環境に設定されていないため、引き続きデプロイはできません）。
 
-- `api.cloudflare.com`（デプロイ・D1・R2 の操作に必要）
+- `api.cloudflare.com`（デプロイ・D1 の操作に必要）
 - `developers.cloudflare.com`（公式ドキュメント）
 - `workers.cloudflare.com`（`wrangler dev` が `Request.cf` の見本を取りに行く先。遮断されていても警告が出るだけで動きます）
 
@@ -356,10 +339,8 @@ Cloudflare の認証情報（API トークン）が環境に設定されてい�
 | --- | --- |
 | `The Cloudflare application detection logic has been run in the root of a workspace instead of targeting a specific project.` | リポジトリのルートで `wrangler deploy` を実行している（0章）。`apps/server` で実行するか、ルートで `npm run deploy:server`。ダッシュボードの GitHub 連携なら Root directory を `apps/server` にする（2.10） |
 | ダッシュボードの GitHub 連携で `Missing entry-point` | Root directory が `apps/server` になっていない（2.10） |
-| ダッシュボードの GitHub 連携で、`d1 migrations apply` が認証・権限のエラー（code: 10000 など）になる | ビルド用の API トークンに D1 の権限がない。2.10 (3) で **Account → D1 → Edit** を追加する |
-| `wrangler deploy` で D1 のエラー（database not found など） | `wrangler.jsonc` の `database_id` が `00000000-...` のまま。2.3 の値に置き換える |
-| `no such table: players` などのエラー | 本番のマイグレーション未実行。`npx wrangler d1 migrations apply jiro-db --remote` |
-| R2 のエラー（R2 を有効にしてください、など） | ダッシュボードで R2 を有効化してから `wrangler r2 bucket create jiro-saves` |
+| `wrangler deploy` で D1 のエラー（database not found など） | `wrangler.jsonc` の `database_id` が `00000000-...` のまま、またはブックマーク（8-8-8-32 文字）を入れている。D1 の画面の Database ID（8-4-4-4-12 文字）に置き換える（2.10 (1)） |
+| `no such table: players` などのエラー | 通常は Worker が自分でテーブルを作る。続く場合はログ（4章）の `schema_migrated` を確認するか、`npx wrangler d1 migrations apply jiro-db --remote` で作る |
 | Durable Objects に有料プランが必要と言われる | `migrations` が `new_sqlite_classes` になっているか確認。それでも出る場合はプランの条件を公式で確認（有料プランへの変更が必要な可能性） |
 | API が `{"error":"SESSION_SECRET が設定されていません…","code":"server_misconfigured"}` を返す | 2.6 の `wrangler secret put SESSION_SECRET` を実行（32文字以上） |
 | ブラウザで CORS エラー / 403 `origin_not_allowed` | `ALLOWED_ORIGINS` にページのオリジン（`https://…` のホスト部分だけ、末尾スラッシュなし）を追加して再デプロイ |
