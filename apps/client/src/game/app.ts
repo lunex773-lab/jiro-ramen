@@ -27,8 +27,9 @@ import { bankruptScreen, helpScreen, resultScreen, settingsScreen, slotScreen, t
 import { Controls } from './controls';
 import { nextHint } from './guide';
 import { LocalHost, type GameHost } from './host';
+import { lockLandscape } from './orientation';
 import { loadSettings, saveSettings, type Settings } from './settings';
-import { findFocus } from './targeting';
+import { findFocus, interactableBoxes } from './targeting';
 import { openLobby } from '../ui/lobby';
 import { cloudDownload, cloudUpload } from '../net/cloud';
 
@@ -89,8 +90,6 @@ export class App {
   private tutorial: TutorialPanel | null = null;
   /** チュートリアルで目立たせている対象（変わったときだけ画面を更新する） */
   private tutorialHi = '';
-  /** 縦向きのスマホ（横向き専用なので案内を出してゲームを止める。表示は CSS の同じ条件で切り替わる） */
-  private portrait = matchMedia('(orientation: portrait) and (pointer: coarse)');
 
   constructor(mount: HTMLElement) {
     this.root = mount;
@@ -98,19 +97,14 @@ export class App {
     this.canvas = h('canvas', { class: 'game-canvas' });
     this.overlay = h('div', { class: 'overlay3d' });
     this.uiLayer = h('div', { class: 'ui-layer' });
-    this.hintEl = h('div', { class: 'hint' });
-    const rotateHint = h(
-      'div',
-      { class: 'rotate-hint', role: 'alert' },
-      h('div', { class: 'rotate-icon', 'aria-hidden': 'true' }, '📱'),
-      h('div', { class: 'rotate-title' }, '横向きにしてください'),
-      h('div', { class: 'rotate-sub' }, 'このゲームは横画面専用です。向きが変わらないときは、コントロールセンターの「画面縦向きのロック」をオフにしてください。'),
-    );
-    this.root.append(this.canvas, this.overlay, this.uiLayer, rotateHint);
+    this.hintEl = h('div', { class: 'hint', hidden: true });
+    this.root.append(this.canvas, this.overlay, this.uiLayer);
     this.applySettings();
-    window.addEventListener('resize', () => this.world?.resize());
-    // 向きを変えた直後は resize が来ない端末があるので、向きの変化でも描画サイズを合わせ直す
-    this.portrait.addEventListener('change', () => this.world?.resize());
+    // 横画面に固定する（縦向きのスマホでは表示ごと 90° 回す）。回し方が変わったら操作中の指を離し、描画サイズを合わせ直す
+    lockLandscape(this.root, () => {
+      this.controls?.releaseAll();
+      this.world?.resize();
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') this.autosave('hidden');
     });
@@ -344,7 +338,7 @@ export class App {
     const c = this.controls;
     if (!host || !world || !c) return;
     const s = host.state;
-    const blocking = !!this.screenEl || this.manage?.isOpen || !!this.editor || this.portrait.matches;
+    const blocking = !!this.screenEl || this.manage?.isOpen || !!this.editor;
     c.enabled = !blocking;
     // シングルプレイではメニュー中は時間を止める
     const pauseLocal = host.mode === 'local' && (blocking || s.phase === 'closed');
@@ -387,8 +381,7 @@ export class App {
     if (me && !blocking) {
       const actor = { ...me, pos: this.localPos };
       const eye: [number, number, number] = [this.localPos.x, 1.58, this.localPos.z];
-      const f = findFocus(s, actor, eye, world.viewDir());
-      this.hud?.setFocus(f?.target ?? null);
+      this.hud?.setFocus(findFocus(s, actor, eye, world.viewDir()));
     } else this.hud?.setFocus(null);
     // 経営メニューとレイアウト編集は画面全体を覆うので、その間は 3D を描かない（電池と CPU の節約）
     const covered = this.manage?.isOpen || !!this.editor;
@@ -410,8 +403,12 @@ export class App {
     this.hintAcc = 0;
     const show = s.career.daysPlayed < 3 && !this.screenEl && !this.manage?.isOpen && !s.tutorial;
     const text = show ? nextHint(s, this.host.playerId) : null;
-    this.hintEl.textContent = text ? `💡 ${text}` : '';
-    this.hintEl.style.display = text ? 'block' : 'none';
+    const label = text ? `💡 ${text}` : '';
+    if (this.hintEl.textContent !== label) this.hintEl.textContent = label;
+    this.hintEl.hidden = !text;
+    // 下の帯（案内かチュートリアル）の高さ。開店ボタンなどをその上に置く
+    const strip = this.tutorial?.visible ? this.tutorial.el.offsetHeight : text ? this.hintEl.offsetHeight : 0;
+    this.root.style.setProperty('--strip-h', `${strip}px`);
   }
 
   private checkPhaseScreens(initial: boolean): void {
@@ -606,12 +603,16 @@ export class App {
     // 厨房側の位置を優先（席はカウンター越し）
     const p = pts[pts.length - 1];
     if (!p) return false;
-    const c = t.kind === 'equipment' ? equipmentCenter(t.e) : t.kind === 'seat' ? seatCounterPoint(s, t.seat) : t.kind === 'dirt' ? t.dirt.pos : p;
+    // 照準を対象の箱の中心に合わせる（席はカウンターの天板）
+    const b = interactableBoxes(s).find((x) => x.id === targetId);
+    const c = b
+      ? { x: (b.min[0] + b.max[0]) / 2, y: (b.min[1] + b.max[1]) / 2, z: (b.min[2] + b.max[2]) / 2 }
+      : { ...(t.kind === 'equipment' ? equipmentCenter(t.e) : t.kind === 'seat' ? seatCounterPoint(s, t.seat) : t.kind === 'dirt' ? t.dirt.pos : p), y: 0.8 };
     this.localPos = { x: p.x, z: p.z };
     const me = s.players.find((x) => x.id === host.playerId);
     if (me && host.mode === 'local') me.pos = { x: p.x, z: p.z };
     this.controls.yaw = Math.atan2(c.x - p.x, c.z - p.z);
-    this.controls.pitch = t.kind === 'dirt' ? -0.9 : -0.35;
+    this.controls.pitch = Math.atan2(c.y - 1.58, Math.hypot(c.x - p.x, c.z - p.z));
     host.move(p.x, p.z, this.controls.yaw);
     return true;
   }

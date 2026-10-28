@@ -1,5 +1,7 @@
 /* 次郎系ラーメン屋 経営シミュレーター — UI スタイル
-   iPhone の横向き専用（PC でも遊べる）。タップ領域は 40px 以上、ノッチ・ホームバーの安全領域を避ける。 */
+   iPhone の横向き専用（PC でも遊べる）。タップ領域は 40px 以上、ノッチ・ホームバーの安全領域を避ける。
+   縦向きのスマホではゲームの表示（.app）ごと 90° 回して横画面にする（game/orientation.ts）。そのため大きさは画面（vw/vh・@media）ではなく、
+   表示の大きさ（.app をコンテナにした cqw/cqh・@container app）で決める。 */
 
 :root {
   --yellow: #f2c200;
@@ -37,6 +39,14 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 #app, .app { position: fixed; inset: 0; }
+.app { container: app / size; }
+/* 表示を回しているとき: 表示の左＝画面の上（ノッチ）、右＝画面の下（ホームバー）、上＝画面の右、下＝画面の左 */
+.app.rotated {
+  --sat: env(safe-area-inset-right, 0px);
+  --sar: env(safe-area-inset-bottom, 0px);
+  --sab: env(safe-area-inset-left, 0px);
+  --sal: env(safe-area-inset-top, 0px);
+}
 .game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .overlay3d { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .ui-layer { position: absolute; inset: 0; pointer-events: none; }
@@ -118,9 +128,10 @@ input, select { font: inherit; }
 .note.bad { color: #ff8a7a; }
 
 /* ───────── HUD（iPhone の横向き専用） ─────────
-   上: 状態の行 / 左の列: 伝票・通知 / 上部中央: 案内・手に持っている物 / 右の列: 詳細＋操作ボタン（右手の親指で押す）/
-   下中央: 開店ボタン。画面の左側は移動スティック、右側は視点操作に使うので、左下は空けておく */
+   上: 状態の行 / 左の列: 伝票・通知 / 上部中央: 手に持っている物 / 右の列: 詳細＋小さな丸い操作ボタン（右手の親指で押す）/
+   下: 案内の帯（小さく横長。文字の部分はタッチを素通りさせる）と開店ボタン。画面の左側は移動スティック、右側は視点操作に使う */
 .hud { position: absolute; inset: 0; pointer-events: none; --hud-top: calc(var(--sat) + 48px); }
+.app { --act-w: 196px; }
 .hud > * { pointer-events: auto; }
 .hud > .hud-top, .hud > .hud-left, .hud > .hud-center, .hud > .hud-right { pointer-events: none; }
 .hud-top {
@@ -156,7 +167,7 @@ input, select { font: inherit; }
   position: absolute;
   top: var(--hud-top);
   left: calc(var(--sal) + 8px);
-  width: min(33vw, 400px);
+  width: min(33cqw, 400px);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -214,24 +225,35 @@ input, select { font: inherit; }
   top: var(--hud-top);
   left: 50%;
   transform: translateX(-50%);
-  width: min(30vw, 460px);
+  width: min(30cqw, 460px);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
 }
 .hint {
-  background: rgba(242, 194, 0, 0.92);
-  color: #1a1407;
-  font-weight: 800;
-  font-size: 13px;
-  padding: 6px 12px;
-  border-radius: 10px;
-  max-width: 100%;
-  display: none;
+  position: absolute;
+  left: calc(var(--sal) + 8px);
+  right: calc(var(--sar) + var(--act-w) + 14px);
+  bottom: calc(var(--sab) + 6px);
+  max-width: 620px;
+  margin: 0 auto;
+  background: rgba(20, 16, 12, 0.72);
+  border-left: 3px solid var(--yellow);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 4px 10px;
+  border-radius: 8px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   pointer-events: none !important;
-  text-align: center;
 }
+.hint[hidden] { display: none; }
 .hud-hand {
   background: rgba(0, 0, 0, 0.6);
   border-radius: 10px;
@@ -257,6 +279,8 @@ input, select { font: inherit; }
   pointer-events: none;
 }
 .crosshair.active { background: var(--yellow); width: 12px; height: 12px; margin: -6px 0 0 -6px; }
+/* 狙っているが手が届かない */
+.crosshair.far { background: rgba(255, 255, 255, 0.35); box-shadow: 0 0 0 2px var(--warn); }
 .focus-label {
   position: absolute;
   left: 50%;
@@ -268,12 +292,26 @@ input, select { font: inherit; }
   pointer-events: none;
   white-space: nowrap;
 }
+.focus-reason {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 32px);
+  transform: translateX(-50%);
+  max-width: min(70cqw, 520px);
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffd08a;
+  text-align: center;
+  text-shadow: 0 1px 3px #000, 0 0 6px #000;
+  pointer-events: none;
+}
+.focus-reason:empty { display: none; }
 .work-bar {
   position: absolute;
   left: 50%;
-  top: calc(50% + 40px);
+  top: calc(50% + 52px);
   transform: translateX(-50%);
-  width: min(260px, 34vw);
+  width: min(260px, 34cqw);
   display: none;
   pointer-events: none;
 }
@@ -281,13 +319,13 @@ input, select { font: inherit; }
 .work-track { height: 10px; border-radius: 5px; background: rgba(0, 0, 0, 0.6); overflow: hidden; }
 .work-fill { height: 100%; background: var(--yellow); width: 0; }
 
-/* 右の列: 詳細は操作ボタンの真上に積み、残りの高さに収まらなければスクロール */
+/* 右の列: 詳細は操作ボタンの真上に積み、残りの高さに収まらなければスクロール。操作ボタンは右下から小さな丸を並べる */
 .hud-right {
   position: absolute;
   top: var(--hud-top);
   right: calc(var(--sar) + 10px);
   bottom: calc(var(--sab) + 10px);
-  width: min(34vw, 320px);
+  width: min(34cqw, 320px);
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -321,45 +359,76 @@ input, select { font: inherit; }
 .hud-actions {
   flex: 0 0 auto;
   display: flex;
-  flex-direction: column-reverse;
+  /* 1つ目（主な操作）を右下に置き、左へ並べて、3つで上の段へ折り返す */
+  flex-direction: row-reverse;
+  flex-wrap: wrap-reverse;
+  justify-content: flex-start;
+  align-items: center;
   gap: 8px;
-  align-items: flex-end;
-  max-width: 100%;
+  max-width: var(--act-w);
 }
 .act {
   position: relative;
-  min-height: 52px;
-  min-width: 150px;
-  max-width: 100%;
-  padding: 8px 14px;
-  border-radius: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.15);
-  background: rgba(30, 24, 19, 0.88);
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  background: rgba(30, 24, 19, 0.82);
   color: var(--text);
-  font-weight: 800;
-  font-size: 15px;
-  text-align: left;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   touch-action: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
 }
-.act.primary { background: var(--yellow); color: #1a1407; border-color: var(--yellow-d); min-height: 62px; font-size: 17px; }
+.act.primary { width: 66px; height: 66px; background: var(--yellow); color: #1a1407; border-color: var(--yellow-d); }
 .act.hold { border-style: dashed; }
-.act.disabled { opacity: 0.75; background: rgba(30, 24, 19, 0.7); color: var(--muted); cursor: default; }
-.act-sub { font-size: 11px; font-weight: 600; opacity: 0.8; }
-.act-key { position: absolute; top: 4px; right: 8px; font-size: 11px; opacity: 0.6; }
+.act.disabled { opacity: 0.5; filter: grayscale(0.6); cursor: default; }
+.act-icon { font-size: 20px; line-height: 1; }
+.act.primary .act-icon { font-size: 24px; }
+.act-label { margin-top: 2px; font-size: 10px; font-weight: 800; line-height: 1.1; white-space: nowrap; }
+.act-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 18px;
+  text-align: center;
+}
+.act-key { position: absolute; top: -4px; left: -2px; font-size: 10px; opacity: 0.7; }
+/* 長押しの作業中: ボタンの周りの輪で進み具合を出す */
+.act.working::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: conic-gradient(var(--good) calc(var(--p, 0) * 1turn), rgba(255, 255, 255, 0.15) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+  pointer-events: none;
+}
 
 .hud-cta {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--sab) + 14px);
+  bottom: calc(var(--sab) + var(--strip-h, 0px) + 12px);
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  width: min(420px, 36vw);
+  width: min(420px, 36cqw);
   text-align: center;
 }
 .hud-cta:empty { display: none; }
@@ -442,19 +511,19 @@ input, select { font: inherit; }
 .screen.behind { display: none; }
 .screen-inner { max-width: 920px; margin: 0 auto; }
 .screen h2 { color: var(--yellow); margin: 8px 0 14px; font-size: 22px; }
-.logo { text-align: center; margin: 7vh 0 4vh; }
+.logo { text-align: center; margin: 7cqh 0 4cqh; }
 .logo-sign {
   display: inline-block;
   background: var(--yellow);
   color: #111;
   font-weight: 900;
-  font-size: clamp(36px, 11vw, 72px);
+  font-size: clamp(36px, 11cqw, 72px);
   padding: 6px 28px;
   border: 6px solid #111;
   letter-spacing: 0.08em;
   box-shadow: 0 8px 0 #7a5c00;
 }
-.logo-title { margin-top: 22px; font-size: clamp(18px, 5vw, 28px); font-weight: 900; }
+.logo-title { margin-top: 22px; font-size: clamp(18px, 5cqw, 28px); font-weight: 900; }
 .logo-sub { margin-top: 8px; color: var(--muted); font-size: 14px; }
 .menu-col { display: flex; flex-direction: column; gap: 12px; max-width: 420px; margin: 0 auto; }
 .foot { text-align: center; color: var(--muted); font-size: 12px; margin-top: 30px; }
@@ -554,13 +623,30 @@ input, select { font: inherit; }
 .layout-main { flex: 1; display: flex; gap: 10px; min-height: 0; }
 .layout-canvas-wrap { flex: 1; min-width: 0; position: relative; }
 .layout-canvas { position: absolute; inset: 0; touch-action: none; border-radius: 10px; }
-.layout-side { width: min(320px, 38vw); overflow-y: auto; touch-action: pan-y; }
+.layout-side { width: min(320px, 38cqw); overflow-y: auto; touch-action: pan-y; }
 /* 幅の狭い PC のウィンドウ用（スマホは横向き専用なので該当しない） */
-@media (max-width: 700px) and (orientation: portrait) {
+@container app (max-width: 700px) and (orientation: portrait) {
   .layout-main { flex-direction: column; }
   .layout-canvas-wrap { flex: 1 1 55%; }
   .layout-side { width: auto; flex: 0 0 auto; max-height: 40%; }
 }
+
+/* 共同経営の参加コード（待機画面と、上部の「コード」から開く表示） */
+.room-code-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 10px 0; }
+.room-code {
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: 0.25em;
+  color: var(--yellow);
+  background: #1d1814;
+  border: 2px dashed var(--yellow-d);
+  border-radius: 12px;
+  padding: 2px 8px 2px 18px;
+  font-variant-numeric: tabular-nums;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.room-wait .row { margin-top: 12px; }
 
 /* モーダル・トースト */
 .modal-overlay { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
@@ -570,7 +656,8 @@ input, select { font: inherit; }
 .toasts {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--sab) + 40%);
+  /* 下は案内の帯と操作ボタンがあるので、上の状態の行のすぐ下に出す */
+  top: calc(var(--sat) + 50px);
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -578,7 +665,7 @@ input, select { font: inherit; }
   align-items: center;
   pointer-events: none !important;
   z-index: 60;
-  width: min(460px, 92vw);
+  width: min(460px, 92cqw);
 }
 .toast {
   background: rgba(20, 16, 12, 0.94);
@@ -595,49 +682,55 @@ input, select { font: inherit; }
 .toast.good { border-left-color: var(--good); }
 .toast.out { opacity: 0; transform: translateY(-10px); }
 
-/* ───────── チュートリアル ───────── */
+/* ───────── チュートリアル ─────────
+   画面の下に小さく横長の帯で出す（文は2行まで。「…」で全文）。文字の部分はタッチを素通りさせ、ボタンだけ押せる */
 .tutorial-panel {
   position: absolute;
-  top: calc(var(--sat) + 48px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(40vw, 520px);
+  left: calc(var(--sal) + 8px);
+  right: calc(var(--sar) + var(--act-w) + 14px);
+  bottom: calc(var(--sab) + 6px);
   z-index: 40;
   display: none;
-  background: rgba(24, 19, 15, 0.95);
-  border: 2px solid var(--yellow);
-  border-radius: 12px;
-  padding: 8px 12px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  align-items: center;
+  gap: 8px;
+  background: rgba(20, 16, 12, 0.78);
+  border-left: 3px solid var(--yellow);
+  border-radius: 8px;
+  padding: 4px 6px 4px 8px;
 }
-/* 経営メニュー・レイアウト編集・結果画面の上では下にずらす（タブや見出しを隠さない） */
-.tutorial-panel.docked { top: auto; bottom: calc(var(--sab) + 8px); width: min(60vw, 560px); }
-.tut-head { display: flex; align-items: center; gap: 8px; }
-.tut-badge { background: var(--yellow); color: #1a1407; font-size: 11px; font-weight: 900; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
-.tut-title { flex: 1; min-width: 0; font-weight: 900; font-size: 15px; color: var(--yellow); }
-.tut-prog { font-size: 11px; color: var(--muted); white-space: nowrap; }
-.tut-head { cursor: pointer; }
-.tut-fold { font-size: 12px; color: var(--muted); transition: transform 0.2s; }
-.tutorial-panel.collapsed .tut-fold { transform: rotate(180deg); }
-.tutorial-panel.collapsed .tut-text, .tutorial-panel.collapsed .tut-guide, .tutorial-panel.collapsed .tut-buttons { display: none; }
-.tut-text { margin-top: 4px; font-size: 13px; line-height: 1.5; }
-.tut-guide { margin-top: 4px; font-size: 12px; color: #ffe27a; }
-.tut-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
-.tut-btn { min-height: 36px; padding: 6px 14px; font-size: 14px; }
-.tut-quit { margin-left: auto; padding: 6px; border: none; background: none; color: var(--muted); font-size: 12px; text-decoration: underline; cursor: pointer; }
+.ui-layer > .tutorial-panel { pointer-events: none; }
+.tutorial-panel button { pointer-events: auto; }
+/* 経営メニュー・レイアウト編集・結果画面の上では、操作ボタンがないので右端まで使う */
+.tutorial-panel.docked { right: calc(var(--sar) + 8px); background: rgba(20, 16, 12, 0.96); }
+.tut-badge { flex: 0 0 auto; background: var(--yellow); color: #1a1407; font-size: 10px; font-weight: 900; padding: 2px 6px; border-radius: 999px; white-space: nowrap; }
+.tut-main { flex: 1 1 auto; min-width: 0; }
+.tut-line {
+  font-size: 12px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.tutorial-panel.expanded .tut-line { display: block; -webkit-line-clamp: unset; line-clamp: none; }
+.tut-title { color: var(--yellow); }
+.tut-guide { font-size: 11px; color: #ffe27a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tut-buttons { flex: 0 0 auto; display: flex; gap: 6px; align-items: center; }
+.tut-btn { min-height: 32px; padding: 4px 12px; font-size: 13px; border-radius: 10px; }
+.tut-more { min-width: 32px; min-height: 32px; border-radius: 8px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.4); color: var(--text); font-weight: 900; cursor: pointer; }
+.tut-more[hidden] { display: none; }
+.tut-quit { min-height: 32px; padding: 4px; border: none; background: none; color: var(--muted); font-size: 11px; text-decoration: underline; cursor: pointer; }
 /* 押してほしいボタン・タブ */
 .tut-pulse { box-shadow: 0 0 0 3px var(--yellow); animation: tut-pulse 1.1s ease-in-out infinite; }
 @keyframes tut-pulse { 50% { box-shadow: 0 0 0 7px rgba(242, 194, 0, 0.35); } }
 /* 目印が画面の外にあるときの、向きを示す矢印 */
 .tut-edge { position: absolute; display: none; z-index: 5; color: var(--yellow); font-size: 34px; line-height: 1; text-shadow: 0 0 6px #000, 0 0 2px #000; pointer-events: none; }
-/* チュートリアル中: 左の列を細くし、手元の表示は左下へ、右の列は案内パネルの下から使う */
-.tutorial-on .hud-left { width: min(28vw, 360px); }
-.tutorial-on .hud-center { top: auto; bottom: calc(var(--sab) + 70px); left: calc(var(--sal) + 8px); transform: none; align-items: flex-start; width: min(28vw, 360px); }
-.tutorial-on .hud-right { top: calc(var(--hud-top) + var(--tut-h, 0px) + 6px); }
-.tutorial-on .manage-body, .tutorial-on .layout-side, .tutorial-on .screen { padding-bottom: 170px; }
+/* チュートリアル中: 経営メニューなどの最後の行が下の帯に隠れないようにする */
+.tutorial-on .manage-body, .tutorial-on .layout-side, .tutorial-on .screen { padding-bottom: calc(var(--strip-h, 48px) + 16px); }
 
 /* 高さの低い画面（iPhone の横向き: Safari で約 750×342、ホーム画面から開くと約 844×390） */
-@media (max-height: 500px) {
+@container app (max-height: 500px) {
   .hud { --hud-top: calc(var(--sat) + 42px); }
   .top-left .day, .top-left .clock, .top-right .money, .top-right .rep, .top-right .queue { font-size: 13px; padding: 4px 8px; }
   .chip { min-height: 30px; padding: 4px 10px; font-size: 12px; }
@@ -648,7 +741,7 @@ input, select { font: inherit; }
   .ticket-wait { text-align: right; }
   .hud-notices .notice:nth-last-child(n + 3) { display: none; }
   .notice { font-size: 11px; padding: 3px 6px; }
-  .hint { font-size: 12px; padding: 4px 10px; }
+  .hint { font-size: 11px; padding: 3px 8px; }
   .hud-hand { font-size: 12px; padding: 4px 8px; }
   .focus-label { font-size: 13px; }
   .hud-right { gap: 6px; }
@@ -656,18 +749,22 @@ input, select { font: inherit; }
   .slot { padding: 2px 0; gap: 4px; }
   .slot-sub { flex: 1 1 auto; }
   .slot .mini { min-height: 28px; padding: 2px 10px; }
+  .app { --act-w: 172px; }
   .hud-actions { gap: 6px; }
-  .hud-actions .act:nth-child(n + 5) { display: none; }
-  .act { min-width: 120px; min-height: 42px; padding: 5px 12px; font-size: 13px; border-radius: 12px; }
-  .act.primary { min-height: 48px; font-size: 15px; }
-  .act-sub { font-size: 10px; }
-  .hud-cta { bottom: calc(var(--sab) + 10px); gap: 4px; }
+  .act { width: 50px; height: 50px; }
+  .act.primary { width: 58px; height: 58px; }
+  .act-icon { font-size: 18px; }
+  .act.primary .act-icon { font-size: 21px; }
+  .act-label { font-size: 9px; }
+  .focus-reason { font-size: 11px; top: calc(50% + 28px); }
+  .work-bar { top: calc(50% + 46px); }
+  .hud-cta { bottom: calc(var(--sab) + var(--strip-h, 0px) + 8px); gap: 4px; }
   .hud-cta .btn.big { min-height: 44px; font-size: 16px; padding: 8px 20px; }
   .cta-info { font-size: 12px; padding: 4px 10px; }
   /* 開店前の説明は上部中央の案内と重なるので省く */
   .cta-info.redundant { display: none; }
   .work-label { font-size: 12px; }
-  .toasts { bottom: calc(var(--sab) + 64px); width: min(460px, 44vw); }
+  .toasts { top: calc(var(--sat) + 44px); width: min(460px, 60cqw); }
   .toast { font-size: 13px; padding: 6px 10px; }
 
   /* タイトル: ロゴとメニューを左右に並べる */
@@ -676,7 +773,7 @@ input, select { font: inherit; }
   .screen.title .logo { margin: 0; }
   .screen.title .menu-col { width: 100%; gap: 8px; }
   .screen.title .foot { grid-column: 1 / -1; margin-top: 0; }
-  .logo-sign { font-size: clamp(28px, 13vh, 56px); padding: 4px 20px; border-width: 5px; }
+  .logo-sign { font-size: clamp(28px, 13cqh, 56px); padding: 4px 20px; border-width: 5px; }
   .logo-title { margin-top: 12px; font-size: 17px; }
   .logo-sub { font-size: 12px; }
   .btn.big { min-height: 48px; font-size: 16px; padding: 8px 18px; }
@@ -688,34 +785,10 @@ input, select { font: inherit; }
   .manage-title { font-size: 16px; }
   .tabs { padding: 4px 0; }
   .tab { min-height: 34px; padding: 4px 12px; font-size: 13px; }
-  .tutorial-panel { top: calc(var(--sat) + 42px); padding: 6px 10px; }
-  .tut-title { font-size: 13px; }
-  .tut-text { font-size: 12px; line-height: 1.45; }
-  .tut-guide { font-size: 11px; }
-  .tut-btn { min-height: 32px; padding: 4px 12px; font-size: 13px; }
+  .tut-line { font-size: 11px; }
+  .tut-guide { font-size: 10px; }
+  .tut-btn { min-height: 30px; padding: 3px 10px; font-size: 12px; }
   .tut-edge { font-size: 28px; }
-}
-
-/* 縦向きのスマホ: このゲームは横向き専用なので、横向きにするよう案内する（ゲームは一時停止） */
-.rotate-hint {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: var(--ink);
-  color: var(--text);
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 24px;
-  text-align: center;
-  touch-action: none;
-}
-.rotate-icon { font-size: 64px; animation: rotate-phone 2.2s ease-in-out infinite; }
-.rotate-title { font-size: 20px; font-weight: 900; color: var(--yellow); }
-.rotate-sub { font-size: 13px; line-height: 1.6; color: var(--muted); max-width: 320px; }
-@keyframes rotate-phone { 0%, 30% { transform: rotate(0deg); } 60%, 100% { transform: rotate(-90deg); } }
-@media (orientation: portrait) and (pointer: coarse) {
-  .rotate-hint { display: flex; }
+  .room-code { font-size: 30px; }
+  .room-code-row { margin: 6px 0; }
 }

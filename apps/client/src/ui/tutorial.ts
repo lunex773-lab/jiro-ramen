@@ -1,5 +1,6 @@
-// チュートリアルの案内パネル。今の手順（何をするか）と進み具合を出し、
-// 「次へ」などのボタンと、経営メニューのタブを開いたかの判定（画面側の条件）を受け持つ。
+// チュートリアルの案内。画面の下に小さく横長の帯で出し、視界をふさがない（文は2行まで。「…」で全文）。
+// 今の手順（何をするか）と進み具合を出し、「次へ」などのボタンと、経営メニューのタブを開いたかの判定（画面側の条件）を受け持つ。
+// 帯の文字の部分はタッチを素通りさせ、下にある移動スティックの操作を邪魔しない（ボタンだけ押せる）。
 // 手順の中身と、操作で状態が変わったら次へ進む判定は core（sim/tutorial.ts）にある。
 
 import { currentTutorialStep, tutorialProgress, type GameState, type TutorialUi } from '@jiro/core';
@@ -41,9 +42,9 @@ export class TutorialPanel {
   private sentFor = '';
   private finishedHandled = false;
   private acc = 0;
-  /** 見出しだけにたたんでいるか（手順が変わると開き直す） */
-  private collapsed = false;
-  private collapsedStep = '';
+  /** 全文を出しているか（手順が変わると2行に戻す） */
+  private expanded = false;
+  private expandedStep = '';
 
   constructor(
     private root: HTMLElement,
@@ -51,7 +52,6 @@ export class TutorialPanel {
     private cb: TutorialPanelCallbacks,
   ) {
     this.el = h('div', { class: 'tutorial-panel', role: 'status' });
-    this.el.addEventListener('pointerdown', (e) => e.stopPropagation());
     root.appendChild(this.el);
   }
 
@@ -81,23 +81,26 @@ export class TutorialPanel {
       return;
     }
     app?.classList.add('tutorial-on');
-    this.el.style.display = 'block';
+    this.el.style.display = 'flex';
     this.el.classList.toggle('docked', screen.covered);
     // 画面側の条件（経営メニューのタブを開いた等）を満たしたら「次へ」を送る
     if (step.ui && this.sentFor !== step.id && uiMet(step.ui, screen)) {
       this.sentFor = step.id;
       void this.host.act({ type: 'tutorial', op: 'next', stepId: step.id });
     }
-    if (this.collapsed && this.collapsedStep !== step.id) this.collapsed = false;
-    this.el.classList.toggle('collapsed', this.collapsed);
+    if (this.expanded && this.expandedStep !== step.id) this.expanded = false;
+    this.el.classList.toggle('expanded', this.expanded);
     const guide = step.showGuide ? nextHint(s, this.host.playerId) : null;
     const key = `${step.id}|${guide ?? ''}|${s.phase}`;
     if (key !== this.lastKey) {
       this.lastKey = key;
       this.render(s, guide);
     }
-    // 案内パネルの高さぶん、右の列（詳細と操作ボタン）を下げる
-    if (app instanceof HTMLElement) app.style.setProperty('--tut-h', screen.covered ? '0px' : `${this.el.offsetHeight}px`);
+  }
+
+  /** 表示中か（下の帯の高さを測るため） */
+  get visible(): boolean {
+    return this.el.style.display !== 'none';
   }
 
   private hide(app: Element | null): void {
@@ -119,31 +122,36 @@ export class TutorialPanel {
     if (step.closeButton && s.phase === 'open') buttons.push(h('button', { class: 'btn primary tut-btn', onclick: act('close') }, '閉店する'));
     if (step.button) buttons.push(h('button', { class: 'btn primary tut-btn', onclick: act('next') }, step.button));
     if (step.alt) buttons.push(h('button', { class: 'btn tut-btn', onclick: act('alt') }, step.alt.label));
-    // 見出しを押すとたたむ（画面が狭いときに、下の画面を見るため）
-    const toggle = () => {
-      this.collapsed = !this.collapsed;
-      this.collapsedStep = step.id;
-      this.el.classList.toggle('collapsed', this.collapsed);
-    };
+    const line = h('div', { class: 'tut-line' }, h('b', { class: 'tut-title' }, step.title), ' ', step.text);
+    // 2行に収まらないときだけ「…」（全文を出す）を出す
+    const more = h(
+      'button',
+      {
+        class: 'tut-more',
+        'aria-label': '全文を見る',
+        onclick: () => {
+          this.expanded = !this.expanded;
+          this.expandedStep = step.id;
+          this.el.classList.toggle('expanded', this.expanded);
+          more.textContent = this.expanded ? '▾' : '…';
+        },
+      },
+      this.expanded ? '▾' : '…',
+    );
+    more.hidden = true;
+    const stop = (e: Event) => e.stopPropagation();
+    const btnRow = h('div', { class: 'tut-buttons' }, more, ...buttons, h('button', { class: 'tut-quit', onclick: () => this.cb.onQuit() }, 'やめる'));
+    // ボタンのタッチは 3D の操作に渡さない（帯のほかの部分は素通り）
+    btnRow.addEventListener('pointerdown', stop);
     replace(
       this.el,
-      h(
-        'div',
-        { class: 'tut-head', onclick: toggle, title: 'たたむ / 開く' },
-        h('span', { class: 'tut-badge' }, kind),
-        h('span', { class: 'tut-title' }, step.title),
-        prog ? h('span', { class: 'tut-prog' }, `${prog.index} / ${prog.total}`) : null,
-        h('span', { class: 'tut-fold', 'aria-hidden': 'true' }, '▾'),
-      ),
-      h('div', { class: 'tut-text' }, step.text),
-      guide ? h('div', { class: 'tut-guide' }, `💡 ${guide}`) : null,
-      h(
-        'div',
-        { class: 'tut-buttons' },
-        ...buttons,
-        h('button', { class: 'tut-quit', onclick: () => this.cb.onQuit() }, 'やめる'),
-      ),
+      h('span', { class: 'tut-badge' }, prog ? `${kind} ${prog.index}/${prog.total}` : kind),
+      h('div', { class: 'tut-main' }, line, guide ? h('div', { class: 'tut-guide' }, `💡 ${guide}`) : null),
+      btnRow,
     );
+    requestAnimationFrame(() => {
+      more.hidden = !this.expanded && line.scrollHeight <= line.clientHeight + 1;
+    });
   }
 
   dispose(): void {

@@ -68,6 +68,10 @@ export class RemoteHost implements GameHost {
     this.joinToken = opts.joinToken;
   }
 
+  get roomCode(): string {
+    return this.opts.code;
+  }
+
   /** 接続して最初の全体状態を受け取るまで待つ */
   connect(): Promise<boolean> {
     return new Promise((resolve) => {

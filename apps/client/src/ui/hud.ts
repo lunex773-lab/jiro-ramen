@@ -25,8 +25,10 @@ import {
   INGREDIENTS,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
-import { targetName } from '../game/targeting';
+import { targetName, type FocusResult } from '../game/targeting';
 import { h, replace, stars, toast, yenStr } from './dom';
+import { showRoomCode } from './room-code';
+import { verbFace } from './verb-face';
 
 export interface HudCallbacks {
   onMenu(): void;
@@ -52,6 +54,8 @@ export class Hud {
   private rail: HTMLElement;
   private notices: HTMLElement;
   private focusLabel: HTMLElement;
+  /** 照準の下: 押せない理由・「近づいてください」 */
+  private focusReason: HTMLElement;
   private detail: HTMLElement;
   private actions: HTMLElement;
   private workBar: HTMLElement;
@@ -73,6 +77,10 @@ export class Hud {
   private seenNotices = new Set<string>();
   private verbs: VerbInfo[] = [];
   private focus: Target | null = null;
+  /** 注視対象に手が届くか */
+  private reachable = true;
+  /** 長押しの進み具合の輪を出しているボタン */
+  private ringBtn: HTMLElement | null = null;
   /** 長押し中の動詞 */
   private holding: string | null = null;
   private acc = 0;
@@ -87,6 +95,7 @@ export class Hud {
     this.notices = h('div', { class: 'hud-notices' });
     this.crosshair = h('div', { class: 'crosshair' });
     this.focusLabel = h('div', { class: 'focus-label' });
+    this.focusReason = h('div', { class: 'focus-reason' });
     this.detail = h('div', { class: 'hud-detail' });
     this.actions = h('div', { class: 'hud-actions' });
     this.workFill = h('div', { class: 'work-fill' });
@@ -94,13 +103,12 @@ export class Hud {
     this.workBar = h('div', { class: 'work-bar' }, this.workLabel, h('div', { class: 'work-track' }, this.workFill));
     this.hand = h('div', { class: 'hud-hand' });
     this.cta = h('div', { class: 'hud-cta' });
-    // 横向きの画面: 上に状態の行、左の列に伝票と通知、上部中央に案内、右の列に詳細と操作ボタン（右手の親指で押す）、
-    // 下中央に開店ボタン。左半分は移動スティック用に空けておく
+    // 横向きの画面: 上に状態の行、左の列に伝票と通知、上部中央に手に持っている物、右の列に詳細と丸い操作ボタン（右手の親指で押す）、
+    // 下に案内の帯（小さく横長。チュートリアルの案内も同じ場所）と開店ボタン。左半分は移動スティック用に空けておく
     const left = h('div', { class: 'hud-left' }, this.rail, this.notices);
-    // 上部中央: 案内と手に持っている物（照準の近くで目に入る）
     this.center = h('div', { class: 'hud-center' }, this.hand);
     const right = h('div', { class: 'hud-right' }, this.detail, this.actions);
-    this.el = h('div', { class: 'hud' }, this.top, left, this.center, right, this.crosshair, this.focusLabel, this.workBar, this.cta);
+    this.el = h('div', { class: 'hud' }, this.top, left, this.center, right, this.crosshair, this.focusLabel, this.focusReason, this.workBar, this.cta);
     // HUD 上のタッチを 3D 操作に渡さない
     for (const el of [this.top, this.rail, this.detail, this.actions, this.cta, this.notices]) {
       el.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -113,17 +121,18 @@ export class Hud {
     root.appendChild(this.el);
   }
 
-  /** 初心者向けの案内を上部中央に置く */
+  /** 初心者向けの案内（下の帯）を置く */
   attachHint(el: HTMLElement): void {
-    this.center.insertBefore(el, this.hand);
+    this.el.appendChild(el);
   }
 
   get currentVerbs(): VerbInfo[] {
     return this.verbs;
   }
 
-  setFocus(t: Target | null): void {
-    this.focus = t;
+  setFocus(f: FocusResult | null): void {
+    this.focus = f?.target ?? null;
+    this.reachable = f?.reachable ?? true;
   }
 
   /** 毎フレーム呼ぶ（DOM 更新は間引く） */
@@ -185,7 +194,7 @@ export class Hud {
                 },
               },
             )
-          : h('span', { class: 'chip conn' }),
+          : h('button', { class: 'chip conn', title: '参加コードを表示', onclick: () => showRoomCode(this.root, this.host) }),
     };
     replace(
       this.top,
@@ -221,7 +230,9 @@ export class Hud {
     if (this.host.mode === 'local') t.speed.textContent = `×${this.host.speed}`;
     else {
       t.speed.className = `chip conn ${this.host.conn}`;
-      t.speed.textContent = this.host.conn === 'online' ? `オンライン ${this.host.peers.filter((p) => p.connected).length}人` : connLabel(this.host.conn);
+      // 参加コードは常に出す（押すと大きく表示してコピーできる）
+      const code = this.host.roomCode ? `コード ${this.host.roomCode}` : '';
+      t.speed.textContent = this.host.conn === 'online' ? `${code} ・ ${this.host.peers.filter((p) => p.connected).length}人` : `${connLabel(this.host.conn)} ${code}`;
     }
   }
 
@@ -272,12 +283,18 @@ export class Hud {
     const me = this.me();
     if (!me) return;
     const t = this.focus;
-    this.verbs = t ? listVerbs(s, me.id, t.id) : [];
+    // 手が届かない物は名前だけ出し、近づくよう案内する
+    const far = !!t && !this.reachable;
+    this.verbs = t && !far ? listVerbs(s, me.id, t.id) : [];
     this.focusLabel.textContent = t ? targetName(s, t) : '';
-    this.crosshair.classList.toggle('active', !!t);
-    // 操作ボタン
+    this.crosshair.classList.toggle('active', !!t && !far);
+    this.crosshair.classList.toggle('far', far);
+    // 操作ボタン（押せるものがなければ、押せない1つを薄く出し、理由を照準の下に出す）
     const enabled = this.verbs.filter((v) => v.enabled);
     const shown = enabled.length > 0 ? enabled.slice(0, 5) : this.verbs.slice(0, 1);
+    const first = this.verbs[0];
+    const reason = far ? '近づいてください' : enabled.length === 0 && first?.reason ? `${first.label}: ${first.reason}` : '';
+    if (this.focusReason.textContent !== reason) this.focusReason.textContent = reason;
     const key = `${t?.id ?? ''}|${shown.map((v) => `${v.verb}:${v.label}:${v.enabled}:${v.reason}`).join('|')}|${me.work?.verb ?? ''}`;
     if (key !== this.lastActionsKey) {
       this.lastActionsKey = key;
@@ -289,17 +306,17 @@ export class Hud {
     this.updateDetail(s, t);
   }
 
+  /** 小さな丸い操作ボタン（絵文字＋短い名前）。正式な名前は読み上げ名にする */
   private actionButton(v: VerbInfo, i: number): HTMLElement {
+    const f = verbFace(v.verb, v.label);
+    const title = v.enabled ? (v.hold ? `${v.label}（長押し ${v.duration.toFixed(1)}秒）` : v.label) : `${v.label}: ${v.reason ?? ''}`;
     const btn = h(
       'button',
-      { class: `act ${v.enabled ? '' : 'disabled'} ${v.hold ? 'hold' : ''} ${i === 0 ? 'primary' : ''}` },
-      h('span', { class: 'act-label' }, v.label),
-      v.enabled
-        ? v.hold
-          ? h('span', { class: 'act-sub' }, `長押し ${v.duration.toFixed(1)}秒`)
-          : null
-        : h('span', { class: 'act-sub' }, v.reason ?? ''),
-      !this.root.closest('.touch') && i < 6 ? h('span', { class: 'act-key' }, i === 0 ? 'E' : String(i + 1)) : null,
+      { class: `act ${v.enabled ? '' : 'disabled'} ${v.hold ? 'hold' : ''} ${i === 0 ? 'primary' : ''}`, 'aria-label': v.label, title, 'data-verb': v.verb },
+      h('span', { class: 'act-icon', 'aria-hidden': 'true' }, f.icon),
+      h('span', { class: 'act-label', 'aria-hidden': 'true' }, f.short),
+      f.badge ? h('span', { class: 'act-badge', 'aria-hidden': 'true' }, f.badge) : null,
+      !this.root.closest('.touch') && i < 6 ? h('span', { class: 'act-key', 'aria-hidden': 'true' }, i === 0 ? 'E' : String(i + 1)) : null,
     );
     if (!v.enabled) return btn;
     btn.addEventListener('pointerdown', (e) => {
@@ -350,16 +367,27 @@ export class Hud {
     const w = me?.work;
     if (!w) {
       this.workBar.style.display = 'none';
-      if (this.holding && !me?.work) {
-        // 作業が終わった
-      }
+      this.setRing(null, 0);
       return;
     }
     this.workBar.style.display = 'block';
     const p = Math.min(1, w.progress / Math.max(0.01, w.duration));
     this.workFill.style.width = `${(p * 100).toFixed(1)}%`;
+    // 押している丸ボタンの周りにも進み具合の輪を出す
+    this.setRing(this.actions.querySelector<HTMLElement>(`.act[data-verb="${CSS.escape(w.verb)}"]`), p);
     const label = this.verbs.find((v) => v.verb === w.verb)?.label ?? '作業中';
     if (this.workLabel.textContent !== label) this.workLabel.textContent = label;
+  }
+
+  private setRing(btn: HTMLElement | null, p: number): void {
+    if (this.ringBtn && this.ringBtn !== btn) {
+      this.ringBtn.classList.remove('working');
+      this.ringBtn.style.removeProperty('--p');
+    }
+    this.ringBtn = btn;
+    if (!btn) return;
+    btn.classList.add('working');
+    btn.style.setProperty('--p', p.toFixed(3));
   }
 
   private updateHand(s: GameState): void {

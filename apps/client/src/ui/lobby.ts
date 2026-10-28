@@ -1,16 +1,68 @@
 // 共同経営のルーム作成・参加（設計書 19.1 マルチプレイのルーム作成/参加/接続中表示）。
+// ルームを作ったら、参加コードを大きく見せる待機画面を出してから店に入る。店の中では画面上部の「コード」からいつでも見られる。
 
 import { createGame, listSlots, loadFromSlot, saveToSlot, type GameState } from '@jiro/core';
 import type { App } from '../game/app';
 import { VERSION } from '../game/app';
+import type { GameHost } from '../game/host';
+import { codeBlock, JOIN_HOWTO, memberText } from './room-code';
 import { Api, ApiError, defaultServerUrl, rememberServerUrl } from '../net/api';
 import { RemoteHost } from '../net/remote';
 import { h, replace, toast } from './dom';
 
 export function openLobby(app: App, onBack: () => void): HTMLElement {
   const body = h('div', { class: 'lobby-body' });
-  const el = h('div', { class: 'screen lobby' }, h('div', { class: 'screen-inner' }, h('h2', null, 'オンライン共同経営（最大4人）'), body, h('button', { class: 'btn ghost', onclick: onBack }, '← 戻る')));
+  const backBtn = h('button', { class: 'btn ghost', onclick: onBack }, '← 戻る');
+  const el = h('div', { class: 'screen lobby' }, h('div', { class: 'screen-inner' }, h('h2', null, 'オンライン共同経営（最大4人）'), body, backBtn));
   el.addEventListener('pointerdown', (e) => e.stopPropagation());
+
+  /** ルームを作った後: 参加コードを大きく見せ、仲間を待ってから店に入る */
+  const showWaiting = (host: GameHost, code: string) => {
+    backBtn.style.display = 'none';
+    const members = h('div', { class: 'note' });
+    const tick = () => (members.textContent = memberText(host));
+    const timer = window.setInterval(tick, 500);
+    tick();
+    replace(
+      body,
+      h(
+        'section',
+        { class: 'card wide room-wait' },
+        h('h4', null, 'ルームを作りました'),
+        h('p', { class: 'note' }, '仲間にこの参加コードを伝えてください。'),
+        codeBlock(app.uiLayer, code),
+        h('p', { class: 'note' }, `${JOIN_HOWTO}お店に入った後も、画面上部の「コード」を押すといつでも確認できます。`),
+        members,
+        h(
+          'div',
+          { class: 'row' },
+          h(
+            'button',
+            {
+              class: 'btn ghost',
+              onclick: () => {
+                window.clearInterval(timer);
+                host.dispose();
+                onBack();
+              },
+            },
+            'やめる',
+          ),
+          h(
+            'button',
+            {
+              class: 'btn primary big',
+              onclick: () => {
+                window.clearInterval(timer);
+                app.startGame(host);
+              },
+            },
+            '店に入る',
+          ),
+        ),
+      ),
+    );
+  };
 
   const urlInput = h('input', { class: 'input', value: defaultServerUrl(), placeholder: 'https://jiro-ramen.<アカウント>.workers.dev' }) as HTMLInputElement;
   const codeInput = h('input', { class: 'input code', placeholder: '参加コード（6文字）', maxLength: 6 }) as HTMLInputElement;
@@ -69,8 +121,12 @@ export function openLobby(app: App, onBack: () => void): HTMLElement {
         host.dispose();
         throw new Error(host.lastError || '接続できませんでした');
       }
-      if (mode === 'create') app.slot = slot;
-      toast(app.uiLayer, `ルーム ${code} に参加しました。仲間に参加コード「${code}」を伝えてください`, 'good', 8000);
+      if (mode === 'create') {
+        app.slot = slot;
+        showWaiting(host, code);
+        return;
+      }
+      toast(app.uiLayer, `ルーム ${code} に参加しました`, 'good', 4000);
       app.startGame(host);
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : (e as Error).message;

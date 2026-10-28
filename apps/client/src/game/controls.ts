@@ -3,6 +3,7 @@
 // PC: WASD/矢印で移動、マウスで視点（クリックでポインターロック）、E/クリック=操作、Q=中断、Tab=経営メニュー。
 
 import { h } from '../ui/dom';
+import { toView, viewSize } from './orientation';
 
 export interface ControlSettings {
   lookSensitivity: number;
@@ -94,37 +95,39 @@ export class Controls {
       this.look(e.movementX, e.movementY, 0.0024);
     });
 
-    // タッチ（スマホ）。UI ボタン上のタッチはここに来ない（HUD 側で stopPropagation）
+    // タッチ（スマホ）。UI ボタン上のタッチはここに来ない（HUD 側で stopPropagation）。
+    // 座標は表示の座標に直して使う（縦向きの画面では表示を 90° 回しているため。game/orientation.ts）
     this.listen(this.canvas, 'pointerdown', (e) => {
       if (!this.enabled || e.pointerType === 'mouse') return;
-      const w = window.innerWidth;
-      if (e.clientX < w * 0.45 && this.joyId === null) {
+      const p = toView(e.clientX, e.clientY);
+      if (p.x < viewSize().width * 0.45 && this.joyId === null) {
         this.joyId = e.pointerId;
-        this.joyOrigin = { x: e.clientX, y: e.clientY };
+        this.joyOrigin = p;
         this.joyVec = { x: 0, y: 0 };
         this.joyEl.style.display = 'block';
-        this.joyEl.style.left = `${e.clientX - 60}px`;
-        this.joyEl.style.top = `${e.clientY - 60}px`;
+        this.joyEl.style.left = `${p.x - 60}px`;
+        this.joyEl.style.top = `${p.y - 60}px`;
         this.knobEl.style.transform = 'translate(0px, 0px)';
       } else if (this.lookId === null) {
         this.lookId = e.pointerId;
-        this.lookLast = { x: e.clientX, y: e.clientY };
+        this.lookLast = p;
       }
       this.canvas.setPointerCapture?.(e.pointerId);
     });
     this.listen(this.canvas, 'pointermove', (e) => {
+      const p = toView(e.clientX, e.clientY);
       if (e.pointerId === this.joyId) {
-        const dx = e.clientX - this.joyOrigin.x;
-        const dy = e.clientY - this.joyOrigin.y;
+        const dx = p.x - this.joyOrigin.x;
+        const dy = p.y - this.joyOrigin.y;
         const len = Math.hypot(dx, dy);
         const max = 55;
         const k = len > max ? max / len : 1;
         this.joyVec = { x: (dx * k) / max, y: (dy * k) / max };
         this.knobEl.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
       } else if (e.pointerId === this.lookId) {
-        const dx = e.clientX - this.lookLast.x;
-        const dy = e.clientY - this.lookLast.y;
-        this.lookLast = { x: e.clientX, y: e.clientY };
+        const dx = p.x - this.lookLast.x;
+        const dy = p.y - this.lookLast.y;
+        this.lookLast = p;
         this.look(dx, dy, 0.0062);
       }
     });

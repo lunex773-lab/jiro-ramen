@@ -61,13 +61,15 @@ test('タイトル→新規開始→店内HUDが表示される', async ({ page 
 test('設備を見ると操作ボタンが出て、丼を取って並べられる', async ({ page }) => {
   await startNewGame(page);
   await face(page, 'bowl_rack');
-  const take = page.locator('.act', { hasText: 'きれいな丼を取る' });
+  // 操作ボタンは小さな丸（絵文字＋短い名前）。正式な名前は読み上げ名（aria-label）
+  const take = page.locator('.act[aria-label^="きれいな丼を取る"]');
+  await expect(take).toContainText('丼取る');
   await expect(take).toBeVisible();
   await shot(page, '03-rack');
   await press(take);
   await expect(page.locator('.hud-hand')).toContainText('きれいな丼');
   await face(page, 'assembly');
-  const place = page.locator('.act', { hasText: /丼を並べる|丼を置く/ });
+  const place = page.locator('.act[aria-label^="丼を並べる"], .act[aria-label^="丼を置く"]');
   await expect(place).toBeVisible();
   await press(place);
   await expect(page.locator('.hud-detail')).toContainText('盛り付け台');
@@ -126,34 +128,99 @@ test('保存して再読み込みしても続きから遊べる', async ({ page 
   await expect(page.locator('.hud-top')).toContainText('1日目');
 });
 
-test.describe('縦向きのスマホ', () => {
-  // 横向き専用なので、縦向きでは案内を出してゲームを止める
+test.describe('縦向きのスマホ（回転ロック中など）', () => {
+  // 横画面専用。縦向きの画面では表示ごと 90° 回して横画面にし、そのまま遊べる（端末を左に倒して持つ）
   test.use({ viewport: { width: 390, height: 664 } });
+  const viewOf = (page: Page) =>
+    page.locator('.app').evaluate((el) => ({ rotated: el.classList.contains('rotated'), w: el.clientWidth, h: el.clientHeight }));
 
-  test('縦向きでは「横向きにしてください」が出て、横にすると消える', async ({ page }) => {
+  test('縦向きの画面では表示を回して横画面にし、横にすると元に戻る', async ({ page }) => {
     test.skip(!test.info().project.use.hasTouch, 'タッチ端末だけの動作');
     await page.goto('/');
-    const hint = page.locator('.rotate-hint');
-    await expect(hint).toBeVisible();
-    await expect(hint).toContainText('横向きにしてください');
-    await shot(page, '00-portrait');
-    await page.setViewportSize({ width: 750, height: 342 });
-    await expect(hint).toBeHidden();
+    expect(await viewOf(page)).toEqual({ rotated: true, w: 664, h: 390 });
+    // 回した表示が画面にぴったり収まる
+    const box = (await page.locator('.app').boundingBox())!;
+    expect([Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)]).toEqual([0, 0, 390, 664]);
     await expect(page.getByText('ひとりで経営する')).toBeVisible();
+    await shot(page, '00-portrait-title');
+    await page.setViewportSize({ width: 750, height: 342 });
+    await expect.poll(() => viewOf(page)).toEqual({ rotated: false, w: 750, h: 342 });
   });
 
-  test('縦向きの間はゲームの時間が止まる', async ({ page }) => {
+  test('回した表示のまま、ボタンを押して遊べ、指の操作の向きも合う', async ({ page }) => {
     test.skip(!test.info().project.use.hasTouch, 'タッチ端末だけの動作');
-    await page.setViewportSize({ width: 750, height: 342 });
     await startNewGame(page);
-    await page.getByRole('button', { name: /開店する/ }).click();
-    await expect.poll(async () => page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.host.state.phase)).toBe('open');
-    await page.setViewportSize({ width: 390, height: 664 });
-    await expect(page.locator('.rotate-hint')).toBeVisible();
-    const t0 = await page.evaluate(() => (window as unknown as { __jiro: { host: { state: { t: number } } } }).__jiro.host.state.t);
-    await page.waitForTimeout(1500);
-    const t1 = await page.evaluate(() => (window as unknown as { __jiro: { host: { state: { t: number } } } }).__jiro.host.state.t);
-    expect(t1).toBe(t0);
+    expect((await viewOf(page)).rotated).toBe(true);
+    await face(page, 'bowl_rack');
+    const take = page.locator('.act[aria-label^="きれいな丼を取る"]');
+    await press(take);
+    await expect(page.locator('.hud-hand')).toContainText('きれいな丼');
+    await shot(page, '00-portrait-shop');
+    // 本物のタッチを送る。表示の左側（画面では上側）を押して、表示の上（画面では右）へなぞると前に進む
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd', x: number, y: number) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] });
+    const controls = () => page.evaluate(() => {
+      const c = (window as unknown as { __jiro: { controls: { forward: number; strafe: number } } }).__jiro.controls;
+      return { forward: c.forward, strafe: c.strafe };
+    });
+    await touch('touchStart', 200, 120);
+    await touch('touchMove', 230, 120);
+    await touch('touchMove', 260, 120);
+    await expect.poll(async () => (await controls()).forward).toBeGreaterThan(0.5);
+    expect(Math.abs((await controls()).strafe)).toBeLessThan(0.2);
+    await touch('touchEnd', 0, 0);
+    await expect.poll(async () => (await controls()).forward).toBe(0);
+  });
+});
+
+test.describe('共同経営', () => {
+  // サーバーを偽物に差し替えて、ルームを作ってから参加コードが見えるまでを確かめる
+  const SERVER = 'https://mock.jiro.test';
+  const CODE = 'ABC234';
+
+  test('ルームを作ると参加コードを大きく表示し、店の中でも上部にいつも出ている', async ({ page }) => {
+    await page.route(`${SERVER}/api/v1/**`, async (route) => {
+      const url = new URL(route.request().url());
+      const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+      const bodies: Record<string, unknown> = {
+        '/api/v1/game-version': { gameVersion: '0.9.0', minClientVersion: '0.1.0', protocol: 1 },
+        '/api/v1/auth/anonymous': { playerId: 'u1', token: 'tok' },
+        '/api/v1/session/create': { roomId: 'room1', code: CODE, joinToken: 'jt' },
+        '/api/v1/session/leave': { ended: true },
+      };
+      return route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(bodies[url.pathname] ?? {}) });
+    });
+    await page.routeWebSocket(/mock\.jiro\.test\/api\/v1\/room\//, (ws) => {
+      const peers = { t: 'peers', list: [{ id: 'p1', name: '店主', color: '#f2c200', connected: true, isHost: true }] };
+      ws.onMessage((raw) => {
+        const msg = JSON.parse(String(raw)) as { t: string; state?: unknown };
+        if (msg.t === 'hello') ws.send(JSON.stringify({ t: 'welcome', playerId: 'p1', roomId: 'room1', isHost: true, protocol: 1, needInit: true }));
+        if (msg.t === 'hostInit') {
+          ws.send(JSON.stringify({ t: 'full', seq: 0, state: msg.state }));
+          ws.send(JSON.stringify(peers));
+        }
+      });
+    });
+    await page.goto('/');
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await page.getByRole('button', { name: /オンライン共同経営/ }).click();
+    await page.locator('.lobby input.input').first().fill(SERVER);
+    await page.getByRole('button', { name: 'ルームを作成' }).click();
+    // 待機画面: 参加コードを大きく表示
+    await expect(page.locator('.room-wait .room-code')).toHaveText(CODE);
+    await expect(page.locator('.room-wait')).toContainText('参加中 1人');
+    await shot(page, '20-room-wait');
+    await page.getByRole('button', { name: '店に入る' }).click();
+    // 店の中: 上部にいつも参加コード。押すと大きく表示
+    const chip = page.locator('.chip.conn');
+    await expect(chip).toContainText(`コード ${CODE}`);
+    await chip.click();
+    await expect(page.locator('.modal .room-code')).toHaveText(CODE);
+    await shot(page, '21-room-code');
+    await page.locator('.modal').getByRole('button', { name: '閉じる' }).click();
+    await expect(page.locator('.modal')).toBeHidden();
   });
 });
 
@@ -183,7 +250,7 @@ test.describe('チュートリアル', () => {
     await page.waitForTimeout(600);
     await shot(page, '11-tutorial-prep');
     // 長押しで豚を切ると、経営メニューの手順へ
-    const slice = page.locator('.act', { hasText: '豚を切る' });
+    const slice = page.locator('.act[aria-label="豚を切る"]');
     await expect(slice).toBeVisible();
     const box = (await slice.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);

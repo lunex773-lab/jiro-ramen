@@ -1,5 +1,6 @@
-// 注視対象の判定。画面中央からの視線と、操作できる対象の箱（AABB）の交差で決める。
-// 視線が何にも当たらないときは、手が届く範囲で正面に近い対象を選ぶ（スマホで狙いやすくするため）。
+// 注視対象の判定。画面中央の視点カーソルからの視線と、操作できる対象の箱（AABB）の交差で決める。
+// カーソルが重なっている物を必ず選ぶ（手が届かなくても選び、近づくよう案内する）。
+// 何にも重なっていないときだけ、カーソルのすぐ近く（約4°以内）にある手の届く物を選ぶ（スマホで狙いやすくするため）。
 
 import {
   CELL,
@@ -72,9 +73,16 @@ export function rayBox(o: [number, number, number], d: [number, number, number],
 
 export interface FocusResult {
   target: Target;
-  /** 視線で直接狙っているか */
+  /** カーソルが重なっているか（false はカーソルのすぐ近くを補助で選んだ） */
   aimed: boolean;
+  /** 手が届くか（届かなければ操作できないので「近づいてください」と出す） */
+  reachable: boolean;
 }
+
+/** 視線で選べる距離（m）。壁越しの物を選ばないよう短めにする */
+const AIM_RANGE = 3.2;
+/** カーソルが外れていても選ぶ角度（約4°）の正接 */
+const ASSIST = Math.tan((4 * Math.PI) / 180);
 
 /**
  * 注視対象を求める。
@@ -82,38 +90,62 @@ export interface FocusResult {
  */
 export function findFocus(s: GameState, actor: Actor, eye: [number, number, number], dir: [number, number, number]): FocusResult | null {
   const boxes = interactableBoxes(s);
+  // 1. カーソルが重なっている物（一番手前）
   let best: { id: string; t: number } | null = null;
   for (const b of boxes) {
     const t = rayBox(eye, dir, b);
-    if (t < 3.2 && (!best || t < best.t)) best = { id: b.id, t };
+    if (t < AIM_RANGE && (!best || t < best.t)) best = { id: b.id, t };
   }
   if (best) {
     const tgt = resolveTarget(s, best.id);
-    if (tgt && inReach(s, actor, tgt)) return { target: tgt, aimed: true };
+    if (tgt) return { target: tgt, aimed: true, reachable: inReach(s, actor, tgt) };
   }
-  // 正面に近く手の届くもの
-  let alt: { id: string; score: number } | null = null;
-  const fx = dir[0];
-  const fz = dir[2];
-  const fl = Math.hypot(fx, fz) || 1;
+  // 2. 何にも重なっていなければ、カーソルのすぐ近く（外れている角度が約4°以内）で手の届く物のうち、
+  //    一番カーソルに近い（外れている角度が小さい）物
+  let alt: { id: string; miss: number } | null = null;
   for (const b of boxes) {
-    const cx = (b.min[0] + b.max[0]) / 2;
-    const cz = (b.min[2] + b.max[2]) / 2;
-    const dx = cx - actor.pos.x;
-    const dz = cz - actor.pos.z;
-    const dl = Math.hypot(dx, dz) || 1;
-    const dot = (dx * fx + dz * fz) / (dl * fl);
-    if (dot < 0.55) continue;
+    const d = Math.max(0.3, distToBox(eye, b));
+    const m = missMargin(eye, dir, b, d * ASSIST);
+    if (m === Infinity) continue;
+    const miss = m / d;
+    if (alt && miss >= alt.miss) continue;
     const tgt = resolveTarget(s, b.id);
     if (!tgt || !inReach(s, actor, tgt)) continue;
-    const score = dot * 2 - dl;
-    if (!alt || score > alt.score) alt = { id: b.id, score };
+    alt = { id: b.id, miss };
   }
   if (alt) {
     const tgt = resolveTarget(s, alt.id);
-    if (tgt) return { target: tgt, aimed: false };
+    if (tgt) return { target: tgt, aimed: false, reachable: true };
   }
   return null;
+}
+
+function inflate(b: Box, m: number): Box {
+  return { id: b.id, min: [b.min[0] - m, b.min[1] - m, b.min[2] - m], max: [b.max[0] + m, b.max[1] + m, b.max[2] + m] };
+}
+
+/** 視線を箱に当てるのに必要な、箱のふくらみ（m）。max まで広げても当たらなければ Infinity */
+function missMargin(eye: [number, number, number], dir: [number, number, number], b: Box, max: number): number {
+  if (rayBox(eye, dir, inflate(b, max)) >= AIM_RANGE) return Infinity;
+  let lo = 0;
+  let hi = max;
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) / 2;
+    if (rayBox(eye, dir, inflate(b, mid)) < AIM_RANGE) hi = mid;
+    else lo = mid;
+  }
+  return hi;
+}
+
+/** 点から箱までの距離 */
+function distToBox(p: [number, number, number], b: Box): number {
+  let d2 = 0;
+  for (let i = 0; i < 3; i++) {
+    const v = p[i]!;
+    const c = Math.max(b.min[i]!, Math.min(b.max[i]!, v));
+    d2 += (v - c) ** 2;
+  }
+  return Math.sqrt(d2);
 }
 
 export function targetName(s: GameState, t: Target): string {

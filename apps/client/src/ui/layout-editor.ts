@@ -17,6 +17,7 @@ import {
   type Rot,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
+import { toView, viewRect } from '../game/orientation';
 import { h, replace, toast } from './dom';
 
 interface Drag {
@@ -141,9 +142,11 @@ export class LayoutEditor {
   }
 
   private eventPos(e: PointerEvent): { x: number; z: number } {
-    const r = this.canvas.getBoundingClientRect();
+    // 縦向きの画面では表示を 90° 回しているので、表示の座標で計算する（game/orientation.ts）
+    const r = viewRect(this.canvas);
+    const p = toView(e.clientX, e.clientY);
     const dpr = this.canvas.width / r.width;
-    return this.toWorld((e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr);
+    return this.toWorld((p.x - r.left) * dpr, (p.y - r.top) * dpr);
   }
 
   private hit(p: { x: number; z: number }): Equipment | null {

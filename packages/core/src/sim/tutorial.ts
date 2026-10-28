@@ -128,7 +128,7 @@ const BASICS: TutorialStep[] = [
   {
     id: 'prep_pork',
     title: '仕込み: 豚を切る',
-    text: '目印の「仕込み台」を見ると、右下に操作ボタンが出ます。「豚を切る」を押し続けよう（長押しの作業は終わるまで押し続けます）。',
+    text: '画面中央の照準を目印の「仕込み台」に合わせると、右下に丸い操作ボタンが出ます。「🔪 豚切り」を押し続けよう（縁が点線のボタンは長押し。周りの輪が一周するまで押し続けます）。',
     target: { kind: 'role', role: 'prep' },
     enter: (s, _ctx, t) => {
       t.mark.buta = stockOf(s, 'buta');
@@ -215,7 +215,7 @@ const BASICS: TutorialStep[] = [
   {
     id: 'bowl_take',
     title: '丼を用意する',
-    text: '目印の「丼棚」を見て「きれいな丼を取る」。',
+    text: '目印の「丼棚」を見て「🥣 丼取る」。',
     target: { kind: 'role', role: 'rack' },
     enter: (s, _ctx, t) => rememberSeat(s, t),
     auto: (s, t) => me(s).hand.kind === 'clean' || !!bowlOf(s, t),
@@ -223,14 +223,14 @@ const BASICS: TutorialStep[] = [
   {
     id: 'bowl_place',
     title: '丼を並べる',
-    text: '「盛り付け台」を見て「丼を並べる」。丼は食券の順にお客さんへ割り当てられます。',
+    text: '「盛り付け台」を見て「🥣 並べる」。丼は食券の順にお客さんへ割り当てられます。',
     target: { kind: 'role', role: 'assembly' },
     auto: (s, t) => !!bowlOf(s, t),
   },
   {
     id: 'tare',
     title: 'タレを入れる',
-    text: '盛り付け台で「タレを入れる」を押し続けよう。',
+    text: '盛り付け台で「🫗 タレ」を押し続けよう。',
     target: { kind: 'role', role: 'assembly' },
     enter: (s, _ctx, t) => {
       const b = bowlOf(s, t);
@@ -241,14 +241,14 @@ const BASICS: TutorialStep[] = [
   {
     id: 'soup',
     title: 'スープを注ぐ',
-    text: '続けて「スープを注ぐ」。寸胴が近いほど早く注げます。',
+    text: '続けて「🍲 スープ」。寸胴が近いほど早く注げます。',
     target: { kind: 'role', role: 'assembly' },
     auto: (s, t) => (bowlOf(s, t)?.contents?.soupL ?? 0) > 0,
   },
   {
     id: 'noodles_in',
     title: '麺をゆでる',
-    text: '「麺釜」を見て「麺を入れる」。ゆで上がりまで約18秒。釜の上の輪が緑になったら食べ頃です。',
+    text: '「麺釜」を見て「🍜 麺入れ」。ゆで上がりまで約18秒。釜の上の輪が緑になったら食べ頃です。',
     target: { kind: 'role', role: 'boiler' },
     auto: (s, t) => {
       const o = orderOf(s, t);
@@ -258,28 +258,28 @@ const BASICS: TutorialStep[] = [
   {
     id: 'ask_call',
     title: 'コールを聞く',
-    text: 'ゆでている間に、お客さんの席を見て「ニンニク入れますか？」と聞こう。トッピングの量（ヤサイ・ニンニク・アブラ・カラメ）を答えてくれます。',
+    text: 'ゆでている間に、お客さんの席を見て「👂 コール」で「ニンニク入れますか？」と聞こう。トッピングの量（ヤサイ・ニンニク・アブラ・カラメ）を答えてくれます。',
     target: { kind: 'seat' },
     auto: (s, t) => !!orderOf(s, t)?.callRevealed,
   },
   {
     id: 'noodles_up',
     title: '麺上げ',
-    text: '麺釜の輪が緑になったら「麺上げ」。遅すぎると麺がのびて味が落ちます。',
+    text: '麺釜の輪が緑になったら「🥢 麺上げ」。遅すぎると麺がのびて味が落ちます。',
     target: { kind: 'role', role: 'boiler' },
     auto: (s, t) => (bowlOf(s, t)?.contents?.noodleG ?? 0) > 0,
   },
   {
     id: 'toppings',
     title: 'コールどおりに盛る',
-    text: '盛り付け台で「コールどおりに盛る」。食券に聞いたコールが出ています（今回は ニンニク・アブラ）。',
+    text: '盛り付け台で「🥬 盛る」。食券に聞いたコールが出ています（今回は ニンニク・アブラ）。',
     target: { kind: 'role', role: 'assembly' },
     auto: (s, t) => isBowlComplete(bowlOf(s, t)?.contents ?? null),
   },
   {
     id: 'bowl_pick',
     title: '丼を持つ',
-    text: '完成しました！盛り付け台で「丼を持つ」。',
+    text: '完成しました！盛り付け台で「✋ 持つ」。',
     target: { kind: 'role', role: 'assembly' },
     auto: (s, t) => {
       const h = me(s).hand;
@@ -289,7 +289,7 @@ const BASICS: TutorialStep[] = [
   {
     id: 'serve',
     title: '提供する',
-    text: 'お客さんの席を見て「提供する」。冷めないうちに出しましょう。',
+    text: 'お客さんの席を見て「🍽️ 提供」。冷めないうちに出しましょう。',
     target: { kind: 'seat' },
     auto: (s, t) => {
       const b = bowlOf(s, t);
@@ -305,7 +305,7 @@ const BASICS: TutorialStep[] = [
   {
     id: 'collect',
     title: '片付け: 丼を下げる',
-    text: '席を見て「丼を下げる」。',
+    text: '席を見て「🧺 下げる」。',
     target: { kind: 'seat' },
     enter: (s, _ctx, t) => {
       const b = bowlOf(s, t);
@@ -316,7 +316,7 @@ const BASICS: TutorialStep[] = [
   {
     id: 'wash_drop',
     title: '片付け: 洗い場へ',
-    text: '「洗い場」を見て「下げた丼を洗い場に置く」。',
+    text: '「洗い場」を見て「🧺 置く」。',
     target: { kind: 'role', role: 'sink' },
     auto: (s, t) => {
       const b = s.bowls.find((x) => x.id === str(t, 'bowl'));
@@ -326,7 +326,7 @@ const BASICS: TutorialStep[] = [
   {
     id: 'wash',
     title: '片付け: 丼を洗う',
-    text: '洗い場で「丼を洗う」を押し続けよう。洗った丼は丼棚に戻り、また使えます。',
+    text: '洗い場で「🧽 洗う」を押し続けよう。洗った丼は丼棚に戻り、また使えます。',
     target: { kind: 'role', role: 'sink' },
     auto: (s, t) => {
       const b = s.bowls.find((x) => x.id === str(t, 'bowl'));
@@ -336,7 +336,7 @@ const BASICS: TutorialStep[] = [
   {
     id: 'wipe',
     title: '片付け: カウンターを拭く',
-    text: 'カウンターが汚れています。席を見て「カウンターを拭く」。汚れたままだと次のお客さんの満足度が下がります。',
+    text: 'カウンターが汚れています。席を見て「🧻 拭く」。汚れたままだと次のお客さんの満足度が下がります。',
     target: { kind: 'seat' },
     enter: (s, _ctx, t) => {
       const seat = s.seats.find((x) => x.id === str(t, 'seat'));
@@ -347,7 +347,7 @@ const BASICS: TutorialStep[] = [
   {
     id: 'mop_take',
     title: '掃除: モップを持つ',
-    text: '床にスープがこぼれています。滑ると危ないので掃除しよう。まず「掃除用具入れ」を見て「モップを持つ」。',
+    text: '床にスープがこぼれています。滑ると危ないので掃除しよう。まず「掃除用具入れ」を見て「🧹 持つ」。',
     target: { kind: 'role', role: 'locker' },
     enter: (s, _ctx, t) => {
       const st = STAGES[s.career.stage]!;
@@ -361,14 +361,14 @@ const BASICS: TutorialStep[] = [
   {
     id: 'mop',
     title: '掃除: 床を拭く',
-    text: '目印のこぼれたスープを見下ろして「こぼれたスープを拭く」を押し続けよう。',
+    text: '目印のこぼれたスープを見下ろして「🧹 掃除」を押し続けよう。',
     target: { kind: 'spill' },
     auto: (s, t) => !s.dirt.some((d) => d.id === str(t, 'spill')),
   },
   {
     id: 'mop_return',
     title: '掃除: 片付け',
-    text: '掃除用具入れを見て「モップを片付ける」。',
+    text: '掃除用具入れを見て「🧹 片付け」。',
     target: { kind: 'role', role: 'locker' },
     auto: (s) => me(s).hand.kind !== 'mop',
   },

@@ -24,6 +24,8 @@ export interface GameHost {
   readonly isHost: boolean;
   readonly conn: ConnState;
   readonly peers: PeerInfo[];
+  /** 共同経営の参加コード（ひとりプレイではなし） */
+  readonly roomCode?: string;
   /** 操作を要求する */
   act(a: Action): Promise<ActionResult>;
   /** 自分の位置を送る（移動は頻度が高いので専用） */
