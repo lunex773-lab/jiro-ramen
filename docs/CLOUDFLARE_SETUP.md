@@ -8,8 +8,9 @@
 > - サーバーのコードは、この開発環境のローカル（workerd / Miniflare）で動作を確認済みです。
 >   自動テスト 58 件（HTTP API・セーブ・ルーム・WebSocket・永続化）、`wrangler dev` 上での疎通確認スクリプト、
 >   `wrangler deploy --dry-run`（バンドルの確認）が通っています。
-> - **本番の Cloudflare へのデプロイは未検証です。** デプロイは GitHub Actions で行う設定にしました（2.10）。
->   GitHub に Cloudflare の API トークンを登録すると動きます。開発に使った Claude Code のクラウド環境からは
+> - **2026-10-28 に GitHub Actions（2.10）で本番の Cloudflare にデプロイしました。** デプロイ後の確認（バージョン、
+>   GitHub Pages のオリジンからの接続の許可、ルームの作成・参加・操作・保存・退出の通し）が本番で通っています。
+>   iPhone 実機のブラウザからの共同経営は未確認です。開発に使った Claude Code のクラウド環境からは
 >   `developers.cloudflare.com`（公式ドキュメント）への通信が遮断されていて、閲覧できませんでした（第6章）。
 > - API の使い方は、インストールした `wrangler` 4.151.3・`@cloudflare/workers-types`・`@cloudflare/vitest-pool-workers`
 >   に同梱の型定義と設定スキーマで確認しました。**料金・無料枠・プランの条件の数値は確認できていません。**
@@ -179,7 +180,7 @@ node scripts/smoke.mjs https://jiro-ramen.<サブドメイン>.workers.dev
 2. D1 データベース `jiro-db` を探す（なければ作る）。その ID を、実行中だけ `wrangler.jsonc` に入れる（リポジトリには書かない）
 3. 秘密鍵 `SESSION_SECRET` が未登録なら、ランダムな値を作ってデプロイと一緒に登録する（登録済みなら変えない。値はどこにも表示しない）
 4. `apps/server` で `wrangler deploy`
-5. `https://jiro-ramen.<サブドメイン>.workers.dev/api/v1/game-version` が応答するか確認
+5. `https://jiro-ramen.<サブドメイン>.workers.dev/api/v1/game-version` が応答するか、GitHub Pages のオリジン（`https://<所有者>.github.io`）からの接続を許可し、ほかのオリジンを拒否しているかを確認
 
 2〜3 は `apps/server/scripts/cloudflare.mjs` が Cloudflare API を呼んで行います。
 ブラウザ版（GitHub Pages）のビルドも同じ鍵でサーバーの URL を求めて埋め込むので、`VITE_SERVER_URL` の登録は要りません（3章）。

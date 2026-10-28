@@ -120,6 +120,26 @@ jobs:
           done
           echo "::error::$URL/api/v1/game-version が応答しません"
           exit 1
+      - name: 動作確認（ブラウザ版のページからの接続）
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          # GitHub Pages のオリジンを許可し、それ以外は拒否しているか（apps/server/wrangler.jsonc の ALLOWED_ORIGINS）
+          origin="https://${OWNER,,}.github.io"
+          allow=$(curl -fsS -o /dev/null -D - -X OPTIONS -H "Origin: $origin" -H "Access-Control-Request-Method: POST" \
+            -H "Access-Control-Request-Headers: authorization,content-type" "$URL/api/v1/auth/anonymous" \
+            | tr -d '\r' | sed -n 's/^access-control-allow-origin: //Ip')
+          if [ "$allow" != "$origin" ]; then
+            echo "::error::$origin からの接続が許可されていません（apps/server/wrangler.jsonc の ALLOWED_ORIGINS）"
+            exit 1
+          fi
+          other=$(curl -sS -o /dev/null -w '%{http_code}' -H "Origin: https://example.invalid" "$URL/api/v1/game-version")
+          if [ "$other" != "403" ]; then
+            echo "::error::許可していないオリジンからの要求が拒否されません（HTTP $other）"
+            exit 1
+          fi
+          echo "$origin からの接続を許可し、ほかのオリジンは拒否しています"
       - name: 動作確認（共同経営の通し）
         if: inputs.smoke
         env:

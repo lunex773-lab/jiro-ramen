@@ -1,7 +1,7 @@
 # ADR-003: Cloudflare へのデプロイを GitHub Actions で行う
 
 - 状態: 承認（2026-10-27 プロジェクトオーナーの選択「GitHub に鍵（GitHub Actions でデプロイ）」）
-- 関連: [ADR-002](ADR-002-no-r2.md)、docs/CLOUDFLARE_SETUP.md 2.10・6章、docs/TASKS.md T21・U02
+- 関連: [ADR-002](ADR-002-no-r2.md)、docs/CLOUDFLARE_SETUP.md 2.10・6章、docs/TASKS.md T21
 
 ## 背景
 

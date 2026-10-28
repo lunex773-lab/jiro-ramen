@@ -50,5 +50,5 @@
 - CI（GitHub Actions）: push で型チェック・単体テスト（core / server）・ビルド・E2E（iPhone 相当＋PC）
 - GitHub Pages への自動公開（Pages の公開元が「GitHub Actions」でない間は公開をスキップして案内）
 - Cloudflare へのデプロイ: リポジトリのルートで `wrangler deploy` すると失敗していたため、デプロイ先を `apps/server` に向けるスクリプト（`npm run deploy:server`）と手順を追加
-- **Cloudflare へのデプロイを GitHub Actions で行う**（`.github/workflows/deploy-server.yml`。オーナーの判断: [ADR-003](adr/ADR-003-deploy-via-github-actions.md)）。GitHub の Secrets に Cloudflare の API トークンとアカウント ID を登録すると、push のたびにサーバーのテスト → D1 の用意（なければ作る）と ID の設定 → 秘密鍵 `SESSION_SECRET` の登録（未登録のときだけ。値は表示しない）→ デプロイ → 応答の確認 を行う。D1 の ID はリポジトリに書かない。ブラウザ版のビルドも同じ鍵でサーバーの URL を求めて埋め込む（`VITE_SERVER_URL` の登録が不要に）。Claude Code は push するだけで Cloudflare を更新でき、トークンは見ない
+- **Cloudflare へのデプロイを GitHub Actions で行う**（`.github/workflows/deploy-server.yml`。オーナーの判断: [ADR-003](adr/ADR-003-deploy-via-github-actions.md)）。GitHub の Secrets に Cloudflare の API トークンとアカウント ID を登録すると、push のたびにサーバーのテスト → D1 の用意（なければ作る）と ID の設定 → 秘密鍵 `SESSION_SECRET` の登録（未登録のときだけ。値は表示しない）→ デプロイ → 応答の確認 を行う。D1 の ID はリポジトリに書かない。ブラウザ版のビルドも同じ鍵でサーバーの URL を求めて埋め込む（`VITE_SERVER_URL` の登録が不要に）。Claude Code は push するだけで Cloudflare を更新でき、トークンは見ない。2026-10-28 に本番へデプロイし、通しの確認とブラウザ版への URL の埋め込みまで確認済み
 - ドキュメント: 設計書、ADR-001、Phase 0 レポート、バランス記録、Cloudflare 手順書、本ファイル、[TASKS.md](TASKS.md)
