@@ -16,7 +16,7 @@ import { cancelWork, dropHand, getActor, interact, type Args } from './interact'
 import { placeOrder } from './inventory';
 import { autoPlace, expand, placeEquipment, storeEquipment } from './layout';
 import { emit, type SimCtx } from './notices';
-import { currentTutorialStep, inBasicsTutorial, tutorialAction, type TutorialOp } from './tutorial';
+import { currentTutorialStep, inBasicsTutorial, tutorialAction, updateTutorial, type TutorialOp } from './tutorial';
 
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
@@ -73,7 +73,18 @@ function isNum(v: unknown): v is number {
  * 操作要求を検証して適用する。
  * @param now 位置検証に使う実時間（秒）。サーバーは受信時刻、ローカルは performance.now()/1000
  */
+/**
+ * 操作要求を適用する。チュートリアル中は、操作の直後に手順の進み具合を確かめる
+ * （ひとりプレイでは経営メニューを開いている間は時間が止まって step が呼ばれないので、
+ *  発注・値段の変更・修理・採用などの手順がメニューを開いたままでも進むように）
+ */
 export function applyAction(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now = 0): ActionResult {
+  const r = applyActionInner(s, actorId, a, ctx, now);
+  if (r.ok && s.tutorial && a.type !== 'tutorial') updateTutorial(s, ctx);
+  return r;
+}
+
+function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now: number): ActionResult {
   const player = s.players.find((p) => p.id === actorId);
   if (!player) return fail('プレイヤーが見つかりません');
   if (s.phase === 'bankrupt' && a.type !== 'move') return fail('破産しています');

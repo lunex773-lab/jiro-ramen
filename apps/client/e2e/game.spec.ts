@@ -337,6 +337,9 @@ test.describe('チュートリアル', () => {
     await expect(panel).toContainText('どれか1つ仕入れて');
     await expect(panel).toHaveClass(/docked/);
     await shot(page, '12-tutorial-stock');
+    // メニューを開いたまま（時間が止まっている）1つ発注すると、すぐ次の手順へ進む（以前は進まず、発注を重ねて冷蔵庫がいっぱいになった）
+    await page.locator('.manage-body').getByRole('button', { name: '翌朝便' }).first().click();
+    await expect(panel).toContainText('値段を決める');
     // やめると、練習をリセットして1日目から
     await panel.getByRole('button', { name: 'やめる' }).click();
     await page.getByRole('button', { name: 'やめる' }).last().click();

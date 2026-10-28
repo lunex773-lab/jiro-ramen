@@ -9,6 +9,8 @@ import {
   seatCounterPoint,
   TASK_KINDS,
   tutorialTarget,
+  TUTORIAL_STEPS,
+  updateTutorial,
   validateState,
   type Action,
   type GameState,
@@ -17,6 +19,7 @@ import {
 import { eqByType, newGame, run, standAt } from './helpers';
 
 const stepId = (s: GameState) => currentTutorialStep(s)?.id ?? null;
+const TUTORIAL_STEP_INDEX = (id: string) => TUTORIAL_STEPS.basics.findIndex((x) => x.id === id);
 
 function ok(s: GameState, ctx: SimCtx, a: Action) {
   const r = applyAction(s, 'p1', a, ctx);
@@ -102,29 +105,26 @@ describe('チュートリアル（営業0日目）', () => {
     act(s, ctx, prepTable.id, 'prep:slice_pork');
 
     // 経営: 在庫と発注（タブを開いたかは画面が判定して「次へ」を送る）
+    // ひとりプレイでは経営メニューを開いている間は時間が止まるので、ここからレイアウトまでは時間を進めずに、操作だけで進むことを確かめる
     expect(stepId(s)).toBe('stock_open');
     expect(tutorialTarget(s)).toEqual({ ui: 'menu' });
     next(s, ctx);
     expect(stepId(s)).toBe('stock_order');
     ok(s, ctx, { type: 'orderStock', itemId: 'moyashi', packs: 1, express: false });
-    run(s, ctx, 0.2);
 
     // 経営: 値段
     expect(stepId(s)).toBe('price');
     ok(s, ctx, { type: 'setPrice', menuId: 'small', price: 1000 });
-    run(s, ctx, 0.2);
 
     // 経営: 設備（券売機が劣化している）
     expect(stepId(s)).toBe('equip');
     const tm = eqByType(s, 'ticket_machine');
     expect(tm.status).toBe('worn');
     ok(s, ctx, { type: 'maintenance', equipmentId: tm.id, on: true });
-    run(s, ctx, 0.2);
 
     // 経営: レイアウト
     expect(stepId(s)).toBe('layout');
     ok(s, ctx, { type: 'seatOffset', seatIndex: 7, x: 0.05, z: 0 });
-    run(s, ctx, 0.2);
     expect(stepId(s)).toBe('layout_close');
     next(s, ctx);
 
@@ -221,6 +221,34 @@ describe('チュートリアル（営業0日目）', () => {
     next(s, ctx);
     expect(s.tutorial!.finished).toBe(true);
     expect(currentTutorialStep(s)).toBeNull();
+  });
+
+  it('仕入れの手順は、1回発注するとすぐ次へ進み、何度も発注して冷蔵庫をいっぱいにしない（時間が止まっていても）', () => {
+    const s = createGame({ seed: 3, tutorial: true });
+    const ctx = makeCtx();
+    s.tutorial!.step = TUTORIAL_STEP_INDEX('stock_order');
+    s.tutorial!.entered = false;
+    updateTutorial(s, ctx);
+    expect(stepId(s)).toBe('stock_order');
+    const pending = s.deliveries.length;
+    ok(s, ctx, { type: 'orderStock', itemId: 'bones', packs: 1, express: false });
+    expect(stepId(s)).toBe('price');
+    expect(s.deliveries.length).toBe(pending + 1);
+  });
+
+  it('冷蔵庫がいっぱいでも、冷蔵庫に入れない醤油・一味唐辛子なら発注して進める', () => {
+    const s = createGame({ seed: 3, tutorial: true });
+    const ctx = makeCtx();
+    s.tutorial!.step = TUTORIAL_STEP_INDEX('stock_order');
+    s.tutorial!.entered = false;
+    updateTutorial(s, ctx);
+    // 冷蔵庫を配送待ちでいっぱいにする
+    for (let i = 0; i < 20; i++) s.deliveries.push({ id: `full${i}`, itemId: 'bones', qty: 10000, unitCost: 0, arriveDay: s.day + 1, arriveAt: null });
+    expect(applyAction(s, 'p1', { type: 'orderStock', itemId: 'moyashi', packs: 1, express: false }, ctx).ok).toBe(false);
+    expect(stepId(s)).toBe('stock_order');
+    expect(currentTutorialStep(s)?.text).toContain('醤油');
+    ok(s, ctx, { type: 'orderStock', itemId: 'soy', packs: 1, express: false });
+    expect(stepId(s)).toBe('price');
   });
 
   it('操作で進む手順は「次へ」では飛ばせない', () => {
