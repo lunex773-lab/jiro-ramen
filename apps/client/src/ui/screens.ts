@@ -247,7 +247,7 @@ export function helpScreen(onClose: () => void, isTouch: boolean): HTMLElement {
 export function settingsScreen(st: Settings, onChange: (s: Settings) => void, onClose: () => void): HTMLElement {
   const cur = { ...st };
   const update = () => onChange({ ...cur });
-  const toggle = (label: string, key: 'sound' | 'voice' | 'invertY') =>
+  const toggle = (label: string, key: 'sound' | 'voice' | 'invertY' | 'showFps') =>
     h(
       'label',
       { class: 'kv' },
@@ -292,6 +292,8 @@ export function settingsScreen(st: Settings, onChange: (s: Settings) => void, on
           (['low', 'medium', 'high'] as const).map((q) => h('option', { value: q, selected: cur.quality === q }, q === 'low' ? '低（省電力）' : q === 'medium' ? '中' : '高')),
         ),
       ),
+      h('p', { class: 'note' }, '動きが重いときは、描画の細かさを自動で下げます（画質はその上限です）。'),
+      toggle('動作の重さを表示（fps）', 'showFps'),
       h(
         'label',
         { class: 'kv' },

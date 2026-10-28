@@ -8,9 +8,13 @@ export interface Settings {
   lookSensitivity: number;
   invertY: boolean;
   quality: 'low' | 'medium' | 'high';
+  /** 動作の重さ（fps・1フレームの処理時間・描画の解像度）を画面に出す */
+  showFps: boolean;
   playerName: string;
   /** 初回チュートリアルを見たか */
   tutorialSeen: boolean;
+  /** 「ホーム画面に追加すると全画面で遊べる」を案内したか */
+  homeTipShown: boolean;
   lastSlot: number;
 }
 
@@ -23,8 +27,10 @@ export const DEFAULT_SETTINGS: Settings = {
   lookSensitivity: 1,
   invertY: false,
   quality: 'medium',
+  showFps: false,
   playerName: '店主',
   tutorialSeen: false,
+  homeTipShown: false,
   lastSlot: 1,
 };
 

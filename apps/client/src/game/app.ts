@@ -18,7 +18,7 @@ import {
 } from '@jiro/core';
 import { Sfx } from '../audio/sfx';
 import { World } from '../render/world';
-import { confirmDialog, h, replace, toast } from '../ui/dom';
+import { alertDialog, confirmDialog, h, replace, toast } from '../ui/dom';
 import { Hud } from '../ui/hud';
 import { LayoutEditor } from '../ui/layout-editor';
 import { ManageMenu } from '../ui/manage';
@@ -27,10 +27,11 @@ import { bankruptScreen, helpScreen, resultScreen, settingsScreen, slotScreen, t
 import { Controls } from './controls';
 import { nextHint } from './guide';
 import { LocalHost, type GameHost } from './host';
-import { lockLandscape } from './orientation';
+import { isRotated, isStandalone, lockLandscape } from './orientation';
 import { loadSettings, saveSettings, type Settings } from './settings';
 import { findFocus, interactableBoxes } from './targeting';
 import { openLobby } from '../ui/lobby';
+import { installRotatedScroll } from '../ui/rotated-scroll';
 import { cloudDownload, cloudUpload } from '../net/cloud';
 
 export const VERSION = '0.9.0';
@@ -90,6 +91,16 @@ export class App {
   private tutorial: TutorialPanel | null = null;
   /** チュートリアルで目立たせている対象（変わったときだけ画面を更新する） */
   private tutorialHi = '';
+  /** 注視対象は 1 秒に 10 回求める（毎フレームは要らない） */
+  private focusAcc = 0;
+  /** 動作の重さの表示（設定で ON のとき） */
+  private fpsEl: HTMLElement;
+  private fpsAcc = 0;
+  private fpsFrames = 0;
+  private fpsWork = 0;
+  /** 下の帯（案内・チュートリアル）の高さ。大きさが変わったときだけ測る */
+  private stripObserver: ResizeObserver | null = null;
+  private stripH = -1;
 
   constructor(mount: HTMLElement) {
     this.root = mount;
@@ -98,8 +109,15 @@ export class App {
     this.overlay = h('div', { class: 'overlay3d' });
     this.uiLayer = h('div', { class: 'ui-layer' });
     this.hintEl = h('div', { class: 'hint', hidden: true });
-    this.root.append(this.canvas, this.overlay, this.uiLayer);
+    this.fpsEl = h('div', { class: 'fps', hidden: true });
+    this.root.append(this.canvas, this.overlay, this.uiLayer, this.fpsEl);
+    if (typeof ResizeObserver !== 'undefined') {
+      this.stripObserver = new ResizeObserver(() => this.updateStrip());
+      this.stripObserver.observe(this.hintEl);
+    }
     this.applySettings();
+    // 表示を回しているときは、メニューなどのスクロールを指の向きに合わせて自分で動かす
+    installRotatedScroll(this.root);
     // 横画面に固定する（縦向きのスマホでは表示ごと 90° 回す）。回し方が変わったら操作中の指を離し、描画サイズを合わせ直す
     lockLandscape(this.root, () => {
       this.controls?.releaseAll();
@@ -143,6 +161,20 @@ export class App {
         },
         VERSION,
       ),
+    );
+    this.offerHomeScreenTip();
+  }
+
+  /** Safari で表示を回して遊んでいるときに一度だけ: ホーム画面から開くと Safari のバーが出ず、操作が安定する */
+  private offerHomeScreenTip(): void {
+    if (this.settings.homeTipShown || !isRotated() || isStandalone()) return;
+    this.settings.homeTipShown = true;
+    saveSettings(this.settings);
+    void alertDialog(
+      this.uiLayer,
+      '全画面で遊ぶには',
+      'Safari の共有ボタン（□に↑）→「ホーム画面に追加」で追加したアイコンから開くと、Safari のバーが出ない全画面で遊べます。画面の端を触ったときにバーが出てタップが効かなかったり、前のページに戻ったりすることがなくなります。',
+      'わかった',
     );
   }
 
@@ -253,6 +285,7 @@ export class App {
       onQuit: () => void this.quitTutorial(),
       onFinished: () => this.finishTutorial(),
     });
+    this.stripObserver?.observe(this.tutorial.el);
     this.manage = new ManageMenu(this.uiLayer, host, {
       onClose: () => this.closeManage(),
       onLayoutEditor: () => this.openEditor(),
@@ -289,9 +322,11 @@ export class App {
     this.lastT = performance.now();
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
-      const dt = Math.min(0.1, (now - this.lastT) / 1000);
+      const interval = (now - this.lastT) / 1000;
       this.lastT = now;
-      this.frame(dt, now / 1000);
+      const t0 = performance.now();
+      this.frame(Math.min(0.1, interval), now / 1000, interval);
+      this.updateFps(interval, performance.now() - t0);
     };
     this.raf = requestAnimationFrame(loop);
   }
@@ -303,6 +338,7 @@ export class App {
     this.manage?.close();
     this.editor?.close();
     this.hud?.dispose();
+    if (this.tutorial) this.stripObserver?.unobserve(this.tutorial.el);
     this.tutorial?.dispose();
     this.tutorial = null;
     this.tutorialHi = '';
@@ -311,6 +347,7 @@ export class App {
     this.host?.dispose();
     this.sfx.stopAmbience();
     this.hintEl.remove();
+    this.fpsEl.hidden = true;
     this.manage = null;
     this.editor = null;
     this.hud = null;
@@ -332,7 +369,7 @@ export class App {
 
   // ───────────────── 毎フレーム ─────────────────
 
-  private frame(dt: number, t: number): void {
+  private frame(dt: number, t: number, interval: number): void {
     const host = this.host;
     const world = this.world;
     const c = this.controls;
@@ -377,17 +414,26 @@ export class App {
       }
     }
     world.setCamera(this.localPos.x, this.localPos.z, c.yaw, c.pitch, moving, dt);
-    // 注視対象（自分の位置はローカル予測を使う）
+    // 注視対象（自分の位置はローカル予測を使う）。1 秒に 10 回で足りる（HUD の更新も同じ間隔）
+    this.focusAcc += dt;
     if (me && !blocking) {
-      const actor = { ...me, pos: this.localPos };
-      const eye: [number, number, number] = [this.localPos.x, 1.58, this.localPos.z];
-      this.hud?.setFocus(findFocus(s, actor, eye, world.viewDir()));
-    } else this.hud?.setFocus(null);
+      if (this.focusAcc >= 0.1) {
+        this.focusAcc = 0;
+        const actor = { ...me, pos: this.localPos };
+        const eye: [number, number, number] = [this.localPos.x, 1.58, this.localPos.z];
+        this.hud?.setFocus(findFocus(s, actor, eye, world.viewDir()));
+      }
+    } else {
+      this.focusAcc = 0.1;
+      this.hud?.setFocus(null);
+    }
     // 経営メニューとレイアウト編集は画面全体を覆うので、その間は 3D を描かない（電池と CPU の節約）
     const covered = this.manage?.isOpen || !!this.editor;
     if (!covered) {
       world.update(s, host.playerId, t, dt, host.mode === 'remote');
       world.render();
+      // 重い端末では描画の解像度を下げる
+      world.adaptResolution(interval);
     }
     this.hud?.update(dt);
     this.updateTutorial(s, dt);
@@ -405,10 +451,36 @@ export class App {
     const text = show ? nextHint(s, this.host.playerId) : null;
     const label = text ? `💡 ${text}` : '';
     if (this.hintEl.textContent !== label) this.hintEl.textContent = label;
-    this.hintEl.hidden = !text;
-    // 下の帯（案内かチュートリアル）の高さ。開店ボタンなどをその上に置く
-    const strip = this.tutorial?.visible ? this.tutorial.el.offsetHeight : text ? this.hintEl.offsetHeight : 0;
+    if (this.hintEl.hidden !== !text) this.hintEl.hidden = !text;
+  }
+
+  /** 下の帯（案内かチュートリアル）の高さ。開店ボタンなどをその上に置く（帯の大きさが変わったときだけ呼ばれる） */
+  private updateStrip(): void {
+    const strip = this.tutorial?.visible ? this.tutorial.el.offsetHeight : !this.hintEl.hidden ? this.hintEl.offsetHeight : 0;
+    if (strip === this.stripH) return;
+    this.stripH = strip;
     this.root.style.setProperty('--strip-h', `${strip}px`);
+  }
+
+  /** 動作の重さの表示（設定の「動作の重さを表示」） */
+  private updateFps(interval: number, workMs: number): void {
+    if (!this.settings.showFps) {
+      if (!this.fpsEl.hidden) this.fpsEl.hidden = true;
+      return;
+    }
+    if (interval > 0 && interval < 1) {
+      this.fpsAcc += interval;
+      this.fpsFrames++;
+      this.fpsWork += workMs;
+    }
+    if (this.fpsAcc < 1) return;
+    const fps = Math.round(this.fpsFrames / this.fpsAcc);
+    const ms = (this.fpsWork / Math.max(1, this.fpsFrames)).toFixed(1);
+    this.fpsEl.textContent = `${fps} fps ・ 処理 ${ms}ms ・ 解像度 ×${(this.world?.pixelRatio ?? 0).toFixed(2)}`;
+    this.fpsEl.hidden = false;
+    this.fpsAcc = 0;
+    this.fpsFrames = 0;
+    this.fpsWork = 0;
   }
 
   private checkPhaseScreens(initial: boolean): void {

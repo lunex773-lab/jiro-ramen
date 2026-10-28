@@ -12,6 +12,7 @@ async function startNewGame(page: Page) {
   await page.evaluate(() => localStorage.clear());
   await page.reload();
   await expect(page.getByText('ひとりで経営する')).toBeVisible();
+  await closeHomeTip(page);
   await shot(page, '01-title');
   await page.getByText('ひとりで経営する').click();
   await page.getByRole('button', { name: '新しく始める' }).first().click();
@@ -24,6 +25,12 @@ async function startNewGame(page: Page) {
   await expect(page.getByText('ラーメンができるまで')).toBeVisible();
   await page.getByRole('button', { name: '閉じる' }).click();
   await expect(page.getByRole('button', { name: /開店する/ })).toBeVisible();
+}
+
+/** 縦向きの画面（表示を回している Safari）で最初に出る「ホーム画面に追加」の案内を閉じる */
+async function closeHomeTip(page: Page) {
+  const ok = page.getByRole('button', { name: 'わかった' });
+  if (await ok.isVisible()) await ok.click();
 }
 
 type Jiro = {
@@ -138,6 +145,11 @@ test.describe('縦向きのスマホ（回転ロック中など）', () => {
     test.skip(!test.info().project.use.hasTouch, 'タッチ端末だけの動作');
     await page.goto('/');
     expect(await viewOf(page)).toEqual({ rotated: true, w: 664, h: 390 });
+    // Safari で回して表示しているときは、一度だけ全画面で遊ぶ方法を案内する
+    await expect(page.locator('.modal')).toContainText('ホーム画面に追加');
+    await page.getByRole('button', { name: 'わかった' }).click();
+    await page.reload();
+    await expect(page.locator('.modal')).toHaveCount(0);
     // 回した表示が画面にぴったり収まる
     const box = (await page.locator('.app').boundingBox())!;
     expect([Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)]).toEqual([0, 0, 390, 664]);
@@ -170,6 +182,61 @@ test.describe('縦向きのスマホ（回転ロック中など）', () => {
     expect(Math.abs((await controls()).strafe)).toBeLessThan(0.2);
     await touch('touchEnd', 0, 0);
     await expect.poll(async () => (await controls()).forward).toBe(0);
+  });
+
+  test('回した表示のまま、経営メニューを指の向きどおりにスクロールできる', async ({ page }) => {
+    test.skip(!test.info().project.use.hasTouch, 'タッチ端末だけの動作');
+    await startNewGame(page);
+    await page.locator('.chip.menu').click();
+    await page.getByRole('button', { name: '在庫・発注' }).click();
+    const body = page.locator('.manage-body');
+    await expect(body).toContainText('仕入れ');
+    const top0 = await body.evaluate((el) => el.scrollTop);
+    // 表示の上へなぞる（画面では右へ）と、下の行が見えるようにスクロールする
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 100, y: 330, id: 3 }] });
+    for (let x = 120; x <= 260; x += 20) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: 330, id: 3 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBeGreaterThan(top0 + 100);
+  });
+
+  test('指を離した合図が届かなくても歩き続けず、次のタッチで視点が飛ばない', async ({ page }) => {
+    test.skip(!test.info().project.use.hasTouch, 'タッチ端末だけの動作');
+    await startNewGame(page);
+    // 遊び方の画面を閉じた後、操作の受付が戻るのを待つ（この環境は描画が遅い）
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __jiro: { controls: { enabled: boolean } } }).__jiro.controls.enabled)).toBe(true);
+    // Safari がタッチを途中で取ったときのように、touchend を送らずに指が消えた状態を作る
+    const r = await page.evaluate(() => {
+      const app = (window as unknown as { __jiro: { controls: { forward: number; yaw: number; update(): void } } }).__jiro;
+      const canvas = document.querySelector('canvas.game-canvas')!;
+      const fire = (type: string, target: EventTarget, points: { id: number; x: number; y: number }[], changed: { id: number; x: number; y: number }[]) => {
+        const mk = (p: { id: number; x: number; y: number }) => new Touch({ identifier: p.id, target, clientX: p.x, clientY: p.y });
+        target.dispatchEvent(new TouchEvent(type, { touches: points.map(mk), changedTouches: changed.map(mk), bubbles: true, cancelable: true }));
+      };
+      const joy = { id: 7, x: 200, y: 120 };
+      fire('touchstart', canvas, [joy], [joy]);
+      const moved = { id: 7, x: 260, y: 120 };
+      fire('touchmove', canvas, [moved], [moved]);
+      app.controls.update();
+      const walking = app.controls.forward;
+      // 指7の touchend は来ないまま、別の指（ボタンの上）が触れる → 画面に残っている指と照合して離したことにする
+      fire('touchstart', document.body, [{ id: 8, x: 10, y: 10 }], [{ id: 8, x: 10, y: 10 }]);
+      app.controls.update();
+      const after = app.controls.forward;
+      // 視点: 1回で大きく動いた合図は使わない
+      const look = { id: 9, x: 300, y: 600 };
+      fire('touchstart', canvas, [look], [look]);
+      const yaw0 = app.controls.yaw;
+      fire('touchmove', canvas, [{ id: 9, x: 300, y: 100 }], [{ id: 9, x: 300, y: 100 }]);
+      const jump = Math.abs(app.controls.yaw - yaw0);
+      fire('touchmove', canvas, [{ id: 9, x: 300, y: 80 }], [{ id: 9, x: 300, y: 80 }]);
+      const small = Math.abs(app.controls.yaw - yaw0);
+      return { walking, after, jump, small };
+    });
+    expect(r.walking).toBeGreaterThan(0.5);
+    expect(r.after).toBe(0);
+    expect(r.jump).toBe(0);
+    expect(r.small).toBeGreaterThan(0);
   });
 });
 

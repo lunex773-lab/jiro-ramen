@@ -1,5 +1,5 @@
 // 入力（設計書 5.1）。
-// スマホ: 左側=移動スティック、右側=ドラッグで視点。操作ボタンは HUD 側。
+// スマホ: 左側=移動スティック、右側=ドラッグで視点（タッチイベント）。操作ボタンは HUD 側。
 // PC: WASD/矢印で移動、マウスで視点（クリックでポインターロック）、E/クリック=操作、Q=中断、Tab=経営メニュー。
 
 import { h } from '../ui/dom';
@@ -21,6 +21,7 @@ export class Controls {
   settings: ControlSettings = { lookSensitivity: 1, invertY: false };
 
   private keys = new Set<string>();
+  /** 移動スティックと視点に使っている指（Touch.identifier） */
   private joyId: number | null = null;
   private joyOrigin = { x: 0, y: 0 };
   private joyVec = { x: 0, y: 0 };
@@ -75,7 +76,13 @@ export class Controls {
       if (k === 'e' || k === ' ') this.onPrimary?.(false);
       else if (k >= '1' && k <= '6') this.onVerbKey?.(Number(k) - 1, false);
     });
-    this.listen(window, 'blur', () => this.keys.clear());
+    // 別のアプリに切り替えたときなどは、押している指・キーをすべて離したことにする
+    this.listen(window, 'blur', () => this.releaseAll());
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') this.releaseAll();
+    };
+    document.addEventListener('visibilitychange', onHidden);
+    this.disposers.push(() => document.removeEventListener('visibilitychange', onHidden));
 
     // マウス（PC）
     this.listen(this.canvas, 'mousedown', (e) => {
@@ -95,52 +102,97 @@ export class Controls {
       this.look(e.movementX, e.movementY, 0.0024);
     });
 
-    // タッチ（スマホ）。UI ボタン上のタッチはここに来ない（HUD 側で stopPropagation）。
-    // 座標は表示の座標に直して使う（縦向きの画面では表示を 90° 回しているため。game/orientation.ts）
-    this.listen(this.canvas, 'pointerdown', (e) => {
-      if (!this.enabled || e.pointerType === 'mouse') return;
-      const p = toView(e.clientX, e.clientY);
-      if (p.x < viewSize().width * 0.45 && this.joyId === null) {
-        this.joyId = e.pointerId;
-        this.joyOrigin = p;
-        this.joyVec = { x: 0, y: 0 };
-        this.joyEl.style.display = 'block';
-        this.joyEl.style.left = `${p.x - 60}px`;
-        this.joyEl.style.top = `${p.y - 60}px`;
-        this.knobEl.style.transform = 'translate(0px, 0px)';
-      } else if (this.lookId === null) {
-        this.lookId = e.pointerId;
-        this.lookLast = p;
-      }
-      this.canvas.setPointerCapture?.(e.pointerId);
-    });
-    this.listen(this.canvas, 'pointermove', (e) => {
-      const p = toView(e.clientX, e.clientY);
-      if (e.pointerId === this.joyId) {
-        const dx = p.x - this.joyOrigin.x;
-        const dy = p.y - this.joyOrigin.y;
-        const len = Math.hypot(dx, dy);
-        const max = 55;
-        const k = len > max ? max / len : 1;
-        this.joyVec = { x: (dx * k) / max, y: (dy * k) / max };
-        this.knobEl.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
-      } else if (e.pointerId === this.lookId) {
-        const dx = p.x - this.lookLast.x;
-        const dy = p.y - this.lookLast.y;
-        this.lookLast = p;
-        this.look(dx, dy, 0.0062);
-      }
-    });
-    const end = (e: PointerEvent) => {
-      if (e.pointerId === this.joyId) {
-        this.joyId = null;
-        this.joyVec = { x: 0, y: 0 };
-        this.joyEl.style.display = 'none';
-      }
-      if (e.pointerId === this.lookId) this.lookId = null;
+    // タッチ（スマホ）。iOS の元のタッチイベントで扱い、合図のたびに「画面に残っている指」（e.touches）と照合する。
+    // Safari がタッチを途中で取ると、指を離した合図が届かないことがあり、そのままだと歩き続けたり、次のタッチで視点が飛ぶため。
+    // UI ボタンの上で始まったタッチはキャンバスには来ない。座標は表示の座標に直す（縦向きの画面では表示を 90° 回している。game/orientation.ts）
+    const active = { passive: false };
+    this.listen(
+      this.canvas,
+      'touchstart',
+      (e) => {
+        // Safari のスクロール・拡大・バーの出し入れを起こさない
+        e.preventDefault();
+        if (!this.enabled) return;
+        for (const t of Array.from(e.changedTouches)) this.touchStart(t);
+      },
+      active,
+    );
+    this.listen(
+      this.canvas,
+      'touchmove',
+      (e) => {
+        e.preventDefault();
+        for (const t of Array.from(e.changedTouches)) this.touchMove(t);
+      },
+      active,
+    );
+    const end = (e: TouchEvent) => {
+      for (const t of Array.from(e.changedTouches)) this.touchEnd(t.identifier);
+      this.reconcile(e.touches);
     };
-    this.listen(this.canvas, 'pointerup', end);
-    this.listen(this.canvas, 'pointercancel', end);
+    this.listen(this.canvas, 'touchend', end);
+    this.listen(this.canvas, 'touchcancel', end);
+    // ボタンなど、ほかの場所のタッチの合図でも照合する（キャンバスで始めた指の合図が来なくなっていても気づける）
+    for (const type of ['touchstart', 'touchend', 'touchcancel'] as const) {
+      this.listen(window, type, (e) => this.reconcile(e.touches), { capture: true, passive: true });
+    }
+  }
+
+  private touchStart(t: Touch): void {
+    const p = toView(t.clientX, t.clientY);
+    if (p.x < viewSize().width * 0.45) {
+      // 左側の2本目の指は使わない
+      if (this.joyId !== null) return;
+      this.joyId = t.identifier;
+      this.joyOrigin = p;
+      this.joyVec = { x: 0, y: 0 };
+      this.joyEl.style.display = 'block';
+      this.joyEl.style.left = `${p.x - 60}px`;
+      this.joyEl.style.top = `${p.y - 60}px`;
+      this.knobEl.style.transform = 'translate(0px, 0px)';
+    } else if (this.lookId === null) {
+      this.lookId = t.identifier;
+      this.lookLast = p;
+    }
+  }
+
+  private touchMove(t: Touch): void {
+    const p = toView(t.clientX, t.clientY);
+    if (t.identifier === this.joyId) {
+      const dx = p.x - this.joyOrigin.x;
+      const dy = p.y - this.joyOrigin.y;
+      const len = Math.hypot(dx, dy);
+      const max = 55;
+      const k = len > max ? max / len : 1;
+      this.joyVec = { x: (dx * k) / max, y: (dy * k) / max };
+      this.knobEl.style.transform = `translate(${dx * k}px, ${dy * k}px)`;
+    } else if (t.identifier === this.lookId) {
+      const dx = p.x - this.lookLast.x;
+      const dy = p.y - this.lookLast.y;
+      this.lookLast = p;
+      // 1回の合図で大きく動いたものは、合図の取りこぼしによる飛びとみなして使わない
+      if (Math.abs(dx) > 120 || Math.abs(dy) > 120) return;
+      if (this.enabled) this.look(dx, dy, 0.0062);
+    }
+  }
+
+  private touchEnd(id: number): void {
+    if (id === this.joyId) this.releaseJoy();
+    if (id === this.lookId) this.lookId = null;
+  }
+
+  /** 画面に残っていない指を離したことにする */
+  private reconcile(list: TouchList): void {
+    if (this.joyId === null && this.lookId === null) return;
+    const ids = new Set(Array.from(list, (t) => t.identifier));
+    if (this.joyId !== null && !ids.has(this.joyId)) this.releaseJoy();
+    if (this.lookId !== null && !ids.has(this.lookId)) this.lookId = null;
+  }
+
+  private releaseJoy(): void {
+    this.joyId = null;
+    this.joyVec = { x: 0, y: 0 };
+    this.joyEl.style.display = 'none';
   }
 
   private look(dx: number, dy: number, base: number): void {
@@ -153,6 +205,9 @@ export class Controls {
   /** 毎フレーム呼ぶ。移動入力を更新 */
   update(): void {
     if (!this.enabled) {
+      // メニューや画面が出たら、押している指は離したことにする（閉じた後に歩き続けない）
+      if (this.joyId !== null) this.releaseJoy();
+      this.lookId = null;
       this.forward = 0;
       this.strafe = 0;
       return;
@@ -181,10 +236,8 @@ export class Controls {
 
   releaseAll(): void {
     this.keys.clear();
-    this.joyId = null;
+    this.releaseJoy();
     this.lookId = null;
-    this.joyVec = { x: 0, y: 0 };
-    this.joyEl.style.display = 'none';
     if (document.pointerLockElement === this.canvas) document.exitPointerLock?.();
   }
 

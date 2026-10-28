@@ -84,6 +84,38 @@ export function confirmDialog(root: HTMLElement, title: string, body: string, ok
   });
 }
 
+/** 知らせるだけのダイアログ（ボタン1つ） */
+export function alertDialog(root: HTMLElement, title: string, body: string, okLabel = 'OK'): Promise<void> {
+  return new Promise((resolve) => {
+    const overlay = h(
+      'div',
+      { class: 'modal-overlay' },
+      h(
+        'div',
+        { class: 'modal' },
+        h('h3', null, title),
+        h('p', { class: 'modal-body' }, body),
+        h(
+          'div',
+          { class: 'row end' },
+          h(
+            'button',
+            {
+              class: 'btn primary',
+              onclick: () => {
+                overlay.remove();
+                resolve();
+              },
+            },
+            okLabel,
+          ),
+        ),
+      ),
+    );
+    root.appendChild(overlay);
+  });
+}
+
 export function promptDialog(root: HTMLElement, title: string, initial: string, placeholder = ''): Promise<string | null> {
   return new Promise((resolve) => {
     const input = h('input', { class: 'input', value: initial, placeholder, maxLength: 20 }) as HTMLInputElement;

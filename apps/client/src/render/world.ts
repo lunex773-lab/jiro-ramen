@@ -1,6 +1,7 @@
 // 3D シーン: ゲーム状態を描画オブジェクトへ同期する。ゲームのルールはここに置かない（設計書 3）。
 
 import * as THREE from 'three';
+import { ResolutionGovernor } from './resolution';
 
 import {
   CELL,
@@ -41,6 +42,8 @@ const HORIZONTAL_FOV = 100;
 export type Quality = 'low' | 'medium' | 'high';
 
 export const EYE_HEIGHT = 1.58;
+/** 描画の解像度を自動で下げるときの下限 */
+const MIN_PIXEL_RATIO = 0.75;
 export const COUNTER_TOP = 1.0;
 
 interface CharEntry {
@@ -78,6 +81,12 @@ export class World {
   private bob = 0;
   private overlayAcc = 0;
   private quality: Quality;
+  /** 描画の大きさ（CSS ピクセル。resize で更新し、毎回レイアウトを読まない） */
+  private viewW = 1;
+  private viewH = 1;
+  /** 描画の解像度の倍率（端末の速さに合わせて自動で上げ下げする） */
+  private res: ResolutionGovernor;
+  private edgeShown = false;
   /** チュートリアルの目印（対象の上で上下する矢印。物に隠れても見える） */
   private tutMarker: THREE.Group;
   private tutTargetId: string | null = null;
@@ -91,6 +100,7 @@ export class World {
     quality: Quality,
   ) {
     this.quality = quality;
+    this.res = new ResolutionGovernor(() => this.ratioCap(), MIN_PIXEL_RATIO);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: quality !== 'low', powerPreference: 'high-performance' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -160,7 +170,7 @@ export class World {
   private updateTutorialEdge(): void {
     const p = this.tutPos;
     if (!p) {
-      this.tutEdge.style.display = 'none';
+      this.showEdge(false);
       return;
     }
     const v = p.clone().project(this.camera);
@@ -168,16 +178,16 @@ export class World {
     let x = behind ? -v.x : v.x;
     let y = behind ? -v.y : v.y;
     if (!behind && Math.abs(x) <= 0.92 && Math.abs(y) <= 0.86) {
-      this.tutEdge.style.display = 'none';
+      this.showEdge(false);
       return;
     }
     if (behind && Math.abs(x) < 0.05) x = 0.05; // 真後ろなら横に寄せて向きを示す
     const k = 1 / Math.max(Math.abs(x) / 0.88, Math.abs(y) / 0.78, 1e-6);
     x *= k;
     y *= k;
-    const w = this.canvas.clientWidth;
-    const hgt = this.canvas.clientHeight;
-    this.tutEdge.style.display = 'block';
+    const w = this.viewW;
+    const hgt = this.viewH;
+    this.showEdge(true);
     this.tutEdge.style.left = `${((x + 1) / 2) * w}px`;
     this.tutEdge.style.top = `${((1 - y) / 2) * hgt}px`;
     this.tutEdge.style.transform = `translate(-50%, -50%) rotate(${-Math.atan2(y, x)}rad)`;
@@ -185,15 +195,32 @@ export class World {
 
   setQuality(q: Quality): void {
     this.quality = q;
+    this.res.reset();
     this.resize();
+  }
+
+  /** 画質ごとの解像度の上限 */
+  private ratioCap(): number {
+    const dpr = window.devicePixelRatio || 1;
+    return this.quality === 'low' ? 1 : this.quality === 'medium' ? Math.min(1.5, dpr) : Math.min(2, dpr);
+  }
+
+  /** 今の解像度の倍率（性能表示用） */
+  get pixelRatio(): number {
+    return this.res.ratio;
+  }
+
+  /** 描いたフレームごとに、前のフレームからの実際の間隔（秒）を渡す。重い端末では描画の解像度を下げる（render/resolution.ts） */
+  adaptResolution(interval: number): void {
+    if (this.res.sample(interval, performance.now() / 1000)) this.resize();
   }
 
   resize(): void {
     const w = this.canvas.clientWidth || window.innerWidth;
     const hgt = this.canvas.clientHeight || window.innerHeight;
-    const dpr = window.devicePixelRatio || 1;
-    const ratio = this.quality === 'low' ? 1 : this.quality === 'medium' ? Math.min(1.5, dpr) : Math.min(2, dpr);
-    this.renderer.setPixelRatio(ratio);
+    this.viewW = w;
+    this.viewH = hgt;
+    this.renderer.setPixelRatio(Math.min(this.res.ratio, this.ratioCap()));
     this.renderer.setSize(w, hgt, false);
     this.camera.aspect = w / Math.max(1, hgt);
     // 横に長い画面（iPhone の横向きは約 2.2:1）で縦の画角を固定すると左右が大きく引き伸ばされるので、
@@ -535,10 +562,16 @@ export class World {
     }
   }
 
+  private showEdge(on: boolean): void {
+    if (this.edgeShown === on) return;
+    this.edgeShown = on;
+    this.tutEdge.style.display = on ? 'block' : 'none';
+  }
+
   /** 吹き出し（客のセリフ）と席番号 */
   private updateOverlay(s: GameState): void {
-    const w = this.canvas.clientWidth;
-    const hgt = this.canvas.clientHeight;
+    const w = this.viewW;
+    const hgt = this.viewH;
     const seen = new Set<string>();
     const show = (id: string, text: string, pos: THREE.Vector3, cls: string) => {
       const v = pos.clone().project(this.camera);
@@ -555,7 +588,7 @@ export class World {
         b.text = text;
         b.el.textContent = text;
       }
-      b.el.className = cls;
+      if (b.el.className !== cls) b.el.className = cls;
       b.el.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * hgt}px) translate(-50%, -100%)`;
     };
     for (const cu of s.customers) {

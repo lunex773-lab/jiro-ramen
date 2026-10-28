@@ -81,6 +81,11 @@ export class Hud {
   private reachable = true;
   /** 長押しの進み具合の輪を出しているボタン */
   private ringBtn: HTMLElement | null = null;
+  /** 作り置きの丸ボタン（操作ごと） */
+  private actBtns = new Map<string, ActButton>();
+  /** 丸ボタンを押している最中か */
+  private actPressed = false;
+  private workShown = false;
   /** 長押し中の動詞 */
   private holding: string | null = null;
   private acc = 0;
@@ -160,6 +165,8 @@ export class Hud {
     clock: HTMLElement;
     money: HTMLElement;
     rep: HTMLElement;
+    repStars: HTMLElement;
+    repNum: HTMLElement;
     queue: HTMLElement;
     speed: HTMLElement;
   } | null = null;
@@ -180,6 +187,8 @@ export class Hud {
       clock: h('div', { class: 'clock' }),
       money: h('div', { class: 'money' }),
       rep: h('div', { class: 'rep' }),
+      repStars: h('span', { class: 'rep-stars' }),
+      repNum: h('span', { class: 'rep-num' }),
       queue: h('div', { class: 'queue', title: '行列（店外 / 店内）' }),
       speed:
         this.host.mode === 'local'
@@ -196,6 +205,7 @@ export class Hud {
             )
           : h('button', { class: 'chip conn', title: '参加コードを表示', onclick: () => showRoomCode(this.root, this.host) }),
     };
+    parts.rep.append(parts.repStars, parts.repNum);
     replace(
       this.top,
       h('div', { class: 'top-left' }, parts.day, parts.clock),
@@ -225,7 +235,9 @@ export class Hud {
     t.money.className = `money ${s.money < 0 ? 'neg' : ''}`;
     t.money.textContent = yenStr(s.money);
     t.rep.title = `評判 ${s.reputation.toFixed(2)}`;
-    t.rep.textContent = stars(s.reputation);
+    // 幅の狭い画面では星の代わりに数字を出す（CSS で切り替え）
+    t.repStars.textContent = stars(s.reputation);
+    t.repNum.textContent = `★${s.reputation.toFixed(1)}`;
     t.queue.textContent = `🚶${s.queue.length}/${s.insideQueue.length}`;
     if (this.host.mode === 'local') t.speed.textContent = `×${this.host.speed}`;
     else {
@@ -286,52 +298,93 @@ export class Hud {
     // 手が届かない物は名前だけ出し、近づくよう案内する
     const far = !!t && !this.reachable;
     this.verbs = t && !far ? listVerbs(s, me.id, t.id) : [];
-    this.focusLabel.textContent = t ? targetName(s, t) : '';
+    const name = t ? targetName(s, t) : '';
+    if (this.focusLabel.textContent !== name) this.focusLabel.textContent = name;
     this.crosshair.classList.toggle('active', !!t && !far);
     this.crosshair.classList.toggle('far', far);
-    // 操作ボタン（押せるものがなければ、押せない1つを薄く出し、理由を照準の下に出す）
+    // 操作ボタンは押せるものだけ出す。押せるものがないときは、何か持っているか設備を見ているときだけ、理由を照準の下に小さく出す
+    // （空いた席を見ただけで「下げる丼がありません」などが出ると邪魔なため）
     const enabled = this.verbs.filter((v) => v.enabled);
-    const shown = enabled.length > 0 ? enabled.slice(0, 5) : this.verbs.slice(0, 1);
+    const shown = enabled.slice(0, 5);
     const first = this.verbs[0];
-    const reason = far ? '近づいてください' : enabled.length === 0 && first?.reason ? `${first.label}: ${first.reason}` : '';
+    const explain = me.hand.kind !== 'none' || t?.kind === 'equipment';
+    const reason = far ? '近づいてください' : enabled.length === 0 && explain && first?.reason ? `${first.label}: ${first.reason}` : '';
     if (this.focusReason.textContent !== reason) this.focusReason.textContent = reason;
     const key = `${t?.id ?? ''}|${shown.map((v) => `${v.verb}:${v.label}:${v.enabled}:${v.reason}`).join('|')}|${me.work?.verb ?? ''}`;
-    if (key !== this.lastActionsKey) {
+    // 押している間は変えない（指の下のボタンが変わると、押したことにならない）
+    if (key !== this.lastActionsKey && !this.actPressed) {
       this.lastActionsKey = key;
-      replace(
-        this.actions,
-        shown.map((v, i) => this.actionButton(v, i)),
-      );
+      this.renderActions(shown);
     }
     this.updateDetail(s, t);
   }
 
-  /** 小さな丸い操作ボタン（絵文字＋短い名前）。正式な名前は読み上げ名にする */
-  private actionButton(v: VerbInfo, i: number): HTMLElement {
-    const f = verbFace(v.verb, v.label);
-    const title = v.enabled ? (v.hold ? `${v.label}（長押し ${v.duration.toFixed(1)}秒）` : v.label) : `${v.label}: ${v.reason ?? ''}`;
-    const btn = h(
-      'button',
-      { class: `act ${v.enabled ? '' : 'disabled'} ${v.hold ? 'hold' : ''} ${i === 0 ? 'primary' : ''}`, 'aria-label': v.label, title, 'data-verb': v.verb },
-      h('span', { class: 'act-icon', 'aria-hidden': 'true' }, f.icon),
-      h('span', { class: 'act-label', 'aria-hidden': 'true' }, f.short),
-      f.badge ? h('span', { class: 'act-badge', 'aria-hidden': 'true' }, f.badge) : null,
-      !this.root.closest('.touch') && i < 6 ? h('span', { class: 'act-key', 'aria-hidden': 'true' }, i === 0 ? 'E' : String(i + 1)) : null,
-    );
-    if (!v.enabled) return btn;
-    btn.addEventListener('pointerdown', (e) => {
+  /**
+   * 小さな丸い操作ボタン（絵文字＋短い名前。正式な名前は読み上げ名）を並べる。
+   * ボタンは操作ごとに作り置きして中身だけ書き換える（作り直すと、押した瞬間に入れ替わってタップが外れることがある）
+   */
+  private renderActions(shown: VerbInfo[]): void {
+    const keep = new Set(shown.map((v) => v.verb));
+    for (const [verb, b] of this.actBtns) {
+      if (keep.has(verb)) continue;
+      b.el.remove();
+      this.actBtns.delete(verb);
+    }
+    shown.forEach((v, i) => {
+      let b = this.actBtns.get(v.verb);
+      if (!b) {
+        b = this.makeActButton(v);
+        this.actBtns.set(v.verb, b);
+      }
+      b.v = v;
+      this.fillActButton(b, i);
+      if (this.actions.children[i] !== b.el) this.actions.insertBefore(b.el, this.actions.children[i] ?? null);
+    });
+  }
+
+  private makeActButton(v: VerbInfo): ActButton {
+    const icon = h('span', { class: 'act-icon', 'aria-hidden': 'true' });
+    const label = h('span', { class: 'act-label', 'aria-hidden': 'true' });
+    const badge = h('span', { class: 'act-badge', 'aria-hidden': 'true' });
+    const keyHint = h('span', { class: 'act-key', 'aria-hidden': 'true' });
+    const el = h('button', { class: 'act', 'data-verb': v.verb }, icon, label, badge, keyHint) as HTMLButtonElement;
+    const b: ActButton = { el, v, icon, label, badge, keyHint };
+    el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      btn.setPointerCapture?.(e.pointerId);
-      this.press(v, true);
+      if (!b.v.enabled) return;
+      el.setPointerCapture?.(e.pointerId);
+      this.actPressed = true;
+      this.press(b.v, true);
     });
     const up = (e: PointerEvent) => {
       e.stopPropagation();
-      this.press(v, false);
+      if (!this.actPressed) return;
+      this.actPressed = false;
+      this.press(b.v, false);
     };
-    btn.addEventListener('pointerup', up);
-    btn.addEventListener('pointercancel', up);
-    return btn;
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('lostpointercapture', up);
+    return b;
+  }
+
+  private fillActButton(b: ActButton, i: number): void {
+    const v = b.v;
+    const f = verbFace(v.verb, v.label);
+    // 変わったときだけ書き換わる（長押しの輪の working は setRing が受け持つ）
+    b.el.classList.toggle('disabled', !v.enabled);
+    b.el.classList.toggle('hold', v.hold);
+    b.el.classList.toggle('primary', i === 0);
+    const title = v.enabled ? (v.hold ? `${v.label}（長押し ${v.duration.toFixed(1)}秒）` : v.label) : `${v.label}: ${v.reason ?? ''}`;
+    if (b.el.getAttribute('aria-label') !== v.label) b.el.setAttribute('aria-label', v.label);
+    if (b.el.title !== title) b.el.title = title;
+    if (b.icon.textContent !== f.icon) b.icon.textContent = f.icon;
+    if (b.label.textContent !== f.short) b.label.textContent = f.short;
+    const badge = f.badge ?? '';
+    if (b.badge.textContent !== badge) b.badge.textContent = badge;
+    const key = !this.root.closest('.touch') && i < 6 ? (i === 0 ? 'E' : String(i + 1)) : '';
+    if (b.keyHint.textContent !== key) b.keyHint.textContent = key;
   }
 
   /** 操作ボタン・キーの押下/解放 */
@@ -343,6 +396,8 @@ export class Hud {
       void this.host.act({ type: 'interact', targetId: this.focus.id, verb: v.verb, args: argsFor(this.host.state, v.verb, this.focus) }).then((r) => {
         if (!r.ok && r.reason) toast(this.root, r.reason, 'warn', 1800);
         if (!v.hold) this.holding = null;
+        // 押した結果（手に持った物・ボタン）をすぐ出す（いつもの 0.1 秒ごとの更新を待たない）
+        this.acc = 1;
       });
     } else {
       if (this.holding === null) return;
@@ -365,12 +420,15 @@ export class Hud {
   private updateWork(s: GameState): void {
     const me = s.players.find((p) => p.id === this.host.playerId);
     const w = me?.work;
+    // 表示の切り替えは変わったときだけ（毎フレーム書き換えると、そのたびに画面の再計算が起きる）
+    if (this.workShown !== !!w) {
+      this.workShown = !!w;
+      this.workBar.style.display = w ? 'block' : 'none';
+    }
     if (!w) {
-      this.workBar.style.display = 'none';
       this.setRing(null, 0);
       return;
     }
-    this.workBar.style.display = 'block';
     const p = Math.min(1, w.progress / Math.max(0.01, w.duration));
     this.workFill.style.width = `${(p * 100).toFixed(1)}%`;
     // 押している丸ボタンの周りにも進み具合の輪を出す
@@ -407,7 +465,9 @@ export class Hud {
       const item = s.lostItems.find((l) => l.id === (hd as { lostItemId: string }).lostItemId);
       text = `忘れ物（${item?.kind ?? ''}）`;
     } else if (hd.kind === 'trash') text = 'ゴミ';
-    this.hand.textContent = text ? `✋ ${text}` : '';
+    const label = text ? `✋ ${text}` : '';
+    if (this.hand.textContent === label) return;
+    this.hand.textContent = label;
     this.hand.style.display = text ? 'block' : 'none';
   }
 
@@ -530,7 +590,8 @@ export class Hud {
       } else if (statusTxt) {
         content = h('div', null, h('div', { class: 'detail-title' }, `${def?.name ?? ''}${statusTxt}`), h('div', { class: 'slot' }, '経営メニュー → 設備 から修理を依頼できます'));
       }
-    } else if (t?.kind === 'seat') {
+    } else if (t?.kind === 'seat' && (t.seat.customerId || t.seat.dirt > 0.05)) {
+      // 空いていてきれいな席は何も出さない
       const c = s.customers.find((x) => x.id === t.seat.customerId);
       const o = s.orders.find((x) => x.seatId === t.seat.id && x.customerId === t.seat.customerId);
       key += `${c?.state}:${o?.status}:${o?.callRevealed}:${Math.floor(t.seat.dirt * 10)}:${c ? Math.floor(c.patience / 10) : ''}`;
@@ -565,6 +626,16 @@ export class Hud {
   dispose(): void {
     this.el.remove();
   }
+}
+
+interface ActButton {
+  el: HTMLButtonElement;
+  /** 今このボタンが表す操作（押したときに読む） */
+  v: VerbInfo;
+  icon: HTMLElement;
+  label: HTMLElement;
+  badge: HTMLElement;
+  keyHint: HTMLElement;
 }
 
 function connLabel(c: string): string {

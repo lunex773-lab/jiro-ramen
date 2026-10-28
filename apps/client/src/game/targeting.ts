@@ -48,15 +48,15 @@ export function interactableBoxes(s: GameState): Box[] {
   return out;
 }
 
-/** レイと箱の交差距離（当たらなければ Infinity） */
-export function rayBox(o: [number, number, number], d: [number, number, number], b: Box): number {
+/** レイと箱の交差距離（当たらなければ Infinity）。pad だけ箱を各方向にふくらませて調べる */
+export function rayBox(o: [number, number, number], d: [number, number, number], b: Box, pad = 0): number {
   let tmin = 0;
   let tmax = Infinity;
   for (let i = 0; i < 3; i++) {
     const oi = o[i]!;
     const di = d[i]!;
-    const mn = b.min[i]!;
-    const mx = b.max[i]!;
+    const mn = b.min[i]! - pad;
+    const mx = b.max[i]! + pad;
     if (Math.abs(di) < 1e-9) {
       if (oi < mn || oi > mx) return Infinity;
     } else {
@@ -120,18 +120,14 @@ export function findFocus(s: GameState, actor: Actor, eye: [number, number, numb
   return null;
 }
 
-function inflate(b: Box, m: number): Box {
-  return { id: b.id, min: [b.min[0] - m, b.min[1] - m, b.min[2] - m], max: [b.max[0] + m, b.max[1] + m, b.max[2] + m] };
-}
-
 /** 視線を箱に当てるのに必要な、箱のふくらみ（m）。max まで広げても当たらなければ Infinity */
 function missMargin(eye: [number, number, number], dir: [number, number, number], b: Box, max: number): number {
-  if (rayBox(eye, dir, inflate(b, max)) >= AIM_RANGE) return Infinity;
+  if (rayBox(eye, dir, b, max) >= AIM_RANGE) return Infinity;
   let lo = 0;
   let hi = max;
   for (let i = 0; i < 12; i++) {
     const mid = (lo + hi) / 2;
-    if (rayBox(eye, dir, inflate(b, mid)) < AIM_RANGE) hi = mid;
+    if (rayBox(eye, dir, b, mid) < AIM_RANGE) hi = mid;
     else lo = mid;
   }
   return hi;

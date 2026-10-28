@@ -42,6 +42,8 @@ export class TutorialPanel {
   private sentFor = '';
   private finishedHandled = false;
   private acc = 0;
+  /** 下の案内の行（手順の途中でも書き換える） */
+  private guideEl: HTMLElement | null = null;
   /** 全文を出しているか（手順が変わると2行に戻す） */
   private expanded = false;
   private expandedStep = '';
@@ -90,11 +92,17 @@ export class TutorialPanel {
     }
     if (this.expanded && this.expandedStep !== step.id) this.expanded = false;
     this.el.classList.toggle('expanded', this.expanded);
-    const guide = step.showGuide ? nextHint(s, this.host.playerId) : null;
-    const key = `${step.id}|${guide ?? ''}|${s.phase}`;
+    // 帯は手順が変わったときだけ作り直す（ボタンを押している途中で作り直すと押せないため）。下の案内の行だけは中身を書き換える
+    const key = `${step.id}|${s.phase}`;
     if (key !== this.lastKey) {
       this.lastKey = key;
-      this.render(s, guide);
+      this.render(s);
+    }
+    const guide = step.showGuide ? nextHint(s, this.host.playerId) : null;
+    const g = guide ? `💡 ${guide}` : '';
+    if (this.guideEl && this.guideEl.textContent !== g) {
+      this.guideEl.textContent = g;
+      this.guideEl.hidden = !guide;
     }
   }
 
@@ -109,7 +117,7 @@ export class TutorialPanel {
     this.lastKey = '';
   }
 
-  private render(s: GameState, guide: string | null): void {
+  private render(s: GameState): void {
     const step = currentTutorialStep(s);
     if (!step) return;
     const prog = tutorialProgress(s);
@@ -143,12 +151,8 @@ export class TutorialPanel {
     const btnRow = h('div', { class: 'tut-buttons' }, more, ...buttons, h('button', { class: 'tut-quit', onclick: () => this.cb.onQuit() }, 'やめる'));
     // ボタンのタッチは 3D の操作に渡さない（帯のほかの部分は素通り）
     btnRow.addEventListener('pointerdown', stop);
-    replace(
-      this.el,
-      h('span', { class: 'tut-badge' }, prog ? `${kind} ${prog.index}/${prog.total}` : kind),
-      h('div', { class: 'tut-main' }, line, guide ? h('div', { class: 'tut-guide' }, `💡 ${guide}`) : null),
-      btnRow,
-    );
+    this.guideEl = h('div', { class: 'tut-guide', hidden: true });
+    replace(this.el, h('span', { class: 'tut-badge' }, prog ? `${kind} ${prog.index}/${prog.total}` : kind), h('div', { class: 'tut-main' }, line, this.guideEl), btnRow);
     requestAnimationFrame(() => {
       more.hidden = !this.expanded && line.scrollHeight <= line.clientHeight + 1;
     });

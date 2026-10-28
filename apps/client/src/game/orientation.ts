@@ -6,6 +6,11 @@
 
 let rotated = false;
 
+/** ホーム画面から開いているか（Safari のバーがない） */
+export function isStandalone(): boolean {
+  return (navigator as Navigator & { standalone?: boolean }).standalone === true || matchMedia('(display-mode: standalone)').matches;
+}
+
 /** ゲームの表示を回しているか */
 export function isRotated(): boolean {
   return rotated;
@@ -53,10 +58,23 @@ export function lockLandscape(el: HTMLElement, onChange: () => void): void {
     }
     onChange();
   };
-  window.addEventListener('resize', apply);
-  window.visualViewport?.addEventListener('resize', apply);
-  // 向きを変えた直後は resize が来ない端末がある
-  matchMedia('(orientation: portrait)').addEventListener('change', apply);
+  el.classList.toggle('standalone', isStandalone());
+  // Safari のバーが出入りする間は大きさが少しずつ変わるので、落ち着いてから合わせる
+  let timer = 0;
+  const later = () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(apply, 120);
+  };
+  window.addEventListener('resize', later);
+  window.visualViewport?.addEventListener('resize', later);
+  // 向きを変えた直後は、大きさの報告が遅れる端末がある（すぐ・少し後・もう少し後に合わせ直す）
+  const turned = () => {
+    apply();
+    window.setTimeout(apply, 300);
+    window.setTimeout(apply, 800);
+  };
+  matchMedia('(orientation: portrait)').addEventListener('change', turned);
+  window.addEventListener('orientationchange', turned);
   touch.addEventListener('change', apply);
   apply();
 }

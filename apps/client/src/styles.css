@@ -47,6 +47,14 @@ html, body {
   --sab: env(safe-area-inset-left, 0px);
   --sal: env(safe-area-inset-top, 0px);
 }
+/* Safari で回して表示しているとき（ホーム画面から開いたときは除く）: 表示の右＝画面の下は Safari のバーの場所で、
+   そこを触るとバーが出てタップを取られるので、右側を少し空ける。左＝画面の上（時刻の表示）も少し空ける */
+/* 表示を回しているときのスクロールはブラウザに任せず自分で動かす（ui/rotated-scroll.ts） */
+.app.rotated .screen, .app.rotated .manage-body, .app.rotated .layout-side, .app.rotated .tabs { touch-action: none; }
+.app.rotated:not(.standalone) {
+  --sar: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  --sal: calc(env(safe-area-inset-top, 0px) + 8px);
+}
 .game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .overlay3d { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .ui-layer { position: absolute; inset: 0; pointer-events: none; }
@@ -133,7 +141,11 @@ input, select { font: inherit; }
 .hud { position: absolute; inset: 0; pointer-events: none; --hud-top: calc(var(--sat) + 48px); }
 .app { --act-w: 196px; }
 .hud > * { pointer-events: auto; }
-.hud > .hud-top, .hud > .hud-left, .hud > .hud-center, .hud > .hud-right { pointer-events: none; }
+.hud > .hud-top, .hud > .hud-left, .hud > .hud-center, .hud > .hud-right, .hud > .hud-cta { pointer-events: none; }
+/* 押せる物（ボタン）以外は、タッチを 3D の操作（移動・視点）に素通りさせる */
+.hud-top button, .hud-cta button, .hud-right .act, .hud-detail .mini { pointer-events: auto; }
+/* よく書き換わる表示は別の層にして、書き換えのたびに画面全体を描き直さない */
+.hud-top, .hud-left, .hud-center, .hud-right, .crosshair, .focus-label, .focus-reason, .work-bar, .hint, .tutorial-panel, .hud-cta, .toasts, .bubble, .seatno, .fps { will-change: transform; }
 .hud-top {
   position: absolute;
   top: calc(var(--sat) + 6px);
@@ -144,7 +156,6 @@ input, select { font: inherit; }
   align-items: flex-start;
   gap: 8px;
 }
-.hud-top > * { pointer-events: auto; }
 .top-left, .top-right { display: flex; gap: 6px; align-items: center; }
 .top-left { flex: 0 0 auto; }
 .top-left > *, .top-right > * { white-space: nowrap; }
@@ -161,6 +172,15 @@ input, select { font: inherit; }
 .top-left .clock.closing { color: var(--warn); }
 .money.neg { color: var(--bad); }
 .rep { color: var(--yellow); letter-spacing: 1px; }
+.rep-num { display: none; }
+/* 幅の狭い表示（Safari で回して表示した iPhone など）: 上の行を詰め、評判は星の代わりに数字にする（共同経営の参加コードが入っても重ならない） */
+@container app (max-width: 760px) {
+  .top-left, .top-right { gap: 4px; }
+  .top-left .day, .top-left .clock, .top-right .money, .top-right .rep, .top-right .queue { padding: 4px 7px; letter-spacing: 0; }
+  .hud-top .chip { padding: 4px 8px; }
+  .rep-stars { display: none; }
+  .rep-num { display: inline; }
+}
 .chip.menu { background: var(--yellow); color: #1a1407; }
 
 .hud-left {
@@ -176,9 +196,8 @@ input, select { font: inherit; }
 .hud-rail {
   display: flex;
   gap: 6px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  pointer-events: auto;
+  overflow: hidden;
+  pointer-events: none;
 }
 .hud-rail::-webkit-scrollbar { display: none; }
 .ticket {
@@ -325,14 +344,13 @@ input, select { font: inherit; }
   top: var(--hud-top);
   right: calc(var(--sar) + 10px);
   bottom: calc(var(--sab) + 10px);
-  width: min(34cqw, 320px);
+  width: clamp(210px, 30cqw, 270px);
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   align-items: flex-end;
   gap: 8px;
 }
-.hud-right > * { pointer-events: auto; }
 .hud-detail {
   width: 100%;
   flex: 0 1 auto;
@@ -343,8 +361,7 @@ input, select { font: inherit; }
   padding: 8px;
   font-size: 12px;
   display: none;
-  overflow-y: auto;
-  touch-action: pan-y;
+  overflow: hidden;
 }
 .detail-title { font-weight: 800; color: var(--yellow); margin-bottom: 4px; }
 .slot { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 4px 0; border-top: 1px solid var(--line); }
@@ -355,6 +372,11 @@ input, select { font: inherit; }
 .slot.bad { color: var(--bad); }
 .slot-main { font-weight: 700; }
 .slot-sub { color: var(--muted); flex: 1 1 100%; }
+/* 右の詳細パネルの行: 文字は1行に収めて長ければ「…」、ボタンは右端にそろえる */
+.hud-detail .slot { flex-wrap: nowrap; }
+.hud-detail .slot-main { flex: 0 0 auto; white-space: nowrap; }
+.hud-detail .slot-sub { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-detail .slot .mini { flex: 0 0 auto; margin-left: auto; }
 .slot .mini { min-height: 30px; padding: 4px 10px; }
 .hud-actions {
   flex: 0 0 auto;
@@ -407,6 +429,7 @@ input, select { font: inherit; }
   text-align: center;
 }
 .act-key { position: absolute; top: -4px; left: -2px; font-size: 10px; opacity: 0.7; }
+.act-badge:empty, .act-key:empty { display: none; }
 /* 長押しの作業中: ボタンの周りの輪で進み具合を出す */
 .act.working::before {
   content: '';
@@ -631,6 +654,22 @@ input, select { font: inherit; }
   .layout-side { width: auto; flex: 0 0 auto; max-height: 40%; }
 }
 
+/* 動作の重さの表示（設定で ON） */
+.fps {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--sat) + 4px);
+  transform: translateX(-50%);
+  z-index: 70;
+  background: rgba(0, 0, 0, 0.6);
+  color: #9ef0b0;
+  font: 700 11px/1.4 ui-monospace, Menlo, monospace;
+  padding: 2px 8px;
+  border-radius: 6px;
+  pointer-events: none;
+}
+.fps[hidden] { display: none; }
+
 /* 共同経営の参加コード（待機画面と、上部の「コード」から開く表示） */
 .room-code-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 10px 0; }
 .room-code {
@@ -716,14 +755,24 @@ input, select { font: inherit; }
 .tutorial-panel.expanded .tut-line { display: block; -webkit-line-clamp: unset; line-clamp: none; }
 .tut-title { color: var(--yellow); }
 .tut-guide { font-size: 11px; color: #ffe27a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tut-guide[hidden] { display: none; }
 .tut-buttons { flex: 0 0 auto; display: flex; gap: 6px; align-items: center; }
 .tut-btn { min-height: 32px; padding: 4px 12px; font-size: 13px; border-radius: 10px; }
 .tut-more { min-width: 32px; min-height: 32px; border-radius: 8px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.4); color: var(--text); font-weight: 900; cursor: pointer; }
 .tut-more[hidden] { display: none; }
 .tut-quit { min-height: 32px; padding: 4px; border: none; background: none; color: var(--muted); font-size: 11px; text-decoration: underline; cursor: pointer; }
-/* 押してほしいボタン・タブ */
-.tut-pulse { box-shadow: 0 0 0 3px var(--yellow); animation: tut-pulse 1.1s ease-in-out infinite; }
-@keyframes tut-pulse { 50% { box-shadow: 0 0 0 7px rgba(242, 194, 0, 0.35); } }
+/* 押してほしいボタン・タブ。広がる輪は transform と opacity だけで動かす（影を動かすと毎フレーム描き直しになる） */
+.tut-pulse { position: relative; box-shadow: 0 0 0 3px var(--yellow); }
+.tut-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  border: 3px solid var(--yellow);
+  pointer-events: none;
+  animation: tut-pulse 1.1s ease-out infinite;
+}
+@keyframes tut-pulse { from { transform: scale(1); opacity: 0.8; } to { transform: scale(1.25); opacity: 0; } }
 /* 目印が画面の外にあるときの、向きを示す矢印 */
 .tut-edge { position: absolute; display: none; z-index: 5; color: var(--yellow); font-size: 34px; line-height: 1; text-shadow: 0 0 6px #000, 0 0 2px #000; pointer-events: none; }
 /* チュートリアル中: 経営メニューなどの最後の行が下の帯に隠れないようにする */
