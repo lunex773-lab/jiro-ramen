@@ -102,7 +102,9 @@ describe('イベントの共通部分', () => {
     // 控えがなかった日は爆発事故を抽選しない
     expect(s.events!.stats.explosion?.draws ?? 0).toBe(0);
     expect(nextDay(s, ctx).ok).toBe(true);
-    expect(s.prepSnapshot?.day).toBe(s.day);
+    // 翌日からは仕込み開始時点の控えができる
+    const snapshotDay = (x: GameState) => x.prepSnapshot?.day;
+    expect(snapshotDay(s)).toBe(s.day);
   });
 });
 

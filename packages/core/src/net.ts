@@ -186,6 +186,18 @@ function reorder(arr: J[], ids: string[], ins: Record<string, unknown>): J[] {
   });
 }
 
+// ───────────────────────── 配信する状態 ─────────────────────────
+
+/**
+ * 共同経営で配信する状態。仕込み開始時点の控え（prepSnapshot）は含めない
+ * （クライアントは使わず、復元はサーバーの中だけで行う。控えを配ると毎日1回、状態の全体に近い量を全員に送ることになる）
+ */
+export function syncView(s: GameState): GameState {
+  if (s.prepSnapshot === undefined) return s;
+  const { prepSnapshot: _snapshot, ...rest } = s;
+  return rest as GameState;
+}
+
 // ───────────────────────── 補間（表示用） ─────────────────────────
 
 /** 他プレイヤーの表示位置を補間する */

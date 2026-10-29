@@ -32,6 +32,7 @@ import {
   PROTOCOL_VERSION,
   SCHEMA_VERSION,
   stateChecksum,
+  syncView,
   step,
   validateState,
   type ActionResult,
@@ -232,7 +233,7 @@ export class GameRoom extends DurableObject<Env> {
     }
     this.state = r.data.state;
     this.seq = r.data.seq;
-    this.lastSent = clone(this.state);
+    this.lastSent = clone(syncView(this.state));
     this.rids = new Map(Object.entries(r.data.rids).map(([k, v]) => [k, RidCache.from(v)]));
     this.layoutHolder = null;
   }
@@ -814,7 +815,8 @@ export class GameRoom extends DurableObject<Env> {
         this.auditLater({ kind: 'action_exception', playerId: a.pid, detail: { type: m.a.type, error: String(e) } });
       }
       this.dirty = true;
-      if (s.phase !== phase && (s.phase === 'closed' || s.phase === 'bankrupt')) this.checkpoint('phase');
+      // 閉店・破産と、仕込みの開始（翌日・事故のリセット。仕込み開始時点の控えを確実に保存する）で保存する
+      if (s.phase !== phase && (s.phase === 'closed' || s.phase === 'bankrupt' || s.phase === 'prep')) this.checkpoint('phase');
     }
     cache?.set(m.rid, r);
     this.send(ws, { t: 'res', rid: m.rid, r });
@@ -861,7 +863,7 @@ export class GameRoom extends DurableObject<Env> {
     this.state = s;
     this.corrupt = false;
     this.sim = makeCtx();
-    this.lastSent = clone(s);
+    this.lastSent = clone(syncView(s));
     this.seq += 1;
     // すでに接続しているゲストを追加
     for (const [pid, sock] of this.seated()) {
@@ -1059,15 +1061,17 @@ export class GameRoom extends DurableObject<Env> {
   flush(): void {
     const s = this.state;
     if (!s) return;
-    if (!this.lastSent) this.lastSent = clone(s);
+    // 仕込み開始時点の控えは配信しない（syncView）。チェックポイントには状態全体を保存する
+    const view = syncView(s);
+    if (!this.lastSent) this.lastSent = clone(view);
     let patch: string | null = null;
-    const ops = this.dirty || this.sim.events.length > 0 ? diff(this.lastSent, s) : [];
+    const ops = this.dirty || this.sim.events.length > 0 ? diff(this.lastSent, view) : [];
     const ev = this.sim.events.splice(0);
     this.dirty = false;
     if (ops.length > 0 || ev.length > 0) {
       const from = this.seq;
       this.seq += 1;
-      this.lastSent = clone(s);
+      this.lastSent = clone(view);
       const msg: Extract<ServerMsg, { t: 'patch' }> = { t: 'patch', from, to: this.seq, ops, ev };
       const now = Date.now();
       if (now - this.lastHashAt >= HASH_INTERVAL_MS) {

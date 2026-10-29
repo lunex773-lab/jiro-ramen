@@ -1,6 +1,6 @@
 // 共同経営ルーム（GameRoom Durable Object）の WebSocket プロトコル。
 
-import { canonicalJson, createGame, MAX_PLAYERS, stateChecksum, type GameState } from '@jiro/core';
+import { canonicalJson, createGame, MAX_PLAYERS, stateChecksum, syncView, type GameState } from '@jiro/core';
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -282,10 +282,10 @@ describe('操作要求', () => {
     expect(hc.gaps).toBe(0);
     expect(hc.hashChecks).toBeGreaterThan(0);
     expect(hc.hashMismatches).toBe(0);
-    // サーバーの状態とも一致する（パッチ配信時点の状態）
+    // サーバーの状態とも一致する（パッチ配信時点の状態。仕込み開始時点の控えは配信しないので除いて比べる）
     const serverSeqState = await inRoom(room.roomId, (x) => {
       x.flush();
-      return { seq: x.seq, sum: stateChecksum(x.state!) };
+      return { seq: x.seq, sum: stateChecksum(syncView(x.state!)) };
     });
     await hc.until(() => hc.seq >= serverSeqState.seq, 3000, 'host catches up');
     expect(stateChecksum(JSON.parse(hc.snapshots.get(serverSeqState.seq)!) as GameState)).toBe(serverSeqState.sum);
