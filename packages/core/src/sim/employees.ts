@@ -39,6 +39,7 @@ import {
 } from './interact';
 import { isBowlComplete } from './cooking';
 import { emit, notify, type SimCtx } from './notices';
+import { complaintVerbFor } from './complaints';
 
 export const ROLE_LABEL: Record<EmployeeRole, string> = {
   cook: '調理担当',
@@ -309,7 +310,7 @@ export function buildTasks(s: GameState): Task[] {
     }
     for (const seat of s.seats) {
       const cust = s.customers.find((c) => c.id === seat.customerId);
-      if (cust && cust.state === 'complaint') add('complaint', `complaint:${seat.id}`, [step(seat.id, 'complaint_remake')]);
+      if (cust && cust.state === 'complaint') add('complaint', `complaint:${seat.id}`, [step(seat.id, complaintVerbFor(cust))]);
     }
     // ── 仕込み ──
     for (const r of Object.values(PREP_RECIPES)) {

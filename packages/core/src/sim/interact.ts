@@ -10,6 +10,7 @@ import { PREP_RECIPES, type PrepRecipe } from '../data/prep';
 import { accessPoint, equipmentCenter, seatKitchenPoint, seatPos } from '../geometry';
 import type {
   Bowl,
+  ComplaintResponse,
   DayPhase,
   DirtSpot,
   Employee,
@@ -38,7 +39,9 @@ import {
 } from './equipment';
 import { addLot, addTrash, consume, discardWaste, stockOf } from './inventory';
 import { emit, notify, type SimCtx } from './notices';
-import { leaveFromInsideQueue, leaveWithoutEating, onServed } from './customers';
+import { leaveFromInsideQueue, onServed } from './customers';
+import { planComplaintResponse, respondToComplaint } from './complaints';
+import { accidentHalted } from './events';
 
 export type Actor = Player | Employee;
 
@@ -903,33 +906,12 @@ const VERBS: VerbDef[] = [
       a.hand = { kind: 'lostItem', lostItemId: item.id };
     },
   },
-  {
-    id: 'complaint_remake',
-    match: (t) => t.kind === 'seat',
-    phases: ['open', 'closing'],
-    skill: 'service',
-    plan: (s, a, t) => {
-      const seat = seatOf(t);
-      const cust = s.customers.find((c) => c.id === seat.customerId);
-      if (!cust || cust.state !== 'complaint') return no('お詫びして作り直す', 'クレームはありません');
-      if (!(a.hand.kind === 'none' || (a.hand.kind === 'dirty' && a.hand.bowlIds.length < 5))) return no('お詫びして作り直す', '手をあけてください（丼を下げます）');
-      return ok('お詫びして作り直す', 1, 1);
-    },
-    applyUnit: (s, a, t, _args, ctx) => handleComplaint(s, ctx, seatOf(t), a, 'remake'),
-  },
-  {
-    id: 'complaint_refund',
-    match: (t) => t.kind === 'seat',
-    phases: ['open', 'closing'],
-    skill: 'service',
-    plan: (s, _a, t) => {
-      const seat = seatOf(t);
-      const cust = s.customers.find((c) => c.id === seat.customerId);
-      if (!cust || cust.state !== 'complaint') return no('お詫びして返金する', 'クレームはありません');
-      return ok('お詫びして返金する', 1, 1);
-    },
-    applyUnit: (s, a, t, _args, ctx) => handleComplaint(s, ctx, seatOf(t), a, 'refund'),
-  },
+  // ── クレーム（sim/complaints.ts） ──
+  complaintVerb('apologize'),
+  complaintVerb('remake'),
+  complaintVerb('refund'),
+  complaintVerb('explain'),
+  complaintVerb('refuse'),
 
   // ── 床の汚れ ──
   {
@@ -953,6 +935,21 @@ const VERBS: VerbDef[] = [
 
 const VERB_MAP = new Map(VERBS.map((v) => [v.id, v]));
 export const VERB_IDS = VERBS.map((v) => v.id);
+
+/** クレームへの対応の動詞（complaint_apologize / remake / refund / explain / refuse） */
+function complaintVerb(resp: ComplaintResponse): VerbDef {
+  return {
+    id: `complaint_${resp}`,
+    match: (t) => t.kind === 'seat',
+    phases: ['open', 'closing'],
+    skill: 'service',
+    plan: (s, a, t) => {
+      const p = planComplaintResponse(s, a, seatOf(t), resp);
+      return p.reason === null ? ok(p.label, p.time, 1) : no(p.label, p.reason);
+    },
+    applyUnit: (s, a, t, _args, ctx) => respondToComplaint(s, ctx, seatOf(t), a, resp),
+  };
+}
 
 /** 仕込みレシピから動詞を作る */
 function prepVerb(r: PrepRecipe): VerbDef {
@@ -1107,53 +1104,6 @@ function discardBowl(s: GameState, ctx: SimCtx, b: Bowl, a: Actor, reason: strin
   a.hand = { kind: 'dirty', bowlIds: [...ids, b.id] };
 }
 
-function handleComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Actor, mode: 'remake' | 'refund'): void {
-  const cust = s.customers.find((c) => c.id === seat.customerId);
-  if (!cust || cust.state !== 'complaint') return;
-  const o = s.orders.find((x) => x.id === cust.orderId);
-  const svc = a.kind === 'employee' ? 0.5 + 0.5 * a.profile.skills.service : 0.85;
-  if (mode === 'remake' && o) {
-    // 提供済みの丼を下げて、同じ注文を作り直す
-    const b = bowlById(s, seat.bowlId);
-    if (b) {
-      seat.bowlId = null;
-      b.state = 'dirty';
-      b.contents = null;
-      b.orderId = null;
-      b.loc = { at: 'hand', actorId: a.id };
-      const ids = a.hand.kind === 'dirty' ? a.hand.bowlIds : [];
-      a.hand = { kind: 'dirty', bowlIds: [...ids, b.id] };
-    }
-    // 先に計上した売上は返金扱いにして、作り直しを提供したときに改めて計上する
-    cash(s, 'refund', -o.price, `作り直しのため売上取消（${seat.index + 1}番席）`, `refund:${o.id}:${o.remakes}`, true);
-    recordPL(s, 'refunds', o.price);
-    o.status = 'waiting';
-    o.servedAt = null;
-    o.quality = null;
-    o.mistakes = [];
-    // 売上キーは作り直し回数で区別する（sale:<注文ID>:<回数>）
-    o.remakes += 1;
-    s.today.remakes += 1;
-    cust.state = 'seated';
-    cust.stateTime = 0;
-    cust.patience = Math.max(cust.patience, 60);
-    cust.sat.service = Math.max(cust.sat.service * 0.8, svc * 0.85);
-    cust.say = 'じゃあ作り直しでお願いします';
-    cust.sayUntil = s.t + 3;
-    emit(ctx, { type: 'complaintRemake', targetId: seat.id });
-  } else if (o) {
-    cash(s, 'refund', -o.price, `返金（${seat.index + 1}番席）`, `refund:${o.id}:${o.remakes}`, true);
-    recordPL(s, 'refunds', o.price);
-    o.status = 'refunded';
-    cust.sat.service = Math.max(cust.sat.service * 0.7, svc * 0.7);
-    cust.sat.value = Math.max(cust.sat.value, 0.8);
-    cust.say = 'まあ、返金してくれるなら…';
-    cust.sayUntil = s.t + 3;
-    leaveWithoutEating(s, cust, ctx);
-    emit(ctx, { type: 'complaintRefund', targetId: seat.id, value: o.price });
-  }
-}
-
 function soupPotFor(s: GameState, assembly: Equipment): { e: Equipment; d: number } | null {
   const pots = s.equipment
     .filter((x) => x.placed && roleOf(x) === 'soup' && isUsable(x))
@@ -1227,7 +1177,7 @@ function scaledPlan(s: GameState, a: Actor, t: Target, v: VerbDef, args: Args): 
 export function listVerbs(s: GameState, actorId: Id, targetId: Id): VerbInfo[] {
   const a = getActor(s, actorId);
   const t = resolveTarget(s, targetId);
-  if (!a || !t) return [];
+  if (!a || !t || accidentHalted(s)) return [];
   const out: VerbInfo[] = [];
   for (const v of VERBS) {
     if (!v.match(t)) continue;
@@ -1270,6 +1220,7 @@ export function interact(s: GameState, actorId: Id, targetId: Id, verb: string, 
   const a = getActor(s, actorId);
   if (!a) return { ok: false, reason: '操作者が見つかりません' };
   if (s.phase === 'bankrupt') return { ok: false, reason: '破産しています' };
+  if (accidentHalted(s)) return { ok: false, reason: '店が壊滅しています' };
   const t = resolveTarget(s, targetId);
   if (!t) return { ok: false, reason: '対象が見つかりません' };
   const v = VERB_MAP.get(verb);

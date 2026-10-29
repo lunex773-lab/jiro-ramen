@@ -14,10 +14,14 @@ export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire',
   'fire', 'setRole', 'setPriority', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
+  'accidentReset',
 ] as const satisfies readonly ActionType[];
 
-/** 共同経営では受け付けない操作（チュートリアルはひとりプレイのみ） */
-export const SOLO_ONLY_ACTION_TYPES = ['tutorial'] as const satisfies readonly ActionType[];
+/**
+ * 共同経営では受け付けない操作。チュートリアルはひとりプレイのみ。
+ * debugEvent（テスト用のイベントの強制発生）を受け付けると、1人のクライアントがサーバーの状態を変えられてしまうので受け付けない
+ */
+export const SOLO_ONLY_ACTION_TYPES = ['tutorial', 'debugEvent'] as const satisfies readonly ActionType[];
 
 type AcceptedActionType = (typeof ACTION_TYPES)[number];
 
@@ -86,6 +90,8 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   payArrears: {},
   rename: { name: isStr(40) },
   giveUp: {},
+  // 事故の ID（違えばサーバーは何もしない。同時に届いた2回目以降も何もしない）
+  accidentReset: { accidentId: isId },
 };
 
 /** 操作要求の形を検証する。正しければ余計なキーを除いた Action を返す */

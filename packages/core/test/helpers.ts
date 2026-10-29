@@ -1,10 +1,13 @@
 import {
   accessPoint,
+  applyAction,
+  BALANCE,
   createGame,
   DEFAULT_CALL,
   makeCtx,
   makeEmployee,
   requestRepair,
+  seatKitchenPoint,
   step,
   TASK_KINDS,
   type CustomerTraits,
@@ -104,4 +107,44 @@ export function seatCustomer(
   s.orders.push(o);
   s.customers[s.customers.length - 1]!.orderId = o.id;
   return o;
+}
+
+/** 操作を実行し、長押しの作業なら終わるまで時間を進める（失敗したら例外） */
+export function act(s: GameState, ctx: SimCtx, targetId: string, verb: string, args?: Record<string, number>, actorId = 'p1'): void {
+  const r = applyAction(s, actorId, { type: 'interact', targetId, verb, args }, ctx);
+  if (!r.ok) throw new Error(`${verb}: ${r.reason}`);
+  const p = s.players.find((x) => x.id === actorId)!;
+  let guard = 0;
+  while (p.work && guard++ < 1000) run(s, ctx, 0.1);
+}
+
+/**
+ * 注文の丼を作って提供する（プレイヤー p1 が手で作る）。
+ * askCall = true ならコールを聞いてコールどおりに盛る（正しい丼）。false なら聞かずに出す（盛り間違いになる）
+ */
+export function cookAndServe(s: GameState, ctx: SimCtx, o: Order, askCall: boolean): void {
+  const seat = s.seats.find((x) => x.id === o.seatId)!;
+  const p = s.players[0]!;
+  const rack = eqByType(s, 'bowl_rack');
+  const asm = eqByType(s, 'assembly');
+  const boiler = eqByType(s, 'noodle_boiler');
+  if (askCall) {
+    p.pos = seatKitchenPoint(s, seat);
+    act(s, ctx, seat.id, 'ask_call');
+  }
+  standAt(s, 'p1', rack.id);
+  act(s, ctx, rack.id, 'bowls_take', { count: 1 });
+  standAt(s, 'p1', asm.id);
+  act(s, ctx, asm.id, 'bowls_place');
+  act(s, ctx, asm.id, 'tare');
+  act(s, ctx, asm.id, 'soup');
+  standAt(s, 'p1', boiler.id);
+  act(s, ctx, boiler.id, 'noodles_in');
+  run(s, ctx, BALANCE.cooking.noodleIdeal - 1);
+  act(s, ctx, boiler.id, 'noodles_up');
+  standAt(s, 'p1', asm.id);
+  if (askCall) act(s, ctx, asm.id, 'toppings');
+  act(s, ctx, asm.id, 'bowl_take');
+  p.pos = seatKitchenPoint(s, seat);
+  act(s, ctx, seat.id, 'serve');
 }

@@ -8,6 +8,8 @@ import { emptyDayStats } from './sim/economy';
 import { addLot } from './sim/inventory';
 import type { GameState, Player, Seat } from './types';
 import { newTutorial } from './sim/tutorial';
+import { newEvents } from './sim/events';
+import { takePrepSnapshot } from './sim/accident';
 import { newId } from './util';
 
 export const SCHEMA_VERSION = 1;
@@ -110,6 +112,8 @@ export function createGame(opts: NewGameOptions = {}): GameState {
     bankruptcy: null,
     paused: false,
     tutorial: opts.tutorial ? newTutorial('basics') : null,
+    events: newEvents(seed),
+    prepSnapshot: null,
   };
   // JSON で表現できない -Infinity は使わない
   s.career.bestDayProfit = -1e12;
@@ -161,5 +165,7 @@ export function createGame(opts: NewGameOptions = {}): GameState {
   addLot(s, 'ichimi', 300, 2);
 
   s.players.push(makePlayer(s, opts.playerId ?? 'p1', opts.playerName?.trim() || '店主', true));
+  // 1日目の仕込み開始時点（爆発事故のリセット用）。練習の日（0日目）は事故が起きないので作らない
+  if (!opts.tutorial) takePrepSnapshot(s);
   return s;
 }

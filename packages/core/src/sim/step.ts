@@ -15,6 +15,9 @@ import { assignBowls, completeProcess, progressWork, roleOf } from './interact';
 import { receiveDeliveries, stockOf } from './inventory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { updateTutorial } from './tutorial';
+import { accidentHalted } from './events';
+import { stepHalted, updateAccident } from './accident';
+import { updateVisitors } from './visitors';
 
 /** 1ステップの最大時間（大きな dt は分割する） */
 const MAX_DT = 0.25;
@@ -31,6 +34,12 @@ export function step(s: GameState, dt: number, ctx: SimCtx): void {
 
 function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
   if (s.phase === 'closed' || s.phase === 'bankrupt' || s.paused) return;
+  // 爆発事故で店が壊滅している間は、営業の処理（時刻・客・従業員・調理・売上）を進めない
+  if (accidentHalted(s)) {
+    stepHalted(s, dt);
+    s.version += 1;
+    return;
+  }
   s.t += dt;
   if (s.phase === 'open') s.openT += dt;
 
@@ -49,7 +58,13 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
     spawnLostItemOwners(s, ctx);
   }
   updateCustomers(s, dt, ctx);
+  updateVisitors(s, ctx);
   housekeeping(s, dt, ctx);
+  updateAccident(s, dt, ctx);
+  if (accidentHalted(s)) {
+    s.version += 1;
+    return;
+  }
 
   // 1秒ごとの判定
   if (Math.floor(s.t) !== Math.floor(s.t - dt)) {

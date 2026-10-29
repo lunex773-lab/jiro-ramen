@@ -14,6 +14,8 @@ import { dropHand } from './interact';
 import { morningRollCall, refreshCandidates, wagesDue } from './employees';
 import { expireLots, receiveDeliveries, runAutoOrder } from './inventory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
+import { drawAccident, takePrepSnapshot } from './accident';
+import { onDayEndEvents, onDayStartEvents, onOpenShopEvents } from './visitors';
 
 /** 開店 */
 export function openShop(s: GameState, ctx: SimCtx): { ok: boolean; reason?: string } {
@@ -22,6 +24,9 @@ export function openShop(s: GameState, ctx: SimCtx): { ok: boolean; reason?: str
   s.phase = 'open';
   s.openT = 0;
   s.arrivalAcc = 0.6;
+  // その日のイベントの抽選（覆面調査員・爆発事故は開店のときに1日1回だけ）
+  onOpenShopEvents(s);
+  drawAccident(s);
   emit(ctx, { type: 'open' });
   notify(s, ctx, 'phase', 'info', `${s.day}日目の営業を開始しました`);
   return { ok: true };
@@ -185,6 +190,7 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
   s.career.bestDayServed = Math.max(s.career.bestDayServed, s.today.served);
   if (s.today.served > 0) s.career.bestDayProfit = Math.max(s.career.bestDayProfit, op);
   checkGoals(s, ctx);
+  onDayEndEvents(s);
   s.phase = 'closed';
   s.customers = [];
   s.queue = [];
@@ -315,6 +321,8 @@ export function nextDay(s: GameState, ctx: SimCtx): { ok: boolean; reason?: stri
   // 常連は時間が経つと少しずつ離れる
   for (const r of s.regulars) if (s.day - r.lastVisitDay > 5) r.loyalty = Math.max(0, r.loyalty - 0.03);
   s.regulars = s.regulars.filter((r) => r.loyalty > 0.02);
+  // 覆面調査員の記事の公開など（仕込み開始時点の控えより前に済ませ、控えに含める）
+  onDayStartEvents(s, ctx);
   if (s.closedForConstruction > 0) {
     // 工事で休業: 営業せずに精算だけ行う
     s.closedForConstruction -= 1;
@@ -324,6 +332,8 @@ export function nextDay(s: GameState, ctx: SimCtx): { ok: boolean; reason?: stri
     return { ok: true };
   }
   s.phase = 'prep';
+  // 爆発事故のリセットに使う「仕込み開始時点」の控え（ここと新しいキャリアの1日目だけで作る）
+  takePrepSnapshot(s);
   emit(ctx, { type: 'dayStart', value: s.day });
   return { ok: true };
 }

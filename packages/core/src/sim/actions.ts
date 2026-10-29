@@ -6,7 +6,7 @@ import { BOWL_PACK, EQUIPMENT, SEAT_PRICE } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
 import { MENU } from '../data/menu';
 import { moveWithCollision, stageOf } from '../geometry';
-import type { EmployeeRole, GameState, Id, Rot, Vec2 } from '../types';
+import type { EmployeeRole, EventKind, GameState, Id, Rot, Vec2 } from '../types';
 import { dist, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipment';
@@ -17,6 +17,9 @@ import { placeOrder } from './inventory';
 import { autoPlace, expand, placeEquipment, storeEquipment } from './layout';
 import { emit, type SimCtx } from './notices';
 import { currentTutorialStep, inBasicsTutorial, tutorialAction, updateTutorial, type TutorialOp } from './tutorial';
+import { accidentHalted, EVENT_KINDS } from './events';
+import { accidentFainted, resetAccident } from './accident';
+import { forceEvent } from './visitors';
 
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
@@ -46,13 +49,17 @@ export type Action =
   | { type: 'payArrears' }
   | { type: 'rename'; name: string }
   | { type: 'giveUp' }
-  | { type: 'tutorial'; op: TutorialOp; stepId?: string };
+  | { type: 'tutorial'; op: TutorialOp; stepId?: string }
+  /** 爆発事故のあと、事故当日の仕込み開始時点に戻す（accidentId は事故の ID。違えば何もしない） */
+  | { type: 'accidentReset'; accidentId: Id }
+  /** テスト用: イベントを強制的に起こす（ひとりプレイのみ。共同経営のサーバーは受け付けない） */
+  | { type: 'debugEvent'; kind: EventKind };
 
 export type ActionType = Action['type'];
 
 /** 共同経営でホストだけが実行できる操作（店の存続に関わる操作） */
 export const HOST_ONLY: ReadonlySet<ActionType> = new Set<ActionType>([
-  'nextDay', 'sellEquipment', 'fire', 'expand', 'takeLoan', 'rename', 'giveUp',
+  'nextDay', 'sellEquipment', 'fire', 'expand', 'takeLoan', 'rename', 'giveUp', 'accidentReset',
 ]);
 
 export interface ActionResult {
@@ -89,6 +96,11 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
   if (!player) return fail('プレイヤーが見つかりません');
   if (s.phase === 'bankrupt' && a.type !== 'move') return fail('破産しています');
   if (s.paused && a.type !== 'move') return fail('一時停止中です');
+  // 爆発事故で店が壊滅している間は、歩くこととリセットだけ（気を失っている間は歩けない）
+  if (accidentHalted(s)) {
+    if (a.type === 'move' && accidentFainted(s)) return { ok: true, corrected: { ...player.pos } };
+    if (a.type !== 'move' && a.type !== 'accidentReset') return fail('店が壊滅しています（「リセットする」で事故の前に戻れます）');
+  }
   switch (a.type) {
     case 'move': {
       if (!isNum(a.x) || !isNum(a.z) || !isNum(a.yaw)) return fail('不正な位置');
@@ -252,6 +264,15 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       if (s.phase !== 'closed') return fail('閉店後にだけ選べます');
       declareBankruptcy(s, ctx, '経営を断念した');
       return { ok: true };
+    }
+    case 'accidentReset': {
+      const r = resetAccident(s, actorId, a.accidentId, ctx);
+      return r.ok ? { ok: true } : fail(r.reason ?? 'リセットできません');
+    }
+    case 'debugEvent': {
+      if (!EVENT_KINDS.includes(a.kind)) return fail('不明なイベントです');
+      const r = forceEvent(s, ctx, a.kind);
+      return r.ok ? { ok: true } : fail(r.reason ?? '起こせません');
     }
     case 'tutorial': {
       const ops: readonly string[] = ['next', 'alt', 'close', 'quit', 'staffStart', 'staffDecline'];

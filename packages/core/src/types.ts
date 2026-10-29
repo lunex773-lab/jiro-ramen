@@ -335,7 +335,53 @@ export interface Customer {
   forLostItem: Id | null;
   /** チュートリアル用の客（注文と食べる時間が決まっていて、帰ったりクレームを言ったりしない） */
   script?: { menuId: string; eatTime: number } | null;
+  // 以下は営業中のイベント（sim/events.ts, sim/complaints.ts）で使う。古いセーブにはないので任意の項目
+  /** 言っている最中のクレーム（complaint 状態のとき） */
+  complaint?: CustomerComplaint | null;
+  /** この来店で言ったクレーム（同じクレームを繰り返さないため） */
+  complaintLog?: { cause: ComplaintCause; remakes: number }[];
+  /** この来店で抽選を済ませた確認（遅延・汚れ・理不尽な要求など。同じ確認を何度も抽選しない） */
+  rolled?: string[];
+  /** 特別な客（覆面調査員・珍しい客）。正体は画面に出さない */
+  special?: CustomerSpecial | null;
+  /** 一緒に来た客の ID（カップル） */
+  partyId?: Id | null;
+  /** 見た目の指定（珍しい客）。なければ appearance から決まる */
+  look?: CustomerLook | null;
+  /** SNS を見て来た客 */
+  fromBuzz?: boolean;
+  /** 吹き出しの種類（小声） */
+  sayStyle?: 'whisper' | null;
+  /** 食事の合計時間（秒。食事の途中のセリフに使う） */
+  eatTotal?: number;
 }
+
+/** クレームの原因 */
+export type ComplaintCause = 'mistake' | 'quality' | 'delay' | 'dirty' | 'unreasonable';
+/** クレームへの対応 */
+export type ComplaintResponse = 'apologize' | 'remake' | 'refund' | 'explain' | 'refuse';
+
+export interface CustomerComplaint {
+  id: Id;
+  cause: ComplaintCause;
+  /** 提供したあとのクレームか（提供前は作り直せず、返金は食券の払い戻しになる） */
+  served: boolean;
+  text: string;
+  /** 試して受け入れてもらえなかった対応（同じクレームの間は選べない） */
+  tried: ComplaintResponse[];
+}
+
+export type SpecialKind = 'critic' | 'couple_her' | 'couple_him' | 'ramen_lover';
+
+export interface CustomerSpecial {
+  kind: SpecialKind;
+  /** 発生したイベントの ID */
+  eventId: Id;
+  /** セリフを言い終えた（一度の来店で一度だけ） */
+  spoken: boolean;
+}
+
+export type CustomerLook = 'blonde_woman' | 'boyfriend';
 
 export type OrderStatus = 'waiting' | 'served' | 'cancelled' | 'refunded';
 
@@ -481,6 +527,8 @@ export interface Review {
   text: string;
   parts: SatisfactionParts;
   regular: boolean;
+  /** グルメ評論家（覆面調査員）の記事 */
+  critic?: boolean;
 }
 
 export interface Regular {
@@ -546,6 +594,105 @@ export interface TutorialState {
   entered: boolean;
   /** 最後の手順まで終えた（basics は画面側で1日目を始める） */
   finished: boolean;
+}
+
+// ───────────────────────── 営業中のイベント ─────────────────────────
+
+/** イベントの種類（安定した ID。設定値・記録・強制発生のキー） */
+export type EventKind = 'sns_buzz' | 'critic' | 'rare_couple' | 'rare_lover' | 'complaint_unreasonable' | 'explosion';
+
+export interface EventStat {
+  /** 抽選した回数 */
+  draws: number;
+  /** 発生した回数（テスト用の強制発生を含む） */
+  fired: number;
+  /** そのうちテスト用に強制発生した回数（実測の頻度から除くため） */
+  forced: number;
+  /** 最後に発生した営業日（-1 = まだ） */
+  lastDay: number;
+}
+
+export interface BuzzState {
+  id: Id;
+  /** 営業の経過秒（openT）での開始・終了 */
+  startT: number;
+  endT: number;
+  mult: number;
+  /** 拡散している投稿 */
+  post: string;
+}
+
+export type CriticItem = 'taste' | 'speed' | 'service' | 'cleanliness' | 'accuracy';
+
+/** 覆面調査員（グルメ評論家）の評価。来店した翌日の仕込みの開始時に公開する */
+export interface CriticReport {
+  id: Id;
+  day: number;
+  publishDay: number;
+  stars: number;
+  scores: Record<CriticItem, number>;
+  /** 食べずに帰った（待ちきれなかった） */
+  walkedOut: boolean;
+  published: boolean;
+  text: string;
+  /** 改善すべき項目（点数の低い順） */
+  improve: CriticItem[];
+}
+
+/** 来客の倍率（覆面調査員の記事の反響など）。untilDay の営業まで続く */
+export interface DemandEffect {
+  id: Id;
+  source: EventKind;
+  mult: number;
+  untilDay: number;
+}
+
+/** 爆発事故。warning = 設備の異常（営業は続く）、destroyed = 店が壊滅（営業処理は止まる） */
+export interface AccidentState {
+  id: Id;
+  day: number;
+  stage: 'warning' | 'destroyed';
+  /** その段階の経過秒 */
+  t: number;
+  /** 異常を起こした設備 */
+  sourceId: Id | null;
+  pos: Vec2;
+}
+
+export interface ShopEvents {
+  /** イベント専用の乱数（既存の s.rng の並びを変えないため。リセットでも戻さない） */
+  rng: number;
+  /** イベントごとの抽選・発生の記録（実測の発生頻度。リセットでも戻さない） */
+  stats: Record<string, EventStat>;
+  /** その日の回数（理不尽なクレーム・珍しい客など。日が変わると消える） */
+  daily: { day: number; counts: Record<string, number> };
+  buzz: BuzzState | null;
+  /** 次に SNS バズを抽選する営業の経過秒 */
+  nextBuzzCheck: number;
+  /** 覆面調査員が来る予定（開店時の抽選で当たった日） */
+  criticPlan: { day: number; afterOpenT: number } | null;
+  /** 覆面調査員の評価（公開前・公開済み。最近のものだけ） */
+  critics: CriticReport[];
+  effects: DemandEffect[];
+  /** 理不尽なクレームを最後に言われた時刻（その日の t） */
+  unreasonableAt: number;
+  /** テスト用: 次の来店・提供で必ず起こすイベント */
+  forced: EventKind[];
+  /** 爆発事故を抽選した最後の営業日（同じ日に二度抽選しない。リセットでも戻さない） */
+  accidentDrawDay: number;
+  /** 抽選で当たった事故の予定 */
+  accidentPlan: { id: Id; day: number; atOpenT: number } | null;
+  accident: AccidentState | null;
+  /** 仕込み開始時点に戻した回数 */
+  resets: number;
+}
+
+/** 仕込み開始時点の状態の控え。日報・口コミ（営業中は変わらない）と、プレイヤー（接続で変わる）は入れない */
+export type SnapshotState = Omit<GameState, 'prepSnapshot' | 'history' | 'reviews' | 'players'>;
+
+export interface PrepSnapshot {
+  day: number;
+  state: SnapshotState;
 }
 
 export interface Bankruptcy {
@@ -627,4 +774,8 @@ export interface GameState {
   paused: boolean;
   /** チュートリアル中なら進み具合（ひとりプレイのみ） */
   tutorial?: TutorialState | null;
+  /** 営業中のイベント（古いセーブにはない。sim/events.ts の ensureEvents で補う） */
+  events?: ShopEvents;
+  /** その日の仕込み開始時点の控え（爆発事故のリセット用。共同経営では配信しない） */
+  prepSnapshot?: PrepSnapshot | null;
 }

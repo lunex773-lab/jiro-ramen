@@ -24,6 +24,10 @@ import type { QualityResult } from './cooking';
 import { effectSum, equipmentByRole, isUsable, useEquipment, defOf } from './equipment';
 import { stockOf } from './inventory';
 import { emit, notify, type SimCtx } from './notices';
+import { canComplain, startComplaint } from './complaints';
+import { addDaily, dailyCount, eventDemandFactor, ensureEvents, eventsAllowed, evRand, noteDraw, noteFire, takeForced } from './events';
+import { hasRolled, markRolled, onCustomerArrive, onVisitEnd } from './visitors';
+import { COMPLAINT_TEXT, UNREASONABLE_TEXT } from '../data/events';
 
 // ───────────────────────── 生成 ─────────────────────────
 
@@ -201,7 +205,9 @@ export function arrivalRate(s: GameState): number {
   const regularF = 1 + Math.min(0.6, s.regulars.reduce((a, r) => a + r.loyalty, 0) * 0.03);
   const ticketMachines = equipmentByRole(s, 'ticket');
   const ticketF = ticketMachines.length === 0 ? 0.6 : 1;
-  return c.baseRate * repF * timeCurve(x) * priceF * demand * regularF * ticketF;
+  // SNS バズ・覆面調査員の記事の反響（売上は通常どおり提供したときに計上される）
+  const eventF = eventDemandFactor(s);
+  return c.baseRate * repF * timeCurve(x) * priceF * demand * regularF * ticketF * eventF;
 }
 
 function activeCustomers(s: GameState): number {
@@ -242,6 +248,14 @@ export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
     s.queue.push(c.id);
     s.today.customers += 1;
     emit(ctx, { type: 'arrive', targetId: c.id });
+    // SNS を見て来た客・覆面調査員・珍しい客。カップルなら一緒に来た彼氏がすぐ後ろに並ぶ
+    const partner = onCustomerArrive(s, c, ctx);
+    if (partner) {
+      s.customers.push(partner);
+      s.queue.push(partner.id);
+      s.today.customers += 1;
+      emit(ctx, { type: 'arrive', targetId: partner.id });
+    }
   }
 }
 
@@ -311,13 +325,23 @@ function ticketPoint(s: GameState): Vec2 {
   return { x: (st.door.x0 + st.door.x1) / 2 + 0.6, z: 0.8 };
 }
 
-function freeSeat(s: GameState): Seat | null {
-  for (const seat of s.seats) {
-    if (!seat.installed || seat.customerId || seat.bowlId) continue;
-    if (seat.index >= stageOf(s).seats.length) continue;
-    return seat;
+/** 空いている席。一緒に来た客（カップル）は、隣が空いていれば隣に座る */
+function freeSeat(s: GameState, c?: Customer): Seat | null {
+  const n = stageOf(s).seats.length;
+  const free = s.seats.filter((seat) => seat.installed && !seat.customerId && !seat.bowlId && seat.index < n);
+  if (free.length === 0) return null;
+  if (c?.partyId) {
+    const mate = s.customers.find((x) => x.id === c.partyId);
+    const mateSeat = mate?.seatId ? s.seats.find((x) => x.id === mate.seatId) : null;
+    if (mateSeat) {
+      const next = free.find((x) => Math.abs(x.index - mateSeat.index) === 1);
+      if (next) return next;
+    } else if (mate && mate.state === 'waitingSeat') {
+      const pair = free.find((x) => free.some((y) => y.index === x.index + 1));
+      if (pair) return pair;
+    }
   }
-  return null;
+  return free[0]!;
 }
 
 function cleanlinessScore(s: GameState, seat: Seat | null): number {
@@ -336,6 +360,7 @@ function comfortScore(s: GameState): number {
 export function sayFor(c: Customer, s: GameState, text: string, sec = 3): void {
   c.say = text;
   c.sayUntil = s.t + sec;
+  c.sayStyle = null;
 }
 
 export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
@@ -476,7 +501,7 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
           return x && !x.forLostItem;
         });
         if (firstDiner === c.id) {
-          const seat = freeSeat(s);
+          const seat = freeSeat(s, c);
           if (seat) {
             removeFromInsideQueue(s, c.id);
             seat.customerId = c.id;
@@ -520,11 +545,13 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
         c.orderId = order.id;
         if (seat.dirt > 0.5) sayFor(c, s, 'カウンターがベタベタだな…');
         emit(ctx, { type: 'seated', targetId: seat.id, text: MENU[c.menuId]?.short ?? '' });
+        maybeDirtyComplaint(s, ctx, c, seat);
         break;
       }
       case 'seated': {
         c.seatWait += dt;
         c.patience -= dt * (0.6 + 0.4 * (1 - c.traits.patience));
+        if (maybeDelayComplaint(s, ctx, c)) break;
         if (c.patience <= 0) {
           const o = s.orders.find((x) => x.id === c.orderId);
           if (o && o.status === 'waiting') o.status = 'cancelled';
@@ -550,9 +577,17 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
       }
       case 'complaint': {
         c.patience -= dt;
-        if (c.stateTime > 30) {
+        if (c.stateTime > BALANCE.events.complaint.timeout) {
+          // 放っておかれて怒って帰る。理不尽な要求を放っておいたときは、断ったのと同じく口コミは書かない
+          const cp = c.complaint;
           sayFor(c, s, 'もう二度と来ない！');
           c.sat.service = 0;
+          if (cp?.cause === 'unreasonable') c.traits.reviewPropensity = 0;
+          c.complaint = null;
+          if (cp && !cp.served) {
+            leaveAngry(s, c, ctx);
+            break;
+          }
           s.today.lost += 1;
           const seat = s.seats.find((x) => x.id === c.seatId);
           if (seat) finishEating(s, c, seat, ctx);
@@ -612,7 +647,69 @@ export function leaveFromInsideQueue(s: GameState, c: Customer, ctx: SimCtx): vo
   startLeaving(s, c, ctx, 'left');
 }
 
-function startLeaving(s: GameState, c: Customer, ctx: SimCtx, endState: 'left' | 'abandoned'): void {
+/**
+ * 怒って帰る客（クレームを断られた・放っておかれた）。返金はしない。
+ * 提供した丼は手を付けないまま席に残り、提供前なら注文を取り消す。
+ */
+export function leaveAngry(s: GameState, c: Customer, ctx: SimCtx): void {
+  const o = s.orders.find((x) => x.id === c.orderId);
+  if (o && o.status === 'waiting') o.status = 'cancelled';
+  const seat = s.seats.find((x) => x.id === c.seatId);
+  const b = seat ? s.bowls.find((x) => x.id === seat.bowlId) : undefined;
+  if (b) {
+    b.state = 'dirty';
+    b.contents = null;
+  }
+  c.complaint = null;
+  s.today.lost += 1;
+  finalizeVisit(s, c, ctx, true);
+  startLeaving(s, c, ctx, 'left');
+}
+
+/** 提供の遅れのクレーム: 待ちが我慢の限度に近づいたとき、一度だけ抽選（提供前） */
+function maybeDelayComplaint(s: GameState, ctx: SimCtx, c: Customer): boolean {
+  if (c.script || hasRolled(c, 'delay') || !eventsAllowed(s, 1)) return false;
+  const tolerable = 45 + 70 * c.traits.patience;
+  if (c.seatWait < tolerable * BALANCE.events.complaint.delayAt) return false;
+  markRolled(c, 'delay');
+  if (!canComplain(s, c, 'delay')) return false;
+  if (evRand(s) >= c.traits.complaintPropensity * BALANCE.events.complaint.delayChance) return false;
+  startComplaint(s, ctx, c, 'delay', pick(ensureEvents(s), COMPLAINT_TEXT.delay), false, '提供が遅い');
+  return true;
+}
+
+/** 汚れのクレーム: 汚れた席に座ったとき、一度だけ抽選（提供前） */
+function maybeDirtyComplaint(s: GameState, ctx: SimCtx, c: Customer, seat: Seat): void {
+  if (c.script || hasRolled(c, 'dirty') || !eventsAllowed(s, 1)) return;
+  if (seat.dirt < BALANCE.events.complaint.dirtySeat) return;
+  markRolled(c, 'dirty');
+  if (!canComplain(s, c, 'dirty')) return;
+  if (evRand(s) >= c.traits.cleanlinessDemand * BALANCE.events.complaint.dirtyChance) return;
+  startComplaint(s, ctx, c, 'dirty', pick(ensureEvents(s), COMPLAINT_TEXT.dirty), false, '席が汚れている');
+}
+
+/** 理不尽な要求: 良い丼を出しても、クレームを言いやすくマナーの悪い客がまれに言う（店全体で間隔をあけ、1日の上限あり） */
+function maybeUnreasonable(s: GameState, ctx: SimCtx, c: Customer): boolean {
+  const u = BALANCE.events.complaint;
+  const forced = takeForced(s, 'complaint_unreasonable');
+  if (!forced) {
+    if (c.script || c.special || !eventsAllowed(s, 1)) return false;
+    const ev = ensureEvents(s);
+    if (s.t - ev.unreasonableAt < u.unreasonableGap || dailyCount(s, 'complaint_unreasonable') >= u.unreasonableMaxPerDay) return false;
+    if (!canComplain(s, c, 'unreasonable')) return false;
+    noteDraw(s, 'complaint_unreasonable');
+    if (evRand(s) >= c.traits.complaintPropensity * (1 - c.traits.manners) * u.unreasonableChance) return false;
+  }
+  const ev = ensureEvents(s);
+  ev.unreasonableAt = s.t;
+  addDaily(s, 'complaint_unreasonable');
+  noteFire(s, 'complaint_unreasonable', forced);
+  const text = c.call.yasai >= 2 && evRand(s) < 0.5 ? UNREASONABLE_TEXT.yasai : pick(ev, UNREASONABLE_TEXT.any);
+  startComplaint(s, ctx, c, 'unreasonable', text, true);
+  return true;
+}
+
+export function startLeaving(s: GameState, c: Customer, ctx: SimCtx, endState: 'left' | 'abandoned'): void {
   const seat = s.seats.find((x) => x.id === c.seatId);
   if (seat && seat.customerId === c.id) seat.customerId = null;
   c.state = 'leaving';
@@ -625,6 +722,12 @@ function startLeaving(s: GameState, c: Customer, ctx: SimCtx, endState: 'left' |
 export function onServed(s: GameState, ctx: SimCtx, o: Order, q: QualityResult): void {
   const c = s.customers.find((x) => x.id === o.customerId);
   if (!c) return;
+  // 提供の遅れ・汚れのクレームの最中に届いた: 待たされた分だけ接客の評価は下がるが、クレームは終わる
+  if (c.state === 'complaint' && c.complaint && !c.complaint.served) {
+    c.sat.service = Math.min(c.sat.service, 0.45);
+    c.complaint = null;
+    c.complaintReason = null;
+  }
   const m = MENU[o.menuId]!;
   c.sat.taste = clamp01(q.quality * (1.15 - 0.3 * c.traits.tasteCritic));
   c.sat.accuracy = clamp01(1 - q.mistakes.length * 0.35);
@@ -644,16 +747,16 @@ export function onServed(s: GameState, ctx: SimCtx, o: Order, q: QualityResult):
 
   const yasaiBonus = 1 + 0.08 * o.call.yasai;
   c.eatLeft = c.script ? c.script.eatTime : BALANCE.customers.eatTimeBase * m.eatFactor * yasaiBonus * (1.4 - 0.7 * c.traits.eatSpeed) * randRange(s, 0.85, 1.15);
+  c.eatTotal = c.eatLeft;
   c.state = 'eating';
   c.stateTime = 0;
   const bad = q.mistakes.length > 0 || q.quality < 0.45;
-  if (bad && !c.script && rand(s) < 0.25 + c.traits.complaintPropensity * (q.mistakes.length > 0 ? 1.4 : 0.8)) {
-    c.state = 'complaint';
-    c.complaintReason = q.mistakes[0] ?? '味がおかしい';
-    sayFor(c, s, `ちょっと！${c.complaintReason}んだけど`, 6);
-    s.today.complaints += 1;
-    notify(s, ctx, `complaint:${o.seatId}`, 'danger', `${(s.seats.find((x) => x.id === o.seatId)?.index ?? 0) + 1}番席でクレーム: ${c.complaintReason}`);
-    emit(ctx, { type: 'complaint', targetId: o.seatId, text: c.complaintReason });
+  const cause = q.mistakes.length > 0 ? 'mistake' : 'quality';
+  if (bad && !c.script && rand(s) < 0.25 + c.traits.complaintPropensity * (q.mistakes.length > 0 ? 1.4 : 0.8) && canComplain(s, c, cause)) {
+    const reason = q.mistakes[0] ?? '味がおかしい';
+    startComplaint(s, ctx, c, cause, `ちょっと！${reason}んだけど`, true, reason);
+  } else if (!bad && maybeUnreasonable(s, ctx, c)) {
+    // 良い丼でも理不尽な要求をされることがある
   } else if (q.quality > 0.85 && q.mistakes.length === 0) {
     sayFor(c, s, pick(s, ['うまっ…！', 'これこれ', '最高のワシワシ麺', '乳化スープたまらん']));
   } else {
@@ -749,7 +852,7 @@ export function overallSatisfaction(c: Customer): number {
   return clamp01(v / wsum);
 }
 
-function addReview(s: GameState, c: Customer, stars: number, texts: string[], regular: boolean): void {
+export function addReview(s: GameState, c: Customer, stars: number, texts: string[], regular: boolean): void {
   s.todayReviews.push({
     id: newId(s, 'rv'),
     day: s.day,
@@ -761,7 +864,9 @@ function addReview(s: GameState, c: Customer, stars: number, texts: string[], re
 }
 
 /** 退店時の口コミ・常連化（設計書 7.4, 7.5） */
-function finalizeVisit(s: GameState, c: Customer, _ctx: SimCtx, failed: boolean): void {
+export function finalizeVisit(s: GameState, c: Customer, _ctx: SimCtx, failed: boolean): void {
+  // 覆面調査員は満足度の項目から評価をまとめる（翌日に公開）
+  onVisitEnd(s, c);
   const sat = failed ? Math.min(0.25, overallSatisfaction(c)) : overallSatisfaction(c);
   s.today.satisfactionSum += sat;
   s.today.satisfactionCount += 1;
