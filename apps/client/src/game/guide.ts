@@ -39,8 +39,13 @@ export function nextHint(s: GameState, myId: string): string | null {
   if (hand.kind === 'mop') return '床の汚れを見て掃除。終わったら掃除用具入れにモップを戻す';
   if (hand.kind === 'lostItem') return '事務机で「📦 保管」';
   if (orders.length === 0) {
-    const dirtySeat = s.seats.find((x) => x.bowlId);
-    if (dirtySeat) return `${dirtySeat.index + 1}番席の丼を下げましょう`;
+    // 食べ終わった席（汚れた丼がある）: 汚れていれば先に拭く（拭くまでは丼を下げられない）
+    const dirtySeat = s.seats.find((x) => s.bowls.find((b) => b.id === x.bowlId)?.state === 'dirty');
+    if (dirtySeat) {
+      return dirtySeat.dirt >= BALANCE.cleaning.counterCleanBelow
+        ? `${dirtySeat.index + 1}番席のカウンターを「🧻 拭く」→ 丼を「🧺 下げる」`
+        : `${dirtySeat.index + 1}番席の丼を「🧺 下げる」`;
+    }
     const dirty = s.seats.find((x) => x.dirt > 0.4 && !x.customerId);
     if (dirty) return `${dirty.index + 1}番席のカウンターを拭きましょう`;
     return 'お客さんを待っています。今のうちに仕込みや洗い物を';

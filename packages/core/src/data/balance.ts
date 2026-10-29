@@ -76,6 +76,9 @@ export const BALANCE = {
   cleaning: {
     /** 客1人あたりカウンターの汚れ増加 */
     counterDirtPerCustomer: 0.25,
+    /** これ未満ならカウンターはきれい。これ以上汚れている席は、拭いてからでないと丼を下げられない
+     *（先に丼を下げると空いた席に次の客が座り、拭けなくなるため） */
+    counterCleanBelow: 0.05,
     /** 厨房の汚れ増加（1杯あたり） */
     kitchenGrimePerBowl: 0.006,
     /** 床汚れの発生確率（客1人あたり） */

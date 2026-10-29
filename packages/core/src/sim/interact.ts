@@ -847,6 +847,8 @@ const VERBS: VerbDef[] = [
       const label = '丼を下げる';
       const b = bowlById(s, seat.bowlId);
       if (!b || b.state !== 'dirty') return no(label, '下げる丼がありません');
+      // 丼がある間は次の客が座らないので、その間にカウンターを拭いてもらう
+      if (seat.dirt >= BALANCE.cleaning.counterCleanBelow) return no(label, '先にカウンターを拭いてください');
       if (!(handIsEmpty(a.hand) || a.hand.kind === 'dirty')) return no(label, `手がふさがっています（${handLabel(a.hand)}）`);
       if (a.hand.kind === 'dirty' && a.hand.bowlIds.length >= 5) return no(label, 'これ以上持てません（洗い場へ）');
       return ok(label, 0.4, 1);
@@ -870,7 +872,7 @@ const VERBS: VerbDef[] = [
     plan: (_s, a, t) => {
       const seat = seatOf(t);
       const label = 'カウンターを拭く';
-      if (seat.dirt < 0.05) return no(label, 'きれいです');
+      if (seat.dirt < BALANCE.cleaning.counterCleanBelow) return no(label, 'きれいです');
       if (seat.customerId) return no(label, 'お客さんが座っています');
       if (!(handIsEmpty(a.hand) || a.hand.kind === 'dirty')) return no(label, '手がふさがっています');
       return ok(`カウンターを拭く（汚れ${Math.round(seat.dirt * 100)}%）`, BALANCE.cleaning.wipeTime, 1);

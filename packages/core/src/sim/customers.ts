@@ -672,13 +672,14 @@ function finishEating(s: GameState, c: Customer, seat: Seat, ctx: SimCtx): void 
     seat.dirt = clamp01(seat.dirt + BALANCE.cleaning.counterDirtPerCustomer);
     return;
   }
-  // マナーの良い客は丼を上げてカウンターを拭く
+  // マナーの良い客は丼を上げてカウンターを拭いていく（その席は拭かずに丼を下げられる）
   const tidy = rand(s) < c.traits.manners * BALANCE.cleaning.mannersFactor;
   if (b) {
     b.state = 'dirty';
     if (b.contents) b.contents = null;
   }
-  seat.dirt = clamp01(seat.dirt + BALANCE.cleaning.counterDirtPerCustomer * (tidy ? 0.25 : 1));
+  if (tidy) seat.dirt = 0;
+  else seat.dirt = clamp01(seat.dirt + BALANCE.cleaning.counterDirtPerCustomer);
   if (tidy) emit(ctx, { type: 'tidy', targetId: seat.id });
   // 床の汚れ・こぼし
   const p = seatPos(s, seat);

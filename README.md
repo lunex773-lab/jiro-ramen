@@ -7,6 +7,7 @@
 - 設計書: [docs/DESIGN_SPEC.md](docs/DESIGN_SPEC.md) / 技術判断: [docs/adr](docs/adr) / Phase 0 レポート: [docs/PHASE0_REPORT.md](docs/PHASE0_REPORT.md)
 - 変更履歴: [docs/CHANGELOG.md](docs/CHANGELOG.md) / タスクと残課題: [docs/TASKS.md](docs/TASKS.md) / バランス: [docs/BALANCE.md](docs/BALANCE.md)
 - Cloudflare の設定: [docs/CLOUDFLARE_SETUP.md](docs/CLOUDFLARE_SETUP.md)
+- ゲームの概要（AI に説明するとき用）: [docs/GAME_OVERVIEW.md](docs/GAME_OVERVIEW.md)
 
 ## ゲームの流れ
 

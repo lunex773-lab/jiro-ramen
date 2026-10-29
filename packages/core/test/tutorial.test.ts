@@ -163,17 +163,23 @@ describe('チュートリアル（営業0日目）', () => {
     act(s, ctx, seatId, 'serve');
     expect(stepId(s)).toBe('eat_wait');
     // チュートリアルのお客さんはクレームを言わずに食べる
-    waitFor(s, ctx, 'collect', 60);
+    waitFor(s, ctx, 'wipe', 60);
 
-    // 片付け
+    // 片付け: 先にカウンターを拭いてから丼を下げる（拭くまでは下げられず、丼がある間は席が空かない）
+    const seat1 = s.seats.find((x) => x.id === seatId)!;
+    expect(seat1.dirt).toBeGreaterThanOrEqual(BALANCE.cleaning.counterCleanBelow);
+    stand(s, seatId);
+    const early = applyAction(s, 'p1', { type: 'interact', targetId: seatId, verb: 'collect' }, ctx);
+    expect(early.ok).toBe(false);
+    expect(early.reason).toContain('拭いて');
+    act(s, ctx, seatId, 'wipe');
+    expect(stepId(s)).toBe('collect');
     act(s, ctx, seatId, 'collect');
     expect(stepId(s)).toBe('wash_drop');
     const sink = eqByType(s, 'sink');
     act(s, ctx, sink.id, 'dishes_drop');
     expect(stepId(s)).toBe('wash');
     act(s, ctx, sink.id, 'wash');
-    expect(stepId(s)).toBe('wipe');
-    act(s, ctx, seatId, 'wipe');
     expect(stepId(s)).toBe('mop_take');
     const locker = eqByType(s, 'locker');
     act(s, ctx, locker.id, 'mop_take');
@@ -200,6 +206,7 @@ describe('チュートリアル（営業0日目）', () => {
       const b = s.bowls.find((x) => x.state === 'dirty' && x.loc.at === 'seat');
       if (b) break;
     }
+    act(s, ctx, seat2!, 'wipe');
     act(s, ctx, seat2!, 'collect');
     act(s, ctx, sink.id, 'dishes_drop');
     act(s, ctx, sink.id, 'wash');

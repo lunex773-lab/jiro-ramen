@@ -2,6 +2,7 @@
 // 手順ごとに「何をするか」「どこを見るか」「何をしたら次へ進むか」を決め、プレイヤーの操作で状態が変わったら次へ進める。
 // 状態（GameState.tutorial）には手順の番号と基準値だけを持ち、文言や判定はここに置く（セーブを小さく保つため）。
 
+import { BALANCE } from '../data/balance';
 import { STAGES } from '../data/stages';
 import { EQUIPMENT, type EquipmentRole } from '../data/equipment';
 import { DEFAULT_CALL } from '../data/menu';
@@ -303,9 +304,20 @@ const BASICS: TutorialStep[] = [
     auto: (s, t) => bowlOf(s, t)?.state === 'dirty',
   },
   {
+    id: 'wipe',
+    title: '片付け: まずカウンターを拭く',
+    text: '食べ終わってカウンターが汚れています。丼を下げる前に、席を見て「🧻 拭く」。丼が置いてある間は次のお客さんが座らないので、その間に拭きます（拭くまで丼は下げられません）。汚れたままだと次のお客さんの満足度が下がります。',
+    target: { kind: 'seat' },
+    enter: (s, _ctx, t) => {
+      const seat = s.seats.find((x) => x.id === str(t, 'seat'));
+      if (seat) seat.dirt = Math.max(seat.dirt, 0.6);
+    },
+    auto: (s, t) => (s.seats.find((x) => x.id === str(t, 'seat'))?.dirt ?? 0) < BALANCE.cleaning.counterCleanBelow,
+  },
+  {
     id: 'collect',
     title: '片付け: 丼を下げる',
-    text: '席を見て「🧺 下げる」。',
+    text: 'きれいになりました。席を見て「🧺 下げる」。',
     target: { kind: 'seat' },
     enter: (s, _ctx, t) => {
       const b = bowlOf(s, t);
@@ -332,17 +344,6 @@ const BASICS: TutorialStep[] = [
       const b = s.bowls.find((x) => x.id === str(t, 'bowl'));
       return !b || b.state === 'clean';
     },
-  },
-  {
-    id: 'wipe',
-    title: '片付け: カウンターを拭く',
-    text: 'カウンターが汚れています。席を見て「🧻 拭く」。汚れたままだと次のお客さんの満足度が下がります。',
-    target: { kind: 'seat' },
-    enter: (s, _ctx, t) => {
-      const seat = s.seats.find((x) => x.id === str(t, 'seat'));
-      if (seat) seat.dirt = Math.max(seat.dirt, 0.6);
-    },
-    auto: (s, t) => (s.seats.find((x) => x.id === str(t, 'seat'))?.dirt ?? 0) < 0.05,
   },
   {
     id: 'mop_take',
@@ -390,7 +391,7 @@ const BASICS: TutorialStep[] = [
   {
     id: 'cleanup2',
     title: '片付けまでが仕事',
-    text: '食べ終わったら丼を下げて洗い、カウンターも拭こう。',
+    text: '食べ終わったら、カウンターを拭いてから丼を下げて洗おう。',
     showGuide: true,
     auto: (s) => s.bowls.every((b) => b.state !== 'served' && b.state !== 'dirty' && b.state !== 'washing'),
   },

@@ -351,11 +351,11 @@ export function buildTasks(s: GameState): Task[] {
     const b = s.bowls.find((x) => x.id === seat.bowlId);
     if (b && b.state === 'dirty') {
       const drop = dws[0] ?? sinks[0];
-      const steps = [step(seat.id, 'collect')];
+      // 汚れた席は、拭いてから丼を下げる（丼を下げると次の客が座って拭けなくなるため）
+      const steps = seat.dirt >= BALANCE.cleaning.counterCleanBelow ? [step(seat.id, 'wipe'), step(seat.id, 'collect')] : [step(seat.id, 'collect')];
       if (drop) steps.push(step(drop.id, 'dishes_drop'));
       add('collect', `collect:${seat.id}`, steps, someoneWaiting ? 20 : 0);
-    }
-    if (seat.dirt >= 0.3 && !seat.customerId) add('wipe', `wipe:${seat.id}`, [step(seat.id, 'wipe')], someoneWaiting ? 15 : 0);
+    } else if (seat.dirt >= 0.3 && !seat.customerId) add('wipe', `wipe:${seat.id}`, [step(seat.id, 'wipe')], someoneWaiting ? 15 : 0);
     if (seat.lostItemId && desks[0]) {
       const item = s.lostItems.find((l) => l.id === seat.lostItemId);
       if (item && item.state === 'lying') add('lost', `lost:${item.id}`, [step(seat.id, 'lost_pick'), step(desks[0].id, 'lost_store')]);
