@@ -244,7 +244,13 @@ export function helpScreen(onClose: () => void, isTouch: boolean): HTMLElement {
   );
 }
 
-export function settingsScreen(st: Settings, onChange: (s: Settings) => void, onClose: () => void): HTMLElement {
+/** 設定の「爆発事故を起こす」（店の中で開いたときだけ。reason があれば押せない） */
+export interface ExplosionOption {
+  reason: string | null;
+  onTrigger: () => void;
+}
+
+export function settingsScreen(st: Settings, onChange: (s: Settings) => void, onClose: () => void, explosion?: ExplosionOption): HTMLElement {
   const cur = { ...st };
   const update = () => onChange({ ...cur });
   const toggle = (label: string, key: 'sound' | 'voice' | 'invertY' | 'showFps') =>
@@ -301,6 +307,16 @@ export function settingsScreen(st: Settings, onChange: (s: Settings) => void, on
         h('input', { class: 'input', value: cur.playerName, maxLength: 12, onchange: (e: Event) => { cur.playerName = (e.target as HTMLInputElement).value.trim() || '店主'; update(); } }),
       ),
     ),
+    explosion
+      ? h(
+          'section',
+          { class: 'card wide' },
+          h('h4', null, '爆発事故'),
+          h('p', { class: 'note' }, 'めったに起きない爆発事故（営業日ごとに 0.001%）を、今のお店で起こします。営業中ならすぐ、仕込み中なら開店の3秒後に起きます。事故のあとは「リセットする」で今日の仕込みの開始時点に戻れます（ひとりプレイの2日目から）。'),
+          h('button', { class: 'btn danger', 'data-explode': '1', disabled: !!explosion.reason, onclick: explosion.onTrigger }, '💥 爆発事故を起こす'),
+          explosion.reason ? h('p', { class: 'note' }, explosion.reason) : null,
+        )
+      : null,
     h('button', { class: 'btn primary', onclick: onClose }, '閉じる'),
   );
 }

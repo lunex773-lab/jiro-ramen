@@ -397,6 +397,13 @@ async function forceEvent(page: Page, kind: string) {
   await expect(page.locator('.manage')).toHaveCount(0);
 }
 
+/** 店の中で設定の画面を開く（経営メニュー →「セーブ・設定」→「設定」） */
+async function openSettings(page: Page) {
+  await press(page.locator('.chip.menu'));
+  await press(page.getByRole('button', { name: 'セーブ・設定' }));
+  await press(page.getByRole('button', { name: '設定（音・操作・画質）' }));
+}
+
 type JiroState = { t: number; day: number; money: number; phase: string; players: { pos: { x: number; z: number } }[]; events?: { accident: unknown; buzz: unknown } };
 const jiroState = (page: Page) => page.evaluate(() => (window as unknown as { __jiro: { host: { state: JiroState } } }).__jiro.host.state);
 
@@ -410,10 +417,16 @@ test('SNSでバズると、上部に「バズ中」と残り時間が出る', as
   await shot(page, '30-buzz');
 });
 
-test('爆発事故: 気を失って目覚め、焼け跡を歩けて、「リセットする」で仕込みの開始時点に戻る', async ({ page }) => {
+test('爆発事故: 設定から起こし、気を失って目覚め、焼け跡を歩けて、「リセットする」で仕込みの開始時点に戻る', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await startNewGame(page, '/?debug=1');
+  await startNewGame(page);
+  // 1日目は起こせない（理由が出る）
+  await openSettings(page);
+  await expect(page.locator('[data-explode]')).toBeDisabled();
+  await expect(page.getByText('2日目から起きます')).toBeVisible();
+  await press(page.getByRole('button', { name: '閉じる', exact: true }));
+  await press(page.locator('.manage .close'));
   // 事故は2日目から。2日目の仕込み開始時点にする（控えの日付も合わせる）
   const money0 = await page.evaluate(() => {
     const s = (window as unknown as { __jiro: { host: { state: { day: number; money: number; prepSnapshot: { day: number; state: { day: number } } } } } }).__jiro.host.state;
@@ -422,8 +435,12 @@ test('爆発事故: 気を失って目覚め、焼け跡を歩けて、「リセ
     s.prepSnapshot.state.day = 2;
     return s.money;
   });
-  // 仕込み中に起こすと、開店の3秒後に起きる
-  await forceEvent(page, 'explosion');
+  // 設定の「爆発事故を起こす」→ 確認 → 仕込み中なので開店の3秒後に起きる
+  await openSettings(page);
+  await press(page.locator('[data-explode]'));
+  await press(page.getByRole('button', { name: '起こす', exact: true }));
+  await expect(page.locator('.manage')).toHaveCount(0);
+  await expect(page.locator('.toast', { hasText: '開店すると3秒後に爆発事故が起きます' })).toBeVisible();
   await page.getByRole('button', { name: /開店する/ }).click();
   // ヘッドレスの描画は遅く（1〜2fps）ゲーム内の時間がなかなか進まないので、待つ代わりに時刻を進める（各段階の時間の進み方は core のテストで確認）
   const advance = (expr: string) =>

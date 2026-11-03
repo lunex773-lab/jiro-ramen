@@ -51,6 +51,17 @@ function accidentBlocked(s: GameState): string | null {
   return null;
 }
 
+/**
+ * 今、爆発事故を強制的に起こせるか（設定の「爆発事故を起こす」とテスト用の強制発生）。起こせなければ理由。読むだけ
+ */
+export function explosionUnavailable(s: GameState): string | null {
+  const blocked = accidentBlocked(s);
+  if (blocked) return blocked;
+  if (s.events?.accident) return 'すでに事故が起きています';
+  if (s.phase !== 'prep' && s.phase !== 'open') return '仕込み中か営業中に起こせます';
+  return null;
+}
+
 /** 開店の操作の中で1日1回だけ呼ぶ */
 export function drawAccident(s: GameState): void {
   const ev = ensureEvents(s);
@@ -69,10 +80,9 @@ export function drawAccident(s: GameState): void {
 
 /** テスト用の強制発生（営業中ならすぐに予兆、仕込み中なら開店の3秒後） */
 export function forceAccident(s: GameState, ctx: SimCtx): { ok: boolean; reason?: string } {
-  const blocked = accidentBlocked(s);
+  const blocked = explosionUnavailable(s);
   if (blocked) return { ok: false, reason: blocked };
   const ev = ensureEvents(s);
-  if (ev.accident) return { ok: false, reason: 'すでに事故が起きています' };
   if (s.phase === 'open') {
     ev.accidentPlan = { id: newId(s, 'ev'), day: s.day, atOpenT: s.openT };
     ev.forced.push('explosion');

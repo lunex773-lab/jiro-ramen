@@ -525,6 +525,8 @@ input, select { font: inherit; }
 .screen {
   position: absolute;
   inset: 0;
+  /* 経営メニュー（z-index 10）から開く設定・遊び方がメニューの下に隠れないように */
+  z-index: 20;
   overflow-y: auto;
   background: radial-gradient(ellipse at top, #3a2a1c 0%, #15110e 70%);
   padding: calc(var(--sat) + 16px) calc(var(--sar) + 16px) calc(var(--sab) + 24px) calc(var(--sal) + 16px);
