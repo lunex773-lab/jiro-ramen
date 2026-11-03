@@ -37,14 +37,15 @@ describe.skipIf(!SERVER)('共同経営（クライアントの通信コード ×
     expect(guest.isHost).toBe(false);
     expect(guest.state.shopName).toBe('共同亭');
 
-    // ゲストが発注すると、ホストの画面の資金も減る
+    // ゲストは経営の操作（発注・店名変更）ができない（第2版 2-1）
     const before = host.state.money;
-    const r = await guest.act({ type: 'orderStock', itemId: 'moyashi', packs: 1, express: false });
+    expect((await guest.act({ type: 'orderStock', itemId: 'moyashi', packs: 1, express: false })).ok).toBe(false);
+    expect((await guest.act({ type: 'rename', name: '乗っ取り' })).ok).toBe(false);
+    // ホストが発注すると、ゲストの画面の資金も減る
+    const r = await host.act({ type: 'orderStock', itemId: 'moyashi', packs: 1, express: false });
     expect(r.ok).toBe(true);
     await wait(800);
-    expect(host.state.money).toBeLessThan(before);
-    // ホストだけの操作（店名変更）はゲストからは拒否される
-    expect((await guest.act({ type: 'rename', name: '乗っ取り' })).ok).toBe(false);
+    expect(guest.state.money).toBeLessThan(before);
     // ホストが開店し、しばらく営業
     expect((await host.act({ type: 'openShop' })).ok).toBe(true);
     await wait(4000);

@@ -497,6 +497,9 @@ export class Hud {
       replace(this.cta, h('div', { class: 'cta-info' }, 'ホストの再接続を待っています（一時停止中）'));
     } else if (s.phase === 'prep' && tutStep && tutStep !== 'open') {
       replace(this.cta);
+    } else if (s.phase === 'prep' && !this.host.isHost) {
+      // 共同経営のゲストは開店できない（開店はホストの操作）
+      replace(this.cta, h('div', { class: 'cta-info' }, 'ホストが開店するのを待っています。今のうちに仕込みをしましょう'));
     } else if (s.phase === 'prep') {
       replace(
         this.cta,

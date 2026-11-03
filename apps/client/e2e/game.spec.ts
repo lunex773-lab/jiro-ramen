@@ -291,6 +291,82 @@ test.describe('共同経営', () => {
   });
 });
 
+test.describe('共同経営のゲスト', () => {
+  const SERVER = 'https://mock.jiro.test';
+  const CODE = 'XYZ789';
+
+  test('ゲストは経営メニューを閲覧専用で開け、操作ボタンは押せず、経営の操作を送らない', async ({ page }) => {
+    // ひとりプレイで作った店の状態に、ゲストを足して偽のサーバーから配る
+    await startNewGame(page);
+    const state = await page.evaluate(() => {
+      const s = JSON.parse(JSON.stringify((window as unknown as { __jiro: { host: { state: unknown } } }).__jiro.host.state)) as { players: Record<string, unknown>[]; prepSnapshot?: unknown };
+      s.players.push({ ...s.players[0], id: 'g1', name: 'ゲスト', isHost: false, color: '#2e86de' });
+      delete s.prepSnapshot;
+      return s;
+    });
+    const sent: string[] = [];
+    await page.route(`${SERVER}/api/v1/**`, async (route) => {
+      const url = new URL(route.request().url());
+      const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+      const bodies: Record<string, unknown> = {
+        '/api/v1/game-version': { gameVersion: '0.9.0', minClientVersion: '0.1.0', protocol: 1 },
+        '/api/v1/auth/anonymous': { playerId: 'u2', token: 'tok2' },
+        '/api/v1/session/join': { roomId: 'room1', joinToken: 'jt2', isHost: false },
+        '/api/v1/session/leave': { ended: false },
+      };
+      return route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(bodies[url.pathname] ?? {}) });
+    });
+    await page.routeWebSocket(/mock\.jiro\.test\/api\/v1\/room\//, (ws) => {
+      ws.onMessage((raw) => {
+        const msg = JSON.parse(String(raw)) as { t: string; rid?: string; a?: { type: string } };
+        if (msg.t === 'hello') {
+          ws.send(JSON.stringify({ t: 'welcome', playerId: 'g1', roomId: 'room1', isHost: false, protocol: 1, needInit: false }));
+          ws.send(JSON.stringify({ t: 'full', seq: 0, state }));
+          ws.send(JSON.stringify({ t: 'peers', list: [{ id: 'p1', name: '店主', color: '#e74c3c', connected: true, isHost: true }, { id: 'g1', name: 'ゲスト', color: '#2e86de', connected: true, isHost: false }] }));
+        }
+        if (msg.t === 'act' && msg.a && msg.a.type !== 'move') {
+          sent.push(msg.a.type);
+          ws.send(JSON.stringify({ t: 'res', rid: msg.rid, r: { ok: false, reason: 'ホストだけが実行できる操作です' } }));
+        }
+      });
+    });
+    await page.goto('/');
+    await closeHomeTip(page);
+    await page.getByRole('button', { name: /オンライン共同経営/ }).click();
+    await page.locator('.lobby input.input').first().fill(SERVER);
+    await page.locator('.lobby input.code').fill(CODE);
+    await page.getByRole('button', { name: '参加する' }).click();
+    // ゲストは開店できない
+    await expect(page.locator('.hud-cta')).toContainText('ホストが開店するのを待っています');
+    await expect(page.getByRole('button', { name: /開店する/ })).toHaveCount(0);
+    // 経営メニューは閲覧専用で開ける（数値は表示される）
+    await press(page.locator('.chip.menu'));
+    await expect(page.locator('.readonly-badge')).toContainText('閲覧専用');
+    await expect(page.locator('.manage-body')).toContainText('¥');
+    await press(page.getByRole('button', { name: '在庫・発注', exact: true }));
+    const order = page.locator('.manage-body button', { hasText: '翌朝便' }).first();
+    await expect(order).toBeDisabled();
+    await order.click({ force: true });
+    await press(page.getByRole('button', { name: '設備', exact: true }));
+    await expect(page.locator('.manage-body button').first()).toBeDisabled();
+    await press(page.getByRole('button', { name: 'セーブ・設定', exact: true }));
+    await expect(page.getByRole('button', { name: '今すぐ保存' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '設定（音・操作・画質）' })).toBeEnabled();
+    await shot(page, '22-guest-readonly');
+    // タブを行き来しても固まらない
+    for (const tab of ['経営', '従業員', 'キャリア', '店舗']) {
+      await press(page.getByRole('button', { name: tab, exact: true }));
+      await expect(page.getByRole('button', { name: tab, exact: true })).toHaveClass(/on/);
+    }
+    // レイアウトの変更もホストだけ
+    await expect(page.getByRole('button', { name: 'レイアウト編集を開く' })).toBeDisabled();
+    await press(page.locator('.manage .close'));
+    await expect(page.locator('.manage')).toHaveCount(0);
+    expect(sent).toEqual([]);
+  });
+});
+
 test.describe('チュートリアル', () => {
   type TutJiro = Jiro & { host: { state: { day: number; tutorial: { step: number; finished: boolean } | null; equipment: { id: string; type: string }[] } } };
   const tut = (page: Page) => page.evaluate(() => (window as unknown as { __jiro: TutJiro }).__jiro.host.state.tutorial);

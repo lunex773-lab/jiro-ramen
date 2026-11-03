@@ -630,6 +630,10 @@ input, select { font: inherit; }
 }
 .manage-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .manage-title { font-weight: 900; font-size: 20px; color: var(--yellow); }
+/* 共同経営のゲスト: 経営メニューは閲覧専用 */
+.readonly-badge { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 800; color: #9fd3ff; background: rgba(60, 120, 200, 0.18); border: 1px solid rgba(120, 180, 255, 0.45); border-radius: 999px; padding: 4px 10px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.readonly-badge[hidden] { display: none; }
+.manage.readonly .manage-body button:disabled:not([data-guest-ok]) { opacity: 0.45; }
 .tabs { display: flex; gap: 6px; overflow-x: auto; padding: 8px 0; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
 .tab {

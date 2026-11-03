@@ -21,7 +21,7 @@ import {
   cancelWork,
   diff,
   dropHand,
-  HOST_ONLY,
+  isHostOnly,
   makeCtx,
   makePlayer,
   makeSaveFile,
@@ -798,8 +798,9 @@ export class GameRoom extends DurableObject<Env> {
     let r: ActionResult;
     if (s.paused) {
       r = fail('ホストの再接続を待っています（一時停止中）');
-    } else if (HOST_ONLY.has(m.a.type) && !host) {
-      r = fail('ホストだけが実行できる操作です');
+    } else if (isHostOnly(m.a.type) && !host) {
+      // 役割はクライアントの申告ではなく、参加トークン（サーバーの署名）とルームの hostId で決まる
+      r = fail('ホストだけが実行できる操作です（ゲストは店の業務だけができます）');
       this.auditLater({ kind: 'action_rejected', playerId: a.pid, detail: { type: m.a.type, reason: 'host_only' } });
     } else if (LAYOUT_ACTIONS.has(m.a.type) && this.layoutHolder !== actorId) {
       r = fail('レイアウトを変更するには編集ロックを取得してください');
@@ -887,6 +888,12 @@ export class GameRoom extends DurableObject<Env> {
       return;
     }
     const id = this.actorIdOf(a.pid);
+    if (on && !this.isHost(a.pid)) {
+      // レイアウトの変更は経営の操作なのでホストだけ。今のロックの状態をすぐ返して、待たせない
+      this.sendError(ws, 'host_only', 'レイアウトの変更はホストだけができます');
+      this.send(ws, { t: 'layoutLock', holder: this.layoutHolder });
+      return;
+    }
     if (on) {
       if (this.layoutHolder === null || this.layoutHolder === id) {
         this.layoutHolder = id;

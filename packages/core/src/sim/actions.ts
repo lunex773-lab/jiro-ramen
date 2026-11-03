@@ -57,10 +57,19 @@ export type Action =
 
 export type ActionType = Action['type'];
 
-/** 共同経営でホストだけが実行できる操作（店の存続に関わる操作） */
-export const HOST_ONLY: ReadonlySet<ActionType> = new Set<ActionType>([
-  'nextDay', 'sellEquipment', 'fire', 'expand', 'takeLoan', 'rename', 'giveUp', 'accidentReset',
-]);
+/**
+ * 共同経営でゲスト（ホスト以外のプレイヤー）ができる操作。ゲストは店で働く従業員と同じ扱いで、
+ * 歩くことと店の業務（調理・接客・配膳・下げる・清掃・クレーム対応など、動詞の操作）だけができる（第2版 2-1）
+ */
+export const GUEST_ACTIONS: ReadonlySet<ActionType> = new Set<ActionType>(['move', 'interact', 'cancelWork']);
+
+/**
+ * 共同経営でホストだけが実行できる操作 = ゲストの操作以外のすべて（開店・発注・採用・設備・レイアウト・値段・資金・店の設定など）。
+ * 新しい操作は、ゲストの操作に入れない限り自動的にホストのみになる
+ */
+export function isHostOnly(type: ActionType): boolean {
+  return !GUEST_ACTIONS.has(type);
+}
 
 export interface ActionResult {
   ok: boolean;
@@ -94,6 +103,8 @@ export function applyAction(s: GameState, actorId: Id, a: Action, ctx: SimCtx, n
 function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now: number): ActionResult {
   const player = s.players.find((p) => p.id === actorId);
   if (!player) return fail('プレイヤーが見つかりません');
+  // 経営の操作はホストだけ（共同経営ではサーバーも参加トークンの役割で同じ判定をする。ここは状態を守る二重の確認）
+  if (!player.isHost && isHostOnly(a.type)) return fail('経営の操作はホストだけができます');
   if (s.phase === 'bankrupt' && a.type !== 'move') return fail('破産しています');
   if (s.paused && a.type !== 'move') return fail('一時停止中です');
   // 爆発事故で店が壊滅している間は、歩くこととリセットだけ（気を失っている間は歩けない）

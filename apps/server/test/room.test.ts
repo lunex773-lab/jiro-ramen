@@ -228,23 +228,70 @@ describe('操作要求', () => {
     expect(await money(room.roomId)).toBe(m1);
   });
 
-  it('2人が同時に最後の資金で購入しても一方だけが成功する', async () => {
-    const { room } = await startRoom();
-    const a = await addGuest(room, 'A');
-    const b = await addGuest(room, 'B');
+  it('同時に届いた2つの購入は、最後の資金で一方だけが成功する', async () => {
+    const { room, hc } = await startRoom();
     // 1回分の発注しかできない資金にする
     await inRoom(room.roomId, (r) => {
       r.state!.money = 1000;
     });
     const ra = rid('a');
     const rb = rid('b');
-    a.c.send({ t: 'act', rid: ra, a: { type: 'orderStock', itemId: 'soy', packs: 1, express: false }, v: 0 });
-    b.c.send({ t: 'act', rid: rb, a: { type: 'orderStock', itemId: 'soy', packs: 1, express: false }, v: 0 });
-    const [resA, resB] = await Promise.all([a.c.next('res', (m) => m.rid === ra), b.c.next('res', (m) => m.rid === rb)]);
+    hc.send({ t: 'act', rid: ra, a: { type: 'orderStock', itemId: 'soy', packs: 1, express: false }, v: 0 });
+    hc.send({ t: 'act', rid: rb, a: { type: 'orderStock', itemId: 'soy', packs: 1, express: false }, v: 0 });
+    const [resA, resB] = await Promise.all([hc.next('res', (m) => m.rid === ra), hc.next('res', (m) => m.rid === rb)]);
     expect([resA.r.ok, resB.r.ok].filter(Boolean)).toHaveLength(1);
     const m = await money(room.roomId);
     expect(m).toBeGreaterThanOrEqual(0);
     expect(await inRoom(room.roomId, (r) => r.state!.deliveries.length)).toBe(1);
+  });
+
+  it('ゲストは経営の操作をすべて拒否され、状態は変わらない。店の業務（歩く・作業）はできる', async () => {
+    const { room } = await startRoom();
+    const g = await addGuest(room, 'ゲスト');
+    const before = await inRoom(room.roomId, (r) => canonicalJson({ ...r.state!, players: [], version: 0, t: 0, notices: [] }));
+    const eq = await inRoom(room.roomId, (r) => r.state!.equipment[0]!.id);
+    // UI を通さずに直接送っても実行されない（第2版 2-3）
+    const management: Record<string, unknown>[] = [
+      { type: 'openShop' },
+      { type: 'orderStock', itemId: 'soy', packs: 1, express: false },
+      { type: 'setAutoOrder', itemId: 'soy', qty: 9000 },
+      { type: 'buyEquipment', equipType: 'plant' },
+      { type: 'repair', equipmentId: eq },
+      { type: 'maintenance', equipmentId: eq, on: true },
+      { type: 'buySeat', seatIndex: 7 },
+      { type: 'buyBowls' },
+      { type: 'setPrice', menuId: 'small', price: 1200 },
+      { type: 'pauseMenu', menuId: 'small', paused: true },
+      { type: 'payArrears' },
+      { type: 'place', equipmentId: eq, gx: 1, gz: 1, rot: 0 },
+      { type: 'store', equipmentId: eq },
+      { type: 'seatOffset', seatIndex: 0, x: 0.1, z: 0 },
+      { type: 'hire', candidateId: 'cand1' },
+      { type: 'setRole', employeeId: 'emp1', role: 'cook' },
+      { type: 'setPriority', employeeId: 'emp1', kind: 'serve', value: 10 },
+      { type: 'sellEquipment', equipmentId: eq },
+      { type: 'nextDay' },
+      { type: 'takeLoan' },
+      { type: 'expand' },
+      { type: 'rename', name: '乗っ取り屋' },
+      { type: 'giveUp' },
+    ];
+    for (const a of management) {
+      const r = await g.c.act(rid('x'), a);
+      expect(r.r.ok, String(a.type)).toBe(false);
+      expect(r.r.reason, String(a.type)).toMatch(/ホスト/);
+    }
+    const after = await inRoom(room.roomId, (r) => canonicalJson({ ...r.state!, players: [], version: 0, t: 0, notices: [] }));
+    expect(after).toBe(before);
+    // レイアウトの編集ロックも取れない（待たされず、すぐに断られる）
+    g.c.send({ t: 'layoutLock', on: true });
+    expect((await g.c.next('error')).code).toBe('host_only');
+    expect((await g.c.next('layoutLock')).holder).toBeNull();
+    // 業務はできる
+    const me = g.c.mirror!.players.find((p) => p.id === g.id)!;
+    const mv = await g.c.act(rid('mv'), { type: 'move', x: me.pos.x, z: me.pos.z + 0.1, yaw: 0 });
+    expect(mv.r.ok).toBe(true);
+    expect(g.c.closed).toBeNull();
   });
 
   it('ホスト専用の操作はゲストからは拒否する', async () => {
@@ -318,8 +365,9 @@ describe('切断と再接続', () => {
     const peers = await g.c.next('peers', (m) => m.list.some((p) => p.isHost && !p.connected));
     expect(peers.list.find((p) => p.id === hostActor)?.connected).toBe(false);
     expect(await inRoom(room.roomId, (x) => x.loopRunning)).toBe(false);
-    // 一時停止中の操作は適用しない
-    const blocked = await g.c.act(rid(), { type: 'orderStock', itemId: 'soy', packs: 1, express: false });
+    // 一時停止中の操作は適用しない（ゲストの業務の操作も）
+    const gp = g.c.mirror!.players.find((p) => p.id === g.id)!.pos;
+    const blocked = await g.c.act(rid(), { type: 'move', x: gp.x, z: gp.z + 0.1, yaw: 0 });
     expect(blocked.r.ok).toBe(false);
     expect(await money(room.roomId)).toBe(m1);
     // ホスト切断時にチェックポイントが保存されている
@@ -337,8 +385,10 @@ describe('切断と再接続', () => {
     expect(full.state.money).toBe(m1);
     await g.c.next('resumed');
     expect(await inRoom(room.roomId, (x) => x.loopRunning)).toBe(true);
-    const ok = await g.c.act(rid(), { type: 'orderStock', itemId: 'soy', packs: 1, express: false });
+    const ok = await g.c.act(rid(), { type: 'move', x: gp.x, z: gp.z + 0.1, yaw: 0 });
     expect(ok.r.ok).toBe(true);
+    const order = await hc2.act(rid(), { type: 'orderStock', itemId: 'soy', packs: 1, express: false });
+    expect(order.r.ok).toBe(true);
   });
 
   it('ゲストが再接続すると全体（full）を受け取り、持っていた物は戻されている', async () => {
@@ -399,34 +449,32 @@ async function fetchLeave(p: TestPlayer, roomId: string): Promise<{ ok: boolean;
 }
 
 describe('レイアウト編集の排他', () => {
-  it('ロックを持つ人だけが配置を変更でき、切断でロックが外れる', async () => {
-    const { room } = await startRoom();
-    const a = await addGuest(room, 'A');
-    const b = await addGuest(room, 'B');
+  it('レイアウトはホストがロックを取ってだけ変更でき、ゲストはロックを取れない。切断でロックが外れる', async () => {
+    const { room, hc, hostActor } = await startRoom();
+    const g = await addGuest(room, 'ゲスト');
     const eq = await inRoom(room.roomId, (r) => r.state!.equipment.find((e) => e.placed && e.type !== 'soup_pot')!);
 
-    const noLock = await b.c.act(rid(), { type: 'store', equipmentId: eq.id });
+    // ホストでもロックなしでは変更できない
+    const noLock = await hc.act(rid(), { type: 'store', equipmentId: eq.id });
     expect(noLock.r.ok).toBe(false);
     expect(noLock.r.reason).toMatch(/ロック/);
 
-    a.c.send({ t: 'layoutLock', on: true });
-    expect((await a.c.next('layoutLock', (m) => m.holder !== null)).holder).toBe(a.id);
-    expect((await b.c.next('layoutLock', (m) => m.holder !== null)).holder).toBe(a.id);
+    // ゲストはロックを取れない（すぐに断られる）
+    g.c.send({ t: 'layoutLock', on: true });
+    expect((await g.c.next('error')).code).toBe('host_only');
+    expect((await g.c.next('layoutLock')).holder).toBeNull();
 
-    b.c.send({ t: 'layoutLock', on: true });
-    expect((await b.c.next('error')).code).toBe('layout_locked');
-    expect((await b.c.next('layoutLock', (m) => m.holder !== null)).holder).toBe(a.id);
-    const placeB = await b.c.act(rid(), { type: 'place', equipmentId: eq.id, gx: eq.gx, gz: eq.gz, rot: eq.rot });
-    expect(placeB.r.ok).toBe(false);
-    expect(placeB.r.reason).toMatch(/ロック/);
+    hc.send({ t: 'layoutLock', on: true });
+    expect((await hc.next('layoutLock', (m) => m.holder !== null)).holder).toBe(hostActor);
+    expect((await g.c.next('layoutLock', (m) => m.holder !== null)).holder).toBe(hostActor);
+    const placeG = await g.c.act(rid(), { type: 'place', equipmentId: eq.id, gx: eq.gx, gz: eq.gz, rot: eq.rot });
+    expect(placeG.r.ok).toBe(false);
+    expect(placeG.r.reason).toMatch(/ホスト/);
+    const placeH = await hc.act(rid(), { type: 'place', equipmentId: eq.id, gx: eq.gx, gz: eq.gz, rot: eq.rot });
+    expect(placeH.r.reason ?? '').not.toMatch(/ロック/);
 
-    const placeA = await a.c.act(rid(), { type: 'place', equipmentId: eq.id, gx: eq.gx, gz: eq.gz, rot: eq.rot });
-    expect(placeA.r.reason ?? '').not.toMatch(/ロック/);
-
-    a.c.close();
-    expect((await b.c.next('layoutLock', (m) => m.holder === null)).holder).toBeNull();
-    b.c.send({ t: 'layoutLock', on: true });
-    expect((await b.c.next('layoutLock', (m) => m.holder !== null)).holder).toBe(b.id);
+    hc.close();
+    expect((await g.c.next('layoutLock', (m) => m.holder === null)).holder).toBeNull();
   });
 });
 
@@ -474,7 +522,7 @@ describe('永続化と復旧', () => {
     const { room, hc, host } = await startRoom();
     const g = await addGuest(room, 'ゲスト');
     const id = rid('order');
-    const r1 = await g.c.act(id, { type: 'orderStock', itemId: 'soy', packs: 3, express: false });
+    const r1 = await hc.act(id, { type: 'orderStock', itemId: 'soy', packs: 3, express: false });
     expect(r1.r.ok).toBe(true);
     const m1 = await money(room.roomId);
     // ホストが切断 → ループが止まり、チェックポイントが書かれる
@@ -495,9 +543,6 @@ describe('永続化と復旧', () => {
     expect(full.state.money).toBe(m1);
     expect(full.state.paused).toBe(true);
     expect(await inRoom(room.roomId, (r) => (r as unknown as { marker?: number }).marker)).toBeUndefined();
-    // 重複検出も復元されている
-    const r2 = await g.c.act(id, { type: 'orderStock', itemId: 'soy', packs: 3, express: false });
-    expect(r2.r).toEqual(r1.r);
 
     // ホストが戻れば再開する
     const hc2 = await open(room.roomId, (await joinRoom(host, room.code)).joinToken);
@@ -506,6 +551,9 @@ describe('永続化と復旧', () => {
     expect(hf.state.money).toBe(m1);
     expect(hf.state.paused).toBe(false);
     await g.c.next('resumed');
+    // 重複検出も復元されている（同じ requestId の再送は適用しない）
+    const r2 = await hc2.act(id, { type: 'orderStock', itemId: 'soy', packs: 3, express: false });
+    expect(r2.r).toEqual(r1.r);
     expect(await inRoom(room.roomId, (r) => r.loopRunning)).toBe(true);
     expect(await money(room.roomId)).toBe(m1);
   });

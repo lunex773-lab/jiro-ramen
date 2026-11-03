@@ -60,6 +60,14 @@ export interface ManageCallbacks {
   onHelp(): void;
 }
 
+/** 閲覧専用: 操作の部品をすべて押せなくする（data-guest-ok の付いた表示だけの部品は除く） */
+function lockControls(root: HTMLElement): void {
+  for (const el of root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button, input, select, textarea')) {
+    if (el.closest('[data-guest-ok]')) continue;
+    el.disabled = true;
+  }
+}
+
 export class ManageMenu {
   readonly el: HTMLElement;
   private body: HTMLElement;
@@ -70,6 +78,10 @@ export class ManageMenu {
   private tabButtons = new Map<ManageTab, HTMLElement>();
   /** 押している最中は自動更新しない（押した要素が差し替わるとタップが外れる） */
   private pressing = false;
+  /** 閲覧専用の印（共同経営のゲスト） */
+  private badge: HTMLElement;
+  /** 最後に描いたときの状態の版（ゲストはホストの更新を受けたら描き直す） */
+  private renderedVersion = -1;
 
   constructor(
     private root: HTMLElement,
@@ -94,6 +106,7 @@ export class ManageMenu {
         'div',
         { class: 'manage-head' },
         h('div', { class: 'manage-title' }, '経営メニュー'),
+        (this.badge = h('div', { class: 'readonly-badge', hidden: true }, '👀 閲覧専用（経営はホストが行います）')),
         h('button', { class: 'btn ghost close', onclick: () => cb.onClose() }, '✕ 閉じる'),
       ),
       this.tabsEl,
@@ -140,7 +153,19 @@ export class ManageMenu {
     for (const [id, b] of this.tabButtons) b.classList.toggle('tut-pulse', id === tab && id !== this.tab);
   }
 
+  /**
+   * 閲覧専用か（共同経営のゲスト）。ゲストは店で働く従業員と同じ扱いで、経営の操作はホストだけ（第2版 2-2）。
+   * 画面は表示するが操作ボタンは押せず、操作はサーバーへ送らない（送ってもサーバーが拒否する）
+   */
+  get readOnly(): boolean {
+    return this.host.mode === 'remote' && !this.host.isHost;
+  }
+
   private async act(a: Action, okMsg?: string): Promise<boolean> {
+    if (this.readOnly) {
+      toast(this.root, '経営の操作はホストだけができます', 'warn');
+      return false;
+    }
     const r = await this.host.act(a);
     if (!r.ok) toast(this.root, r.reason ?? 'できませんでした', 'warn');
     else if (okMsg) toast(this.root, okMsg, 'good', 1600);
@@ -149,23 +174,37 @@ export class ManageMenu {
   }
 
   render(live = false): void {
-    // 入力中は再描画しない
-    if (live && (this.tab !== 'dash' && this.tab !== 'staff')) return;
+    const ro = this.readOnly;
+    const s = this.host.state;
+    // 自動更新: ホストは経営・従業員のタブだけ（入力中・押している最中は描き直さない）。
+    // ゲストは押せる入力がないので、どのタブもホストの更新（状態の版が変わったとき）を受けて描き直す
+    if (live && !ro && this.tab !== 'dash' && this.tab !== 'staff') return;
+    if (live && ro && s.version === this.renderedVersion) return;
     if (live && this.el.contains(document.activeElement) && document.activeElement?.tagName === 'INPUT') return;
     if (live && this.pressing) return;
+    this.renderedVersion = s.version;
     const scroll = this.body.scrollTop;
     for (const [id, b] of this.tabButtons) b.classList.toggle('on', id === this.tab);
-    const s = this.host.state;
-    const content =
-      this.tab === 'dash' ? this.dash(s)
-      : this.tab === 'stock' ? this.stock(s)
-      : this.tab === 'menu' ? this.menu(s)
-      : this.tab === 'equip' ? this.equip(s)
-      : this.tab === 'staff' ? this.staff(s)
-      : this.tab === 'layout' ? this.layout(s)
-      : this.tab === 'career' ? this.career(s)
-      : this.system(s);
+    if (this.badge.hidden !== !ro) this.badge.hidden = !ro;
+    this.el.classList.toggle('readonly', ro);
+    let content: HTMLElement;
+    try {
+      content =
+        this.tab === 'dash' ? this.dash(s)
+        : this.tab === 'stock' ? this.stock(s)
+        : this.tab === 'menu' ? this.menu(s)
+        : this.tab === 'equip' ? this.equip(s)
+        : this.tab === 'staff' ? this.staff(s)
+        : this.tab === 'layout' ? this.layout(s)
+        : this.tab === 'career' ? this.career(s)
+        : this.system(s);
+    } catch (e) {
+      // 表示に失敗しても、メニューが中途半端なまま固まらないようにする（タブの切り替え・閉じるは使える）
+      console.error('manage render failed', e);
+      content = h('section', { class: 'card wide' }, h('p', { class: 'note bad' }, 'この画面を表示できませんでした。ほかのタブを開くか、メニューを閉じてください。'));
+    }
     replace(this.body, content);
+    if (ro) lockControls(this.body);
     this.body.scrollTop = scroll;
   }
 
@@ -485,7 +524,7 @@ export class ManageMenu {
                 },
                 (Object.keys(ROLE_LABEL) as EmployeeRole[]).map((r) => h('option', { value: r, selected: r === e.profile.role }, ROLE_LABEL[r])),
               ),
-              h('button', { class: 'mini ghost', onclick: () => { this.expandedEmp = open ? null : e.id; this.render(); } }, open ? '閉じる' : '担当設定'),
+              h('button', { class: 'mini ghost', 'data-guest-ok': '1', onclick: () => { this.expandedEmp = open ? null : e.id; this.render(); } }, open ? '閉じる' : '担当設定'),
               this.host.isHost
                 ? h(
                     'button',
@@ -687,7 +726,7 @@ export class ManageMenu {
         'section',
         { class: 'card wide' },
         h('h4', null, '設定・その他'),
-        h('div', { class: 'row wrap' }, h('button', { class: 'btn', onclick: () => this.cb.onSettings() }, '設定（音・操作・画質）'), h('button', { class: 'btn', onclick: () => this.cb.onHelp() }, '遊び方'), h('button', { class: 'btn ghost', onclick: () => this.cb.onTitle() }, 'タイトルに戻る')),
+        h('div', { class: 'row wrap', 'data-guest-ok': '1' }, h('button', { class: 'btn', onclick: () => this.cb.onSettings() }, '設定（音・操作・画質）'), h('button', { class: 'btn', onclick: () => this.cb.onHelp() }, '遊び方'), h('button', { class: 'btn ghost', onclick: () => this.cb.onTitle() }, 'タイトルに戻る')),
       ),
     );
   }
