@@ -41,6 +41,7 @@ import { isBowlComplete } from './cooking';
 import { emit, notify, type SimCtx } from './notices';
 import { complaintVerbFor } from './complaints';
 import { evRand } from './events';
+import { unpermittedFilming } from './media';
 import { attendHireDay, dailyWageOf, initNewHire, isPartTime, isSlacking, rollCall, rollPostpone, wagesDueToday } from './staff';
 
 export const ROLE_LABEL: Record<EmployeeRole, string> = {
@@ -62,6 +63,7 @@ export const TASK_KINDS: Record<string, { label: string; base: number; roles: Em
   manner: { label: '食べ方の注意', base: 74, roles: ['server', 'cook'] },
   linger: { label: '居座りへの声かけ', base: 64, roles: ['server', 'cook'] },
   smoke: { label: '店外の喫煙への声かけ', base: 46, roles: ['server', 'cleaner'] },
+  film: { label: '許可のない撮影への声かけ', base: 70, roles: ['server', 'cook'] },
   noodlesIn: { label: '麺を入れる', base: 76, roles: ['cook'] },
   tare: { label: 'タレ', base: 72, roles: ['cook'] },
   soup: { label: 'スープ', base: 71, roles: ['cook'] },
@@ -337,6 +339,12 @@ export function buildTasks(s: GameState): Task[] {
     for (const seat of s.seats) {
       const cust = s.customers.find((c) => c.id === seat.customerId);
       if (cust && cust.state === 'complaint') add('complaint', `complaint:${seat.id}`, [step(seat.id, complaintVerbFor(cust))]);
+      // 許可のない撮影: ルールを説明 → やめるよう伝える → 退店を促す
+      if (cust && unpermittedFilming(cust)) {
+        const f = cust.special!.film!;
+        const verb = f.warned === 0 ? 'film_rules' : f.tried[f.tried.length - 1] === 'rules' ? 'film_stop' : 'film_leave';
+        add('film', `film:${cust.id}`, [step(seat.id, verb)]);
+      }
       // 食べ方の汚い客: 何度か汚したら注意する（一度だけ）
       if (cust && cust.messy && cust.messy.count >= 2 && !cust.messy.calmed && cust.messy.warned === 0 && cust.state === 'eating') add('manner', `manner:${cust.id}`, [step(seat.id, 'manner_warn')]);
       // 居座り: 待っている客がいて、しばらく経ったら退店を促す（混雑の説明から）
@@ -430,7 +438,7 @@ function canTake(s: GameState, e: Employee, t: Task): boolean {
   if (override !== undefined && override <= -100) return false;
   if (kind.roles.includes(e.profile.role)) {
     // 調理担当の接客系は、接客担当がいないときだけ
-    if (e.profile.role === 'cook' && (t.kind === 'serve' || t.kind === 'askCall' || t.kind === 'complaint' || t.kind === 'manner' || t.kind === 'linger')) {
+    if (e.profile.role === 'cook' && (t.kind === 'serve' || t.kind === 'askCall' || t.kind === 'complaint' || t.kind === 'manner' || t.kind === 'linger' || t.kind === 'film')) {
       const servers = s.employees.some((x) => x.presentToday && x.profile.role === 'server');
       if (servers && t.kind !== 'serve') return false;
     }

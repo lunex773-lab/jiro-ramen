@@ -91,6 +91,8 @@ describe('メッセージ検証', () => {
     expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, extra: 1 } })).toBeNull();
     expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1 })).toBeNull();
     expect(parseAction({ type: 'promote', employeeId: 'e1' })).toEqual({ type: 'promote', employeeId: 'e1' });
+    expect(parseAction({ type: 'answerRequest', requestId: 'rq1', accept: false })).toEqual({ type: 'answerRequest', requestId: 'rq1', accept: false });
+    expect(parseAction({ type: 'answerRequest', requestId: 'rq1', accept: 'yes' })).toBeNull();
     expect(parseAction({ type: 'giveUp' })).toEqual({ type: 'giveUp' });
     // チュートリアルはひとりプレイのみ
     expect(parseAction({ type: 'tutorial', op: 'next' })).toBeNull();

@@ -180,7 +180,7 @@ describe('団体客（8）', () => {
     let talked = false;
     for (let i = 0; i < 400 && b.state === 'eating'; i++) {
       run(s, ctx, 0.1);
-      talked ||= (a.talk === true || b.talk === true) && (a.sayUntil > s.t || b.sayUntil > s.t);
+      talked ||= (a.sayEvent === true || b.sayEvent === true) && (a.sayUntil > s.t || b.sayUntil > s.t);
     }
     expect(talked).toBe(true);
     run(s, ctx, 0.5);
@@ -189,7 +189,7 @@ describe('団体客（8）', () => {
     // 1人客は会話しない
     const c = eating(s, 6, 20);
     run(s, ctx, 20);
-    expect(c.talk ?? false).toBe(false);
+    expect(c.sayEvent ?? false).toBe(false);
   });
 
   it('まれに食後も居座り、席が空かない。放っておけば自分から帰る', () => {
@@ -278,6 +278,8 @@ describe('食べ方の汚い客（7）', () => {
   }
 
   it('食事中に席と床を汚し、汚れは清掃の仕組みに反映される（拭く・モップで消える）', () => {
+    // 毎回汚す設定にして、汚れの量を確かめる（確率は別のテストで見る）
+    setBal(BALANCE.guests.messy, 'chancePerCheck', 1);
     const { s, ctx, m } = messyScene(22);
     const dirtBefore = s.seats[3]!.dirt;
     run(s, ctx, 30);

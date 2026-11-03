@@ -708,6 +708,13 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       setRot(target, B.foreL, -0.15, 0, 0);
       headX = Math.max(headX, 0.3);
       setRot(target, B.head, headX, 0, 0);
+    } else if (heldKind === 'tvcamera') {
+      // 右手でカメラを肩に支え、左手でレンズに手を添える
+      setRot(target, B.armR, -2.5, 0, 0.35);
+      setRot(target, B.foreR, -1.3, 0, 0);
+      setRot(target, B.armL, -1.25, 0, -0.35);
+      setRot(target, B.foreL, -1.0, 0, 0);
+      setRot(target, B.head, 0.05, 0.15, 0);
     } else if (heldKind === 'cigarette') {
       // ときどき口元へ運んで吸う
       const puff = Math.max(0, Math.sin(t * 0.8 + opts.seed)) ** 3;
@@ -780,6 +787,10 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       const obj = createHeldItem(kind);
       if (kind === 'clean' || kind === 'dirty') {
         obj.position.set(0, 0, 0);
+        heldAnchor.add(obj);
+      } else if (kind === 'tvcamera') {
+        // 右肩にかつぐ
+        obj.position.set(0.17 * s, 0.55 * s, -0.22);
         heldAnchor.add(obj);
       } else if (kind === 'mop') {
         // 柄を右手で握り、モップ先は前方の床へ

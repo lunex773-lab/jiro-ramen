@@ -607,6 +607,137 @@ test('店の前に「禁煙」の張り紙があり、店の外でタバコを�
   await expect.poll(async () => page.evaluate((cid) => (window as unknown as W).__jiro.host.state.customers.find((x: { id: string }) => x.id === cid)?.state ?? 'left', id)).not.toBe('smoking');
 });
 
+type AnyApp = { __jiro: { host: { state: Record<string, any>; tick(dt: number): void }; world: { scene: { getObjectByName(n: string): unknown } }; localPos: { x: number; z: number }; controls: { yaw: number; pitch: number } } };
+
+test('YouTuber が撮影の許可を求めると、ホストに確認の画面が出て、許可すると撮影できる', async ({ page }) => {
+  await startNewGame(page);
+  await page.getByRole('button', { name: /開店する/ }).click();
+  // YouTuber が来る予定を作り、来るまで進める（許可を求める場面にする）
+  await page.evaluate(() => {
+    const app = (window as unknown as AnyApp).__jiro;
+    const s = app.host.state;
+    s.reputation = 5;
+    s.events.youtuberPlan = { day: s.day, afterOpenT: 0, forced: true };
+    for (let i = 0; i < 3000 && !s.customers.some((c: any) => c.special?.kind === 'youtuber'); i++) app.host.tick(0.1);
+    const c = s.customers.find((x: any) => x.special?.kind === 'youtuber');
+    if (!c) throw new Error('YouTuber が来なかった');
+    if (c.special.film.permission !== 'asking') {
+      c.special.film.permission = 'asking';
+      s.events.requests = [{ id: 'rq-e2e', kind: 'filming', subjectId: c.id, text: 'すみません、YouTubeの撮影をしてもいいですか？', askedAt: s.t, timeoutAt: s.t + 30 }];
+      c.special.film.requestId = 'rq-e2e';
+    }
+  });
+  const prompt = page.locator('.request-prompt');
+  await expect(prompt).toBeVisible();
+  await expect(prompt).toContainText('撮影の許可');
+  await expect(prompt).toContainText('秒で「断る」');
+  await shot(page, '44-filming-request');
+  // 確認の画面を開いている間は時間が止まる（ひとりプレイ）
+  const t0 = await page.evaluate(() => (window as unknown as AnyApp).__jiro.host.state.t);
+  await page.waitForTimeout(800);
+  expect(await page.evaluate(() => (window as unknown as AnyApp).__jiro.host.state.t)).toBe(t0);
+  await press(prompt.getByRole('button', { name: '撮影を許可する' }));
+  await expect(prompt).toBeHidden();
+  const perm = await page.evaluate(() => (window as unknown as AnyApp).__jiro.host.state.customers.find((x: any) => x.special?.kind === 'youtuber')?.special.film.permission);
+  expect(perm).toBe('permitted');
+});
+
+test('テレビ取材: 確認の画面で受けると8人のチームが来ていて、サインは店の壁に飾られる', async ({ page }) => {
+  await startNewGame(page);
+  await page.getByRole('button', { name: /開店する/ }).click();
+  await page.evaluate(() => {
+    const app = (window as unknown as AnyApp).__jiro;
+    const s = app.host.state;
+    s.events.tvPlan = { day: s.day, afterOpenT: s.openT, forced: true };
+    app.host.tick(0.1);
+  });
+  const prompt = page.locator('.request-prompt');
+  await expect(prompt).toBeVisible();
+  await expect(prompt).toContainText('テレビ取材');
+  await press(prompt.getByRole('button', { name: '取材を受ける' }));
+  await expect(prompt).toBeHidden();
+  const crew = await page.evaluate(() => {
+    const s = (window as unknown as AnyApp).__jiro.host.state;
+    const kinds = s.customers.filter((c: any) => c.special?.eventId === s.events.tv.id).map((c: any) => c.special.kind);
+    return { status: s.events.tv.status, kinds };
+  });
+  expect(crew.status).toBe('accepted');
+  expect(crew.kinds.filter((k: string) => k === 'tv_performer')).toHaveLength(2);
+  expect(crew.kinds.filter((k: string) => k === 'tv_camera')).toHaveLength(2);
+  expect(crew.kinds.filter((k: string) => k === 'tv_staff')).toHaveLength(4);
+  // サイン（取材が成功したときの記録）を壁に飾る
+  await page.evaluate(() => {
+    const s = (window as unknown as AnyApp).__jiro.host.state;
+    s.events.signs = [
+      { celebId: 'cel_menta', name: '麺田 ススル', show: '突撃！となりの行列店', day: 1, visits: 1, lastDay: 1 },
+      { celebId: 'cel_mashiko', name: 'ヤサイ マシ子', show: '突撃！となりの行列店', day: 1, visits: 2, lastDay: 1 },
+    ];
+  });
+  await expect.poll(() => page.evaluate(() => !!(window as unknown as AnyApp).__jiro.world.scene.getObjectByName('autograph-cel_mashiko'))).toBe(true);
+  if (SHOTS) {
+    await page.evaluate(() => {
+      const app = (window as unknown as AnyApp).__jiro;
+      app.localPos = { x: 3.2, z: 3.4 };
+      app.controls.yaw = Math.PI;
+      app.controls.pitch = 0.32;
+    });
+    await page.waitForTimeout(1500);
+    await shot(page, '45-autographs');
+  }
+});
+
+test('イベントの吹き出しは縁が違い、複数出ても重ならず画面からはみ出さない', async ({ page }) => {
+  await startNewGame(page);
+  await page.getByRole('button', { name: /開店する/ }).click();
+  await page.evaluate(() => {
+    const app = (window as unknown as AnyApp).__jiro;
+    const s = app.host.state;
+    s.reputation = 5;
+    for (let i = 0; i < 3000 && s.customers.length < 3; i++) app.host.tick(0.1);
+    const cs = s.customers.slice(0, 3);
+    cs.forEach((c: any, i: number) => {
+      s.queue = s.queue.filter((x: string) => x !== c.id);
+      s.insideQueue = s.insideQueue.filter((x: string) => x !== c.id);
+      const seat = s.seats[i + 2];
+      seat.customerId = c.id;
+      c.seatId = seat.id;
+      c.state = 'eating';
+      c.path = [];
+      c.eatTotal = 600;
+      c.eatLeft = 500;
+      c.say = i === 0 ? 'うまっ' : 'これはイベントの長いセリフです。画面の端でも折り返して、ほかの吹き出しとも重ならないように表示されます';
+      c.sayUntil = s.t + 60;
+      c.sayEvent = i !== 0;
+    });
+    app.localPos = { x: 3.2, z: 2.9 };
+    app.controls.yaw = Math.PI;
+    app.controls.pitch = -0.2;
+  });
+  await expect(page.locator('.bubble.event')).toHaveCount(2);
+  await expect(page.locator('.bubble:not(.event)')).toHaveCount(1);
+  await page.waitForTimeout(600);
+  const boxes = await page.locator('.bubble').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON() as { left: number; top: number; right: number; bottom: number }));
+  const vp = page.viewportSize()!;
+  for (const b of boxes) {
+    expect(b.left).toBeGreaterThanOrEqual(-1);
+    expect(b.top).toBeGreaterThanOrEqual(-1);
+    expect(b.right).toBeLessThanOrEqual(vp.width + 1);
+    expect(b.bottom).toBeLessThanOrEqual(vp.height + 1);
+  }
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]!;
+      const b = boxes[j]!;
+      expect(a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom, `${i}/${j}`).toBe(false);
+    }
+  }
+  // イベントの吹き出しは縁が違う（通常の吹き出しは今までどおり）
+  const border = await page.locator('.bubble.event').first().evaluate((e) => getComputedStyle(e).borderTopWidth);
+  const normal = await page.locator('.bubble:not(.event)').first().evaluate((e) => getComputedStyle(e).borderTopWidth);
+  expect(border).not.toBe(normal);
+  await shot(page, '46-event-bubbles');
+});
+
 test('SNSでバズると、上部に「バズ中」と残り時間が出る', async ({ page }) => {
   await startNewGame(page, '/?debug=1');
   await page.getByRole('button', { name: /開店する/ }).click();

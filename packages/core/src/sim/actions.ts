@@ -21,6 +21,7 @@ import { accidentHalted, EVENT_KINDS } from './events';
 import { accidentFainted, resetAccident } from './accident';
 import { forceEvent } from './visitors';
 import { promote, setShift } from './staff';
+import { answerRequest } from './media';
 
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
@@ -47,6 +48,8 @@ export type Action =
   | { type: 'setShift'; employeeId: Id; weekday: number; shift: ShiftDay | null }
   /** アルバイトを社員にする */
   | { type: 'promote'; employeeId: Id }
+  /** ホストへの確認（YouTuber の撮影の許可・テレビ取材）に答える */
+  | { type: 'answerRequest'; requestId: Id; accept: boolean }
   | { type: 'expand' }
   | { type: 'setPrice'; menuId: string; price: number }
   | { type: 'pauseMenu'; menuId: string; paused: boolean }
@@ -249,6 +252,8 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return setShift(s, ctx, a.employeeId, a.weekday, a.shift);
     case 'promote':
       return promote(s, ctx, a.employeeId);
+    case 'answerRequest':
+      return answerRequest(s, ctx, a.requestId, a.accept === true);
     case 'expand':
       return expand(s, ctx);
     case 'setPrice': {

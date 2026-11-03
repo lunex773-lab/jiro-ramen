@@ -9,7 +9,7 @@ import { BALANCE } from '../data/balance';
 import { COMPLAINT_CAUSE_LABEL, COMPLAINT_REPLY, COMPLAINT_RESPONSE_LABEL, STAFF_TALKBACK } from '../data/events';
 import type { ComplaintCause, ComplaintResponse, Customer, CustomerComplaint, Employee, GameState, Player, Seat } from '../types';
 import { clamp01, newId, pick } from '../util';
-import { addReview, leaveAngry, leaveWithoutEating, sayFor } from './customers';
+import { addReview, eventSayTime, leaveAngry, leaveWithoutEating, sayEvent } from './customers';
 import { cash, recordPL } from './economy';
 import { ensureEvents, evRand } from './events';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
@@ -37,7 +37,7 @@ export function startComplaint(s: GameState, ctx: SimCtx, c: Customer, cause: Co
   c.complaintReason = reason;
   c.state = 'complaint';
   c.stateTime = 0;
-  sayFor(c, s, text, 6);
+  sayEvent(c, s, text, 6);
   s.today.complaints += 1;
   const seat = s.seats.find((x) => x.id === c.seatId);
   notify(s, ctx, `complaint:${c.seatId}`, 'danger', `${(seat?.index ?? 0) + 1}番席でクレーム（${COMPLAINT_CAUSE_LABEL[cause]}）: ${reason}`);
@@ -111,7 +111,8 @@ export function respondToComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Act
       rude = true;
       svc *= T.rudeServiceMult;
       c.sat.service *= 0.7;
-      a.say = { text: pick(ensureEvents(s), STAFF_TALKBACK.rude), until: s.t + T.sayFor };
+      const rudeLine = pick(ensureEvents(s), STAFF_TALKBACK.rude);
+      a.say = { text: rudeLine, until: s.t + eventSayTime(rudeLine, T.sayFor) };
       noteTemper(s, a, 'rude');
       noteTrouble(s);
     } else {
@@ -198,7 +199,7 @@ export function respondToComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Act
     }
     cp.tried.push(resp);
     c.sat.service *= 0.85;
-    sayFor(c, s, pick(ensureEvents(s), COMPLAINT_REPLY.rejected[resp]), 4);
+    sayEvent(c, s, pick(ensureEvents(s), COMPLAINT_REPLY.rejected[resp]), 4);
     emit(ctx, { type: 'complaintRejected', targetId: seat.id, text: resp });
     return;
   }
@@ -227,7 +228,8 @@ export function respondToComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Act
  */
 function argue(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, e: Employee, resp: ComplaintResponse): void {
   const ev = ensureEvents(s);
-  e.say = { text: pick(ev, STAFF_TALKBACK.staff), until: s.t + BALANCE.staff.temper.sayFor };
+  const line = pick(ev, STAFF_TALKBACK.staff);
+  e.say = { text: line, until: s.t + eventSayTime(line, BALANCE.staff.temper.sayFor) };
   noteComplaintHandled(s, e, false);
   // 周りの客も口論を見ている（2つ隣まで。1つのトラブルで1回だけ）
   witnessStaffTrouble(s, seat, newId(s, 'tr'));
@@ -236,7 +238,7 @@ function argue(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, e: Employee, 
   addReview(s, c, 1, [STAFF_TALKBACK.review], !!c.regularId);
   c.complaint = null;
   c.complaintReason = null;
-  sayFor(c, s, pick(ev, STAFF_TALKBACK.customer), 4);
+  sayEvent(c, s, pick(ev, STAFF_TALKBACK.customer), 4);
   clearNotice(s, `complaint:${seat.id}`);
   notify(s, ctx, `argue:${e.id}`, 'danger', `${e.profile.name}さんがお客さんと口論になりました（${seat.index + 1}番席）`);
   emit(ctx, { type: 'staffArgue', actorId: e.id, targetId: seat.id, text: resp });
@@ -246,7 +248,8 @@ function argue(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, e: Employee, 
 /** 従業員が対応を途中で放棄した。クレームは続き（放っておくと怒って帰る）、しばらく仕事に戻らない */
 function abandon(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, e: Employee): void {
   const T = BALANCE.staff.temper;
-  e.say = { text: pick(ensureEvents(s), STAFF_TALKBACK.abandon), until: s.t + T.sayFor };
+  const line = pick(ensureEvents(s), STAFF_TALKBACK.abandon);
+  e.say = { text: line, until: s.t + eventSayTime(line, T.sayFor) };
   e.ai.cooldown = T.abandonCooldown;
   e.ai.note = 'クレーム対応を放棄した';
   c.sat.service *= 0.7;
@@ -261,7 +264,7 @@ function resolved(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, reply: str
   if (by?.kind === 'employee') noteComplaintHandled(s, by, true);
   c.complaint = null;
   c.complaintReason = null;
-  sayFor(c, s, reply, 3);
+  sayEvent(c, s, reply, 3);
   clearNotice(s, `complaint:${seat.id}`);
   emit(ctx, { type: 'complaintResolved', targetId: seat.id, text: resp });
 }

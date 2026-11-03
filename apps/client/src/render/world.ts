@@ -5,6 +5,9 @@ import { ResolutionGovernor } from './resolution';
 import { Aftermath, hash01 } from './aftermath';
 import { eatenContents, eatenStep, eatMotion, eatProgress } from './eat-motion';
 import { createSteam } from './models/fx';
+import { layoutBubbles, type BubbleBox } from '../ui/bubble-layout';
+import { createAutographs } from './autograph';
+import { signSlots } from './sign-slots';
 
 import {
   CELL,
@@ -64,6 +67,9 @@ interface CharEntry {
 interface Bubble {
   el: HTMLElement;
   text: string;
+  /** 測った大きさ（px） */
+  w: number;
+  h: number;
 }
 
 export class World {
@@ -72,6 +78,11 @@ export class World {
   readonly camera: THREE.PerspectiveCamera;
   private shell: ShopShell | null = null;
   private shellStage = -1;
+  /** 壁に飾った芸能人のサイン */
+  private autographs: { group: THREE.Group; dispose(): void } | null = null;
+  private autographKey = '';
+  /** YouTuber がカウンターに置いて撮っているスマホ */
+  private filmPhones = new Map<string, THREE.Object3D>();
   private shellName = '';
   private lights: THREE.Light[] = [];
   private equip = new Map<string, { model: EquipmentModel; type: string }>();
@@ -262,6 +273,45 @@ export class World {
 
   // ───────────────── 同期 ─────────────────
 
+  /** 芸能人のサインを壁の決まった場所に飾る（店の段階が変わったら場所を作り直す。レイアウトの変更には影響されない） */
+  private syncAutographs(s: GameState): void {
+    const signs = s.events?.signs ?? [];
+    const key = `${s.career.stage}|${signs.map((x) => `${x.celebId}:${x.visits}`).join(',')}`;
+    if (key === this.autographKey) return;
+    this.autographKey = key;
+    this.autographs?.dispose();
+    this.autographs = null;
+    if (signs.length === 0) return;
+    this.autographs = createAutographs(signs, signSlots(STAGES[s.career.stage]!));
+    this.scene.add(this.autographs.group);
+  }
+
+  /** 撮影中の YouTuber のスマホ（カウンターの丼の横に立てて置く） */
+  private syncFilmPhones(s: GameState): void {
+    const want = new Set<string>();
+    for (const c of s.customers) {
+      const f = c.special?.film;
+      if (!f || f.filming !== 'filming' || !c.seatId || (c.state !== 'seated' && c.state !== 'eating')) continue;
+      const seat = s.seats.find((x) => x.id === c.seatId);
+      if (!seat) continue;
+      want.add(c.id);
+      let m = this.filmPhones.get(c.id);
+      if (!m) {
+        m = createHeldItem('phone');
+        this.filmPhones.set(c.id, m);
+        this.scene.add(m);
+      }
+      const p = seatCounterPoint(s, seat);
+      m.position.set(p.x + 0.2, COUNTER_TOP + 0.13, p.z + 0.05);
+      m.rotation.set(0, Math.PI, 0);
+    }
+    for (const [id, m] of this.filmPhones) {
+      if (want.has(id)) continue;
+      m.removeFromParent();
+      this.filmPhones.delete(id);
+    }
+  }
+
   private syncShell(s: GameState): void {
     const st = s.career.stage;
     if (this.shell && this.shellStage === st) {
@@ -418,10 +468,31 @@ export class World {
       }
       // SNS を見て来た客は、並んでいる間スマホを見ている。店の前の喫煙客はタバコ
       const smoking = cu.state === 'smoking' && cu.path.length === 0;
-      c.model.setHeld(smoking ? 'cigarette' : cu.fromBuzz && (cu.state === 'arriving' || cu.state === 'queue' || cu.state === 'waitingSeat') ? 'phone' : null);
+      const held: HeldKind | null =
+        smoking ? 'cigarette'
+        : cu.state === 'crew' && cu.special?.kind === 'tv_camera' ? 'tvcamera'
+        : cu.fromBuzz && (cu.state === 'arriving' || cu.state === 'queue' || cu.state === 'waitingSeat') ? 'phone'
+        : null;
+      c.model.setHeld(held);
       this.setSmoke(c, smoking);
       // 食事の動き（顔を近づける・麺を持ち上げる・すする・スープ・具・箸を置く）。食後の団体は話している
       if (cu.state === 'eating') c.model.setEat(eatMotion(eatProgress(cu.eatLeft, cu.eatTotal), t, hash01(cu.id, 3), !!cu.messy && !cu.messy.calmed));
+      // テレビ取材: カメラマンは出演者の方を向いてカメラをかつぎ、スタッフは店の方を向いて待つ
+      if (cu.state === 'crew') {
+        const kind = cu.special?.kind;
+        if (c.moving <= 0) {
+          let yaw = 0;
+          if (kind === 'tv_camera') {
+            const p = s.customers.find((x) => x.special?.kind === 'tv_performer' && x.special.eventId === cu.special?.eventId && x.seatId);
+            const seat = p ? s.seats.find((x) => x.id === p.seatId) : undefined;
+            if (seat) {
+              const sp = seatPos(s, seat);
+              yaw = Math.atan2(sp.x - cu.pos.x, sp.z - cu.pos.z);
+            }
+          }
+          this.placeChar(c, cu.pos.x, cu.pos.z, yaw, dt, smooth);
+        }
+      }
       const groupChat = cu.state === 'afterMeal' && !!cu.group && cu.group.size > 1;
       const pose: CharacterPose = cu.state === 'eating' ? 'eat' : groupChat ? 'chat' : seated ? 'sit' : c.moving > 0 ? 'walk' : 'stand';
       c.model.update(pose, t, dt);
@@ -638,6 +709,8 @@ export class World {
 
   update(s: GameState, myId: string, t: number, dt: number, smooth: boolean): void {
     this.syncShell(s);
+    this.syncAutographs(s);
+    this.syncFilmPhones(s);
     this.updateAccident(s, t, dt);
     this.syncEquipment(s, t, dt);
     this.syncStools(s);
@@ -689,28 +762,39 @@ export class World {
     this.tutEdge.style.display = on ? 'block' : 'none';
   }
 
-  /** 吹き出し（客のセリフ）と席番号 */
+  /** 吹き出し（客のセリフ）と席番号。画面からはみ出さず、重ならないように置く（第2版 13-3） */
   private updateOverlay(s: GameState): void {
     const w = this.viewW;
     const hgt = this.viewH;
     const seen = new Set<string>();
-    const show = (id: string, text: string, pos: THREE.Vector3, cls: string) => {
+    const items: BubbleBox[] = [];
+    const show = (id: string, text: string, pos: THREE.Vector3, cls: string, priority: number) => {
       const v = pos.clone().project(this.camera);
       if (v.z > 1 || v.z < -1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) return;
       if (pos.distanceTo(this.camera.position) > 9) return;
       seen.add(id);
       let b = this.bubbles.get(id);
       if (!b) {
-        b = { el: document.createElement('div'), text: '' };
+        b = { el: document.createElement('div'), text: '', w: 0, h: 0 };
         this.overlay.appendChild(b.el);
         this.bubbles.set(id, b);
       }
+      let changed = false;
       if (b.text !== text) {
         b.text = text;
         b.el.textContent = text;
+        changed = true;
       }
-      if (b.el.className !== cls) b.el.className = cls;
-      b.el.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * hgt}px) translate(-50%, -100%)`;
+      if (b.el.className !== cls) {
+        b.el.className = cls;
+        changed = true;
+      }
+      // 大きさは文字・種類が変わったときだけ測る（毎フレーム測らない）
+      if (changed || b.w === 0) {
+        b.w = b.el.offsetWidth;
+        b.h = b.el.offsetHeight + (cls.startsWith('bubble') ? 6 : 0);
+      }
+      items.push({ id, x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * hgt, w: b.w, h: b.h, priority });
     };
     for (const cu of s.customers) {
       const c = this.chars.get(cu.id);
@@ -718,22 +802,29 @@ export class World {
       const head = c.model.group.position.clone();
       const seated = cu.state === 'seated' || cu.state === 'eating' || cu.state === 'complaint' || cu.state === 'afterMeal';
       head.y += seated ? 1.45 : 1.95;
-      // 団体の会話は通常の食事のコメントと吹き出しを分ける
-      if (cu.say && cu.sayUntil > s.t) show(`say:${cu.id}`, cu.say, head, `bubble ${cu.state === 'complaint' ? 'angry' : cu.sayStyle === 'whisper' ? 'whisper' : cu.talk ? 'talk' : ''}`);
-      else if (cu.state === 'seated') {
+      if (cu.say && cu.sayUntil > s.t) {
+        // イベントのセリフ（団体の会話・クレーム・トラブル・珍しい客・取材など）は縁を変え、少し長く出す。通常のコメント・コールは今までどおり
+        const cls = ['bubble', cu.state === 'complaint' ? 'angry' : '', cu.sayStyle === 'whisper' ? 'whisper' : '', cu.sayEvent ? 'event' : ''].filter(Boolean).join(' ');
+        show(`say:${cu.id}`, cu.say, head, cls, cu.sayEvent ? 2 : 1);
+      } else if (cu.state === 'seated') {
         const seat = s.seats.find((x) => x.id === cu.seatId);
         const ratio = cu.patience / 150;
-        if (seat) show(`seat:${cu.id}`, `${seat.index + 1}`, head, `seatno ${ratio < 0.25 ? 'late' : ratio < 0.5 ? 'warn' : ''}`);
+        if (seat) show(`seat:${cu.id}`, `${seat.index + 1}`, head, `seatno ${ratio < 0.25 ? 'late' : ratio < 0.5 ? 'warn' : ''}`, 0);
       }
     }
-    // 従業員の吹き出し（クレームで言い返したときなど）
+    // 従業員の吹き出し（クレームで言い返したときなど。イベントの吹き出し）
     for (const e of s.employees) {
       if (!e.say || e.say.until <= s.t || this.burned) continue;
       const c = this.chars.get(e.id);
       if (!c) continue;
       const head = c.model.group.position.clone();
       head.y += 1.95;
-      show(`say:${e.id}`, e.say.text, head, 'bubble angry staff');
+      show(`say:${e.id}`, e.say.text, head, 'bubble angry staff event', 2);
+    }
+    // 上部の表示（日付・時刻・資金・メニュー）の下から置く
+    for (const p of layoutBubbles(items, w, hgt, 6, 46)) {
+      const b = this.bubbles.get(p.id);
+      if (b) b.el.style.transform = `translate(${Math.round(p.left)}px, ${Math.round(p.top)}px)`;
     }
     for (const [id, b] of this.bubbles) {
       if (seen.has(id)) continue;

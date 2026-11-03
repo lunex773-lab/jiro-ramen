@@ -12,7 +12,7 @@ import { GROUP_CHATS, LINGER_CHATS, LINGER_REPLY, MESSY_LINES, SMOKE_LINES } fro
 import { seatPos } from '../geometry';
 import type { Customer, Employee, GameState, Id, LingerResponse, Player, Seat, Vec2 } from '../types';
 import { clamp01, dist, newId } from '../util';
-import { addDirt, finalizeVisit, sayFor, startLeaving } from './customers';
+import { addDirt, finalizeVisit, sayEvent, startLeaving } from './customers';
 import { ensureEvents, evRand } from './events';
 import { emit, notify, type SimCtx } from './notices';
 import { argueChance, patienceOf } from './staff';
@@ -27,8 +27,7 @@ function pickEv<T>(s: GameState, list: readonly T[]): T {
 
 /** 吹き出し（団体の会話・イベントのセリフ）。通常の食事のコメントと区別する */
 export function talkFor(c: Customer, s: GameState, text: string, sec: number): void {
-  sayFor(c, s, text, sec);
-  c.talk = true;
+  sayEvent(c, s, text, sec);
 }
 
 // ───────────────────────── 団体 ─────────────────────────
@@ -272,7 +271,7 @@ function updateMessy(s: GameState, c: Customer, dt: number, ctx: SimCtx): void {
   const r = evRand(s);
   const p = seatPos(s, seat);
   if (r < G.messy.floorShare) addDirt(s, { x: p.x + (evRand(s) - 0.5) * 0.5, z: p.z - 0.3 - 0.3 * evRand(s) }, 'grime', 'dining');
-  if (m.count === 1 || evRand(s) < 0.4) sayFor(c, s, pickEv(s, MESSY_LINES.self), 2.5);
+  if (m.count === 1 || evRand(s) < 0.4) sayEvent(c, s, pickEv(s, MESSY_LINES.self), 2.5);
   emit(ctx, { type: 'messy', targetId: seat.id });
   // 隣の客への迷惑（距離と客の性格で。全員が不快になるわけではない）
   const splash = evRand(s) < G.messy.splashShare;
@@ -285,7 +284,7 @@ function updateMessy(s: GameState, c: Customer, dt: number, ctx: SimCtx): void {
     if (!loss) continue;
     m.victims.push({ id: n.c.id, ...loss });
     if (m.firstBotherT === null) m.firstBotherT = s.t;
-    sayFor(n.c, s, pickEv(s, MESSY_LINES.victim), 3);
+    sayEvent(n.c, s, pickEv(s, MESSY_LINES.victim), 3);
     const victimSeat = n.seat.index + 1;
     notify(s, ctx, `messy:${c.id}`, 'warn', `${seat.index + 1}番席のお客さんの食べ方で、${victimSeat}番席のお客さんが嫌がっています`);
   }
@@ -367,7 +366,7 @@ export function respondManner(s: GameState, ctx: SimCtx, seat: Seat, a: Actor, k
     const to = moveTarget(s, c);
     if (!to) return;
     moveCustomer(s, c, seat, to);
-    sayFor(c, s, pickEv(s, MESSY_LINES.moved), 3);
+    sayEvent(c, s, pickEv(s, MESSY_LINES.moved), 3);
     // 移ってもらった客の不満の一部を戻す
     const src = neighbors(s, to, 99).find((n) => n.c.messy && c.botheredBy?.includes(n.c.messy.troubleId))?.c ?? s.customers.find((x) => x.messy && c.botheredBy?.includes(x.messy.troubleId));
     if (src?.messy) {
@@ -383,7 +382,7 @@ export function respondManner(s: GameState, ctx: SimCtx, seat: Seat, a: Actor, k
   if (!m) return;
   if (kind === 'leave') {
     // 退店を促す: 食事の途中でも帰る（代金は返さない）。本人の満足度は大きく下がるが、周りの迷惑は止まる
-    sayFor(c, s, pickEv(s, MESSY_LINES.leave), 3);
+    sayEvent(c, s, pickEv(s, MESSY_LINES.leave), 3);
     c.sat.service = Math.min(c.sat.service, 0.15);
     const o = s.orders.find((x) => x.id === c.orderId);
     if (o && o.status === 'waiting') o.status = 'cancelled';
@@ -408,16 +407,16 @@ export function respondManner(s: GameState, ctx: SimCtx, seat: Seat, a: Actor, k
   const r = evRand(s);
   if (r < pStop) {
     m.calmed = true;
-    sayFor(c, s, pickEv(s, MESSY_LINES.stop), 3);
+    sayEvent(c, s, pickEv(s, MESSY_LINES.stop), 3);
     relieveVictims(s, m.victims, m.firstBotherT, M.quickWithin, M.reliefQuick, M.reliefSlow);
     noteTroubleHandled(s, c, 'messyHandled');
     emit(ctx, { type: 'messyStop', targetId: seat.id });
   } else if (r < pStop + pAnnoyed) {
     c.sat.service = Math.min(c.sat.service, 0.3);
-    sayFor(c, s, pickEv(s, MESSY_LINES.annoyed), 3);
+    sayEvent(c, s, pickEv(s, MESSY_LINES.annoyed), 3);
     emit(ctx, { type: 'messyAnnoyed', targetId: seat.id });
   } else {
-    sayFor(c, s, pickEv(s, MESSY_LINES.ignore), 3);
+    sayEvent(c, s, pickEv(s, MESSY_LINES.ignore), 3);
     emit(ctx, { type: 'messyIgnore', targetId: seat.id });
   }
 }
@@ -492,7 +491,7 @@ function updateSmoker(s: GameState, c: Customer, dt: number, ctx: SimCtx): void 
     sm.until = s.t + G.smoke.from + (G.smoke.to - G.smoke.from) * evRand(s);
     sm.nextCheck = s.t + 1;
     noteTrouble(s);
-    sayFor(c, s, pickEv(s, SMOKE_LINES.start), 3);
+    sayEvent(c, s, pickEv(s, SMOKE_LINES.start), 3);
     notify(s, ctx, `smoke:${c.id}`, 'warn', '店の前でタバコを吸っているお客さんがいます（禁煙です）');
   }
   if (s.t >= sm.until) {
@@ -514,7 +513,7 @@ function updateSmoker(s: GameState, c: Customer, dt: number, ctx: SimCtx): void 
     const loss = bother(s, o, sm.troubleId, G.smoke.comfortLoss, 0);
     if (!loss) continue;
     sm.annoyed.push({ id: o.id, comfort: loss.comfort });
-    if (evRand(s) < 0.5) sayFor(o, s, pickEv(s, SMOKE_LINES.victim), 3);
+    if (evRand(s) < 0.5) sayEvent(o, s, pickEv(s, SMOKE_LINES.victim), 3);
   }
 }
 
@@ -543,14 +542,14 @@ export function warnSmoker(s: GameState, ctx: SimCtx, c: Customer, a: Actor): vo
   const r = evRand(s);
   if (r < pIgnore) {
     sm.ignored += 1;
-    sayFor(c, s, pickEv(s, SMOKE_LINES.ignore), 3);
+    sayEvent(c, s, pickEv(s, SMOKE_LINES.ignore), 3);
     emit(ctx, { type: 'smokeIgnore', targetId: c.id });
     return;
   }
   sm.warned = true;
   const r2 = evRand(s);
   const line = r2 < S.displeased * tr.complaintPropensity ? SMOKE_LINES.displeased : r2 < S.displeased * tr.complaintPropensity + S.apologize ? SMOKE_LINES.apologize : SMOKE_LINES.stop;
-  sayFor(c, s, pickEv(s, line), 3);
+  sayEvent(c, s, pickEv(s, line), 3);
   // 嫌な思いをした客の不満の一部を戻す（早いほど多く）
   const started = sm.until < 0 ? s.t : sm.until - (S.from + S.to) / 2;
   const f = s.t - Math.max(0, started) <= S.quickWithin ? S.reliefQuick : S.reliefSlow;

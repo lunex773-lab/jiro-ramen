@@ -32,6 +32,8 @@ import {
   EMPLOYMENT_LABEL,
   WEEKDAY_LABEL,
   attendanceText,
+  buzzBoostFactor,
+  signsOf,
   dailyWageOf,
   employmentOf,
   expectedPay,
@@ -253,6 +255,9 @@ export class ManageMenu {
         row('現在資金', yenStr(s.money), s.money < fc.total ? 'bad' : ''),
         row('評判', `${stars(s.reputation)} ${s.reputation.toFixed(2)}`),
         row('常連客', `${s.regulars.length}人`),
+        // YouTube の動画・テレビ放送の反響（第2版 11・12）
+        buzzBoostFactor(s) > 1 ? row('🎥 SNSの話題になりやすさ', `×${buzzBoostFactor(s).toFixed(1)}（${Math.max(...(s.events?.buzzBoosts ?? []).map((b) => b.untilDay))}日目まで）`, 'good') : null,
+        ...(s.events?.effects ?? []).filter((e) => e.source === 'tv' && (e.fromDay ?? 0) >= s.day).map((e) => row(`📺 テレビ放送の反響（${e.fromDay}日目）`, `来客 ×${e.mult.toFixed(1)}`, 'good')),
         row('店舗', STAGES[s.career.stage]?.name ?? ''),
         arrears > 0 ? row('未払金', yenStr(arrears), 'bad') : null,
         loan > 0 ? row('融資残高', yenStr(loan), 'warn') : null,
@@ -866,9 +871,23 @@ export class ManageMenu {
 
   // ───────────────── キャリア ─────────────────
   private career(s: GameState): HTMLElement {
+    const signs = signsOf(s);
     return h(
       'div',
       null,
+      h(
+        'section',
+        { class: 'card wide' },
+        h('h4', null, `芸能人のサイン（${signs.length}枚）`),
+        signs.length === 0
+          ? h('p', { class: 'note' }, 'テレビ取材を受けて、出演者に食べ終えてもらうとサインがもらえます。サインは店の壁に飾られます（売上には影響しません）。')
+          : h(
+              'div',
+              null,
+              h('p', { class: 'note' }, 'もらった順に店の壁（正面のガラスの上・右の壁）に飾っています。'),
+              signs.map((x) => h('div', { class: 'kv' }, h('span', null, `🖊️ ${x.name}`), h('b', null, `「${x.show}」${x.day}日目${x.visits > 1 ? `・${x.visits}回来店` : ''}`))),
+            ),
+      ),
       h(
         'section',
         { class: 'card wide' },

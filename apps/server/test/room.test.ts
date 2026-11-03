@@ -272,6 +272,7 @@ describe('操作要求', () => {
       { type: 'setShift', employeeId: 'emp1', weekday: 0, shift: { start: 0, end: 60, breakAt: 0, breakLen: 0, fromPrep: false } },
       { type: 'setShift', employeeId: 'emp1', weekday: 1, shift: null },
       { type: 'promote', employeeId: 'emp1' },
+      { type: 'answerRequest', requestId: 'rq1', accept: true },
       { type: 'sellEquipment', equipmentId: eq },
       { type: 'nextDay' },
       { type: 'takeLoan' },

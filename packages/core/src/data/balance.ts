@@ -225,6 +225,17 @@ export const BALANCE = {
   },
 
   /**
+   * 吹き出し（第2版 13）。通常のコメント（コール・食事のコメント）は今までどおり。
+   * イベントの吹き出しの秒数 = max(元の秒数 × eventMult, eventMin, 文字数 × perChar)、eventMax まで（会話の長さに合わせる）
+   */
+  ui: {
+    eventMult: 1.5,
+    eventMin: 3.5,
+    perChar: 0.16,
+    eventMax: 9,
+  },
+
+  /**
    * 第2版 Phase 3: 団体客・食べ方の汚い客・居座り・店外の喫煙・トラブル（docs/SALES_IMPROVEMENT_IMPLEMENTATION_PLAN.md「第2版 Phase 3」）。
    * 値はすべて初期のバランス案。抽選はイベント専用の乱数。チュートリアル中は食べ方・居座り・喫煙は起きない
    */
@@ -401,6 +412,56 @@ export const BALANCE = {
       improveBelow: 0.6,
       /** 待っている間にメモを取るそぶりを見せる確率（正体の手がかり） */
       noteChance: 0.5,
+    },
+    /**
+     * YouTuber（第2版 11）: 開店時に1日1回抽選し、当たった日は営業中のある時刻以降に来た最初の新規の一人客が YouTuber になる。
+     * 来店前に撮影の許可を求めることがある（ホストが答える。答えがなければ許可しない）。
+     * 許可して撮影が完了したら、その日から3日間 SNS バズの確率が上がる（重ねられる。上限あり。オーナー回答）
+     */
+    youtuber: {
+      minDay: 3,
+      chancePerDay: 0.08,
+      cooldownDays: 2,
+      arriveFrom: 0.1,
+      arriveTo: 0.65,
+      /** 来店前に許可を求める確率 */
+      askChance: 0.7,
+      /** 答えを待つ秒数（過ぎたら許可しない） */
+      answerTimeout: 30,
+      /** 許可がないのに撮る確率（聞かずに来た・断られた） */
+      sneakUnasked: 0.7,
+      sneakDenied: 0.25,
+      /** 撮影を完了したときの SNS バズの確率の上乗せ（1本あたり）と、合計の上限（倍率） */
+      buzzBoost: 1.5,
+      buzzBoostCap: 4,
+      /** 効く日数（撮影した日から） */
+      boostDays: 3,
+      /** 撮影のセリフの間隔（秒） */
+      talkEvery: 9,
+      /** 許可のない撮影を嫌がる周りの客（2つ隣まで）の居心地の低下（1人1回だけ） */
+      annoyComfort: 0.15,
+      /** やめるよう伝えたときの反応: 続ける = keepOn（伝え方で変わる、伝えるたびに下がる）、残りは やめる／謝る／不満を示す */
+      keepOnStop: 0.35,
+      keepOnRules: 0.2,
+      displeased: 0.35,
+      apologize: 0.35,
+    },
+    /**
+     * テレビ取材（第2版 12）: 開店時に1日1回抽選。8人（出演者2・カメラマン2・スタッフ4）が来て、ホストが受けるか選ぶ（オーナー回答）。
+     * 出演者2人だけが食べる。出演者が食べ終えてチーム全員が帰れば完了し、翌日と翌々日の来客が確定で増える（実際の来客で。売上を直接足さない）
+     */
+    tv: {
+      minDay: 5,
+      chancePerDay: 0.03,
+      cooldownDays: 7,
+      arriveFrom: 0.15,
+      arriveTo: 0.5,
+      answerTimeout: 30,
+      /** 翌日・翌々日の来客の倍率（同じ日に重ねない。高いほうを使う） */
+      nextDayMult: 2.4,
+      dayAfterMult: 1.7,
+      /** カメラマンが店内にいる間、座っている通常の客の居心地の低下（店が狭く混んでいるほど大きい。1人1回だけ） */
+      crowdComfort: 0.12,
     },
     /** 珍しい客（演出だけ。報酬はない） */
     rare: {

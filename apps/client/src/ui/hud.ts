@@ -324,7 +324,7 @@ export class Hud {
     // （空いた席を見ただけで「下げる丼がありません」などが出ると邪魔なため）
     // クレームの対応（最大5つ）は先に出す
     // お客さんへの対応（クレーム・居座り・食べ方・喫煙）は先に出す
-    const urgent = (v: string) => Number(/^(complaint_|linger_|manner_|smoke_)/.test(v));
+    const urgent = (v: string) => Number(/^(complaint_|linger_|manner_|smoke_|film_)/.test(v));
     const enabled = this.verbs.filter((v) => v.enabled).sort((a, b) => urgent(b.verb) - urgent(a.verb));
     const shown = enabled.slice(0, 5);
     const first = this.verbs[0];
@@ -627,7 +627,7 @@ export class Hud {
       // 空いていてきれいな席は何も出さない
       const c = s.customers.find((x) => x.id === t.seat.customerId);
       const o = s.orders.find((x) => x.seatId === t.seat.id && x.customerId === t.seat.customerId);
-      key += `${c?.state}:${o?.status}:${o?.callRevealed}:${Math.floor(t.seat.dirt * 10)}:${c ? Math.floor(c.patience / 10) : ''}:${c?.complaint?.id ?? ''}:${c?.complaint?.tried.length ?? 0}:${c?.messy?.count ?? ''}:${c?.messy?.calmed ?? ''}:${c?.botheredBy?.length ?? 0}`;
+      key += `${c?.state}:${o?.status}:${o?.callRevealed}:${Math.floor(t.seat.dirt * 10)}:${c ? Math.floor(c.patience / 10) : ''}:${c?.complaint?.id ?? ''}:${c?.complaint?.tried.length ?? 0}:${c?.messy?.count ?? ''}:${c?.messy?.calmed ?? ''}:${c?.botheredBy?.length ?? 0}:${c?.special?.film?.filming ?? ''}:${c?.special?.film?.permission ?? ''}`;
       const cp = c && c.state === 'complaint' ? c.complaint : null;
       // 団体・居座り・食べ方（第2版 Phase 3）
       const lead = c?.group ? s.customers.find((x) => x.group?.id === c.group!.id && x.group.leader) : null;
@@ -648,6 +648,11 @@ export class Hud {
         lingering ? h('div', { class: `slot ${waiting > 0 ? 'bad' : 'warn'}` }, `食べ終わっても話し込んでいる${waiting > 0 ? `（${waiting}人が席を待っています）` : ''}`) : null,
         c?.messy && c.messy.count > 0 ? h('div', { class: `slot ${c.messy.calmed ? '' : 'bad'}` }, c.messy.calmed ? '食べ方を改めてくれた' : `食べ方が汚い（${c.messy.count}回こぼした）。☝️注意・🧻周りを拭く・🚪退店を促す`) : null,
         bothered ? h('div', { class: 'slot warn' }, '隣の客の食べ方を嫌がっている（💺別の席へ移ってもらえます）') : null,
+        // YouTuber の撮影・テレビ取材の出演者（第2版 11・12）
+        c?.special?.film?.filming === 'filming'
+          ? h('div', { class: `slot ${c.special.film.permission === 'permitted' ? 'good' : 'bad'}` }, c.special.film.permission === 'permitted' ? '🎥 撮影中（許可済み）' : '📵 許可なく撮影している（📋ルールを説明・📵やめるよう伝える・🚪退店）')
+          : null,
+        c?.special?.kind === 'tv_performer' ? h('div', { class: 'slot good' }, '📺 テレビ取材の出演者。食べ終えてもらえば取材は成功') : null,
         t.seat.dirt > 0.05 ? h('div', { class: 'slot warn' }, `カウンターの汚れ ${Math.round(t.seat.dirt * 100)}%`) : null,
       );
     }

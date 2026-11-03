@@ -11,7 +11,7 @@ import { hashString, rand } from '../util';
 import { BALANCE } from '../data/balance';
 
 /** イベントの種類（設定値・記録・強制発生のキー） */
-export const EVENT_KINDS: readonly EventKind[] = ['sns_buzz', 'critic', 'rare_couple', 'rare_lover', 'complaint_unreasonable', 'explosion'];
+export const EVENT_KINDS: readonly EventKind[] = ['sns_buzz', 'critic', 'rare_couple', 'rare_lover', 'complaint_unreasonable', 'explosion', 'youtuber', 'tv'];
 
 export function newEvents(seed: number): ShopEvents {
   return {
@@ -100,7 +100,7 @@ export function eventDemandFactor(s: GameState): number {
   if (!ev) return 1;
   let f = 1;
   if (ev.buzz && s.phase === 'open' && s.openT >= ev.buzz.startT && s.openT < ev.buzz.endT) f *= ev.buzz.mult;
-  for (const e of ev.effects) if (e.untilDay >= s.day) f *= e.mult;
+  for (const e of ev.effects) if (e.untilDay >= s.day && (e.fromDay === undefined || e.fromDay <= s.day)) f *= e.mult;
   return f;
 }
 

@@ -45,7 +45,8 @@ import { emit, notify, type SimCtx } from './notices';
 import { leaveFromInsideQueue, onServed } from './customers';
 import { planComplaintResponse, respondToComplaint } from './complaints';
 import { askToLeave, lingerBlocked, mannerBlocked, respondManner, smokeBlocked, warnSmoker } from './manners';
-import { LINGER_RESPONSE_LABEL, MANNER_RESPONSE_LABEL } from '../data/events';
+import { FILM_RESPONSE_LABEL, LINGER_RESPONSE_LABEL, MANNER_RESPONSE_LABEL } from '../data/events';
+import { filmBlocked, respondFilm } from './media';
 import { accidentHalted } from './events';
 
 export type Actor = Player | Employee;
@@ -932,6 +933,9 @@ const VERBS: VerbDef[] = [
   mannerVerb('wipe', BALANCE.cleaning.wipeTime),
   mannerVerb('move', 2),
   mannerVerb('leave', 2),
+  filmVerb('stop'),
+  filmVerb('rules'),
+  filmVerb('leave'),
   {
     id: 'smoke_warn',
     match: (t) => t.kind === 'customer',
@@ -980,6 +984,22 @@ function complaintVerb(resp: ComplaintResponse): VerbDef {
       return p.reason === null ? ok(p.label, p.time, 1) : no(p.label, p.reason);
     },
     applyUnit: (s, a, t, _args, ctx) => respondToComplaint(s, ctx, seatOf(t), a, resp),
+  };
+}
+
+/** 許可のない撮影への対応の動詞（film_stop / film_rules / film_leave） */
+function filmVerb(kind: 'stop' | 'rules' | 'leave'): VerbDef {
+  return {
+    id: `film_${kind}`,
+    match: (t) => t.kind === 'seat',
+    phases: ['open', 'closing'],
+    skill: 'service',
+    plan: (s, _a, t) => {
+      const label = FILM_RESPONSE_LABEL[kind];
+      const why = filmBlocked(s, seatOf(t), kind);
+      return why ? no(label, why) : ok(label, 1.5, 1);
+    },
+    applyUnit: (s, a, t, _args, ctx) => respondFilm(s, ctx, seatOf(t), a, kind),
   };
 }
 

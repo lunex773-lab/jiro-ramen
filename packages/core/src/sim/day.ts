@@ -43,7 +43,7 @@ export function startClosing(s: GameState, ctx: SimCtx): void {
 /** 店内の客がいなくなったか */
 export function allCustomersGone(s: GameState): boolean {
   // 店の前でタバコを吸っている客は店の外なので待たない
-  return s.customers.every((c) => c.state === 'left' || c.state === 'abandoned' || c.state === 'smoking' || c.forLostItem !== null);
+  return s.customers.every((c) => c.state === 'left' || c.state === 'abandoned' || c.state === 'smoking' || c.state === 'crew' || c.forLostItem !== null);
 }
 
 /** 当日の固定費（翌日の予測支出にも使う） */

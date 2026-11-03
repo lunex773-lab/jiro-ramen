@@ -5,10 +5,11 @@ import { BALANCE } from '../data/balance';
 import { BUZZ_POSTS, BUZZ_SAYS, CRITIC_ITEMS, CRITIC_NOTES, RARE_LINES } from '../data/events';
 import type { CriticItem, CriticReport, Customer, EventKind, GameState, Review } from '../types';
 import { clamp, clamp01, dist, newId, pick, randRange } from '../util';
-import { makeCustomer, sayFor } from './customers';
+import { makeCustomer, sayEvent } from './customers';
 import { addDaily, cooledDown, dailyCount, ensureEvents, eventsAllowed, evRand, noteDraw, noteFire, takeForced } from './events';
 import { forceAccident } from './accident';
 import { emit, notify, type SimCtx } from './notices';
+import { buzzBoostFactor, drawMediaPlans, forceMedia, onDayStartMedia } from './media';
 
 const E = BALANCE.events;
 
@@ -20,6 +21,8 @@ export function onOpenShopEvents(s: GameState): void {
   ev.nextBuzzCheck = E.buzz.checkEvery;
   ev.buzz = null;
   drawCritic(s);
+  // YouTuber・テレビ取材（media.ts）
+  drawMediaPlans(s);
 }
 
 /** 翌日の朝（nextDay から。仕込み開始時点の控えを作る前）: 覆面調査員の記事の公開、期限の切れた効果の整理 */
@@ -31,6 +34,7 @@ export function onDayStartEvents(s: GameState, ctx: SimCtx): void {
   ev.effects = ev.effects.filter((e) => e.untilDay >= s.day);
   for (const r of ev.critics) if (!r.published && r.publishDay <= s.day) publishCritic(s, ctx, r);
   ev.critics = ev.critics.slice(-10);
+  onDayStartMedia(s, ctx);
 }
 
 /** 閉店の精算のとき: 当日だけのイベントを終える */
@@ -40,6 +44,10 @@ export function onDayEndEvents(s: GameState): void {
   ev.buzz = null;
   ev.criticPlan = null;
   ev.accidentPlan = null;
+  // 答えていない確認は閉店で終わる
+  ev.requests = [];
+  ev.youtuberPlan = null;
+  ev.tvPlan = null;
 }
 
 // ───────────────────────── SNS でバズる ─────────────────────────
@@ -56,7 +64,8 @@ export function buzzChance(s: GameState): number {
   const b = E.buzz;
   const repF = Math.pow(clamp(s.reputation, 1, 5) / 3, b.reputationExponent);
   const recentF = clamp(recentStars(s) / 3.5, 0.4, 1.5);
-  return b.chancePerCheck * repF * recentF;
+  // 許可した YouTuber の撮影の効果（3日間。重ねられる）
+  return b.chancePerCheck * repF * recentF * buzzBoostFactor(s);
 }
 
 function updateBuzz(s: GameState, ctx: SimCtx): void {
@@ -256,7 +265,7 @@ export function updateVisitors(s: GameState, ctx: SimCtx): void {
   for (const c of s.customers) {
     if (c.fromBuzz && c.state === 'queue' && !hasRolled(c, 'buzzSay')) {
       markRolled(c, 'buzzSay');
-      if (evRand(s) < E.buzz.sayChance) sayFor(c, s, pick(ev, BUZZ_SAYS), 3);
+      if (evRand(s) < E.buzz.sayChance) sayEvent(c, s, pick(ev, BUZZ_SAYS), 3);
     }
     const sp = c.special;
     if (!sp || sp.spoken) continue;
@@ -267,21 +276,21 @@ export function updateVisitors(s: GameState, ctx: SimCtx): void {
       if (!him || (him.state !== 'queue' && him.state !== 'waitingSeat' && him.state !== 'seated' && him.state !== 'eating')) continue;
       if (dist(c.pos, him.pos) > r.coupleNear) continue;
       sp.spoken = true;
-      sayFor(c, s, RARE_LINES.couple, r.lineSec);
+      sayEvent(c, s, RARE_LINES.couple, r.lineSec);
       emit(ctx, { type: 'rareLine', targetId: c.id, text: RARE_LINES.couple });
     } else if (sp.kind === 'ramen_lover') {
       // 食事の途中で一度だけ、味に満足しているときに小声で
       if (c.state !== 'eating' || !c.eatTotal || c.stateTime < c.eatTotal * r.loverAt) continue;
       sp.spoken = true;
       if (c.sat.taste < r.loverMinTaste) continue;
-      sayFor(c, s, RARE_LINES.lover, r.lineSec);
+      sayEvent(c, s, RARE_LINES.lover, r.lineSec);
       c.sayStyle = 'whisper';
       emit(ctx, { type: 'rareLine', targetId: c.id, text: RARE_LINES.lover });
     } else if (sp.kind === 'critic') {
       // 正体は出さないが、待っている間にときどきメモを取る
       if (c.state !== 'seated' || c.stateTime < 6) continue;
       sp.spoken = true;
-      if (evRand(s) < E.critic.noteChance) sayFor(c, s, pick(ev, CRITIC_NOTES), 3);
+      if (evRand(s) < E.critic.noteChance) sayEvent(c, s, pick(ev, CRITIC_NOTES), 3);
     } else {
       sp.spoken = true;
     }
@@ -325,6 +334,9 @@ export function forceEvent(s: GameState, ctx: SimCtx, kind: EventKind): { ok: bo
       return { ok: true };
     case 'explosion':
       return forceAccident(s, ctx);
+    case 'youtuber':
+    case 'tv':
+      return forceMedia(s, kind);
     default:
       return { ok: false, reason: '不明なイベントです' };
   }

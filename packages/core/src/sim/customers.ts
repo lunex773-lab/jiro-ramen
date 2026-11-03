@@ -29,6 +29,7 @@ import { addDaily, dailyCount, eventDemandFactor, ensureEvents, eventsAllowed, e
 import { hasRolled, markRolled, onCustomerArrive, onVisitEnd } from './visitors';
 import { COMPLAINT_TEXT, UNREASONABLE_TEXT } from '../data/events';
 import { drawGroupSize, findGroupSeats, groupMembers, holdAfterMeal, leaveAfterMeal, meanGroupSize, messyLeaveDirt, rollMessy } from './manners';
+import { maybeYoutuber, onMealFinished } from './media';
 
 // ───────────────────────── 生成 ─────────────────────────
 
@@ -254,6 +255,8 @@ export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
     emit(ctx, { type: 'arrive', targetId: c.id });
     // SNS を見て来た客・覆面調査員・珍しい客。カップルなら一緒に来た彼氏がすぐ後ろに並ぶ
     const partner = onCustomerArrive(s, c, ctx);
+    // YouTuber（予定の日・時刻を過ぎて最初に来た新規の一人客）
+    if (!partner) maybeYoutuber(s, c, ctx);
     const members: Customer[] = [c];
     if (partner) {
       s.customers.push(partner);
@@ -385,7 +388,21 @@ export function sayFor(c: Customer, s: GameState, text: string, sec = 3): void {
   c.say = text;
   c.sayUntil = s.t + sec;
   c.sayStyle = null;
-  if (c.talk) c.talk = false;
+  if (c.sayEvent) c.sayEvent = false;
+}
+
+/** イベントの吹き出しの秒数（通常より少し長く、会話の長さに合わせる） */
+export function eventSayTime(text: string, sec: number): number {
+  const U = BALANCE.ui;
+  return Math.min(U.eventMax, Math.max(sec * U.eventMult, U.eventMin, [...text].length * U.perChar));
+}
+
+/** イベントの吹き出し（団体の会話・クレーム・トラブル・珍しい客・取材など。縁のデザインを変えて少し長く出す） */
+export function sayEvent(c: Customer, s: GameState, text: string, sec = 3): void {
+  c.say = text;
+  c.sayUntil = s.t + eventSayTime(text, sec);
+  c.sayStyle = null;
+  c.sayEvent = true;
 }
 
 export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
@@ -601,6 +618,8 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
         if (c.eatLeft <= 0) {
           const seat = s.seats.find((x) => x.id === c.seatId);
           if (seat) finishEating(s, c, seat, ctx);
+          // 撮影の完了・取材の出演者が食べ終えた（media.ts）
+          onMealFinished(s, c, ctx);
           // 団体はまだ食べている連れを席で待ち、全員で帰る（居座ることもある。manners.ts）
           if (holdAfterMeal(s, c)) break;
           leaveAfterMeal(s, c, ctx);

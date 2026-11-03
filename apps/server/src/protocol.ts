@@ -13,7 +13,7 @@ export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire',
-  'fire', 'setRole', 'setPriority', 'setShift', 'promote', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
+  'fire', 'setRole', 'setPriority', 'setShift', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
   'accidentReset',
 ] as const satisfies readonly ActionType[];
 
@@ -92,6 +92,7 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   setPriority: { employeeId: isId, kind: isId, value: isNum },
   setShift: { employeeId: isId, weekday: isIntIn(0, 6), shift: isShift },
   promote: { employeeId: isId },
+  answerRequest: { requestId: isId, accept: isBool },
   expand: {},
   setPrice: { menuId: isId, price: isNum },
   pauseMenu: { menuId: isId, paused: isBool },

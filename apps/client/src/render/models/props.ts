@@ -8,7 +8,7 @@ import { MAT, plastic } from './materials';
 import { BOWL_DIMS, bowlDirtyPool, bowlShellGeometry, bowlStainGeometry, bowlStainMaterial } from './bowl';
 import { canvasTexture, JP_FONT, texGrime, texSpill } from './textures';
 
-export type HeldKind = 'bowl' | 'clean' | 'dirty' | 'mop' | 'lostItem' | 'trash' | 'phone' | 'cigarette';
+export type HeldKind = 'bowl' | 'clean' | 'dirty' | 'mop' | 'lostItem' | 'trash' | 'phone' | 'cigarette' | 'tvcamera';
 
 type Parts = { geo: THREE.BufferGeometry; mat: THREE.Material }[];
 
@@ -129,6 +129,19 @@ function lostBagParts(): Parts {
 }
 
 /** スマートフォン（SNS を見て来た客が手に持つ。画面が光る） */
+/** 肩にかつぐテレビカメラ（テレビ取材のカメラマン） */
+function tvCameraParts(): Parts {
+  return cached('tvcamera', () => {
+    const b = new GeoBuilder();
+    b.box(std('tvcam-body', { color: '#2a2c30', roughness: 0.5, metalness: 0.3 }), 0.12, 0.15, 0.34, { z: 0.02 });
+    b.box(std('tvcam-lens', { color: '#111215', roughness: 0.3, metalness: 0.5 }), 0.085, 0.085, 0.12, { z: 0.24, y: 0.01 });
+    b.box(std('tvcam-glass', { color: '#4a6a9a', emissive: '#203a66', emissiveIntensity: 0.6, roughness: 0.1 }), 0.06, 0.06, 0.005, { z: 0.302, y: 0.01 });
+    b.box(std('tvcam-handle', { color: '#3a3d42', roughness: 0.6 }), 0.03, 0.04, 0.16, { y: 0.1, z: 0.02 });
+    b.box(std('tvcam-light', { color: '#ff3030', emissive: '#ff2020', emissiveIntensity: 2.0 }), 0.012, 0.012, 0.012, { y: 0.08, z: 0.17, x: 0.05 });
+    return b.merged();
+  });
+}
+
 /** タバコ（店の前の喫煙客）。先は赤く光る */
 function cigaretteParts(): Parts {
   return cached('cigarette', () => {
@@ -190,6 +203,8 @@ export function createHeldItem(kind: HeldKind): THREE.Object3D {
       g.rotation.set(0.4, 0.3, 0);
       return g;
     }
+    case 'tvcamera':
+      return instantiate(tvCameraParts());
   }
 }
 

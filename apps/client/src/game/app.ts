@@ -25,6 +25,7 @@ import { LayoutEditor } from '../ui/layout-editor';
 import { ManageMenu } from '../ui/manage';
 import { TutorialPanel } from '../ui/tutorial';
 import { AccidentOverlay, accidentView } from '../ui/accident';
+import { RequestPrompt } from '../ui/request';
 import { showCriticReport } from '../ui/critic';
 import { bankruptScreen, helpScreen, resultScreen, settingsScreen, slotScreen, titleScreen, type ExplosionOption } from '../ui/screens';
 import { Controls } from './controls';
@@ -94,6 +95,7 @@ export class App {
   private tutorial: TutorialPanel | null = null;
   /** 爆発事故の画面の演出 */
   private accidentUi: AccidentOverlay | null = null;
+  private requestPrompt: RequestPrompt | null = null;
   private lastAccidentId: string | null = null;
   private accidentMode = false;
   /** 表示済みの覆面調査員の記事 */
@@ -329,6 +331,8 @@ export class App {
     });
     this.stripObserver?.observe(this.tutorial.el);
     this.accidentUi = new AccidentOverlay(this.uiLayer, host);
+    // ホストへの確認（YouTuber の撮影の許可・テレビ取材）
+    this.requestPrompt = new RequestPrompt(this.uiLayer, host);
     this.lastAccidentId = host.state.events?.accident?.id ?? null;
     this.manage = new ManageMenu(this.uiLayer, host, {
       onClose: () => this.closeManage(),
@@ -405,6 +409,8 @@ export class App {
     this.tutorialHi = '';
     this.accidentUi?.dispose();
     this.accidentUi = null;
+    this.requestPrompt?.dispose();
+    this.requestPrompt = null;
     this.lastAccidentId = null;
     this.setAccidentMode(false);
     this.controls?.dispose();
@@ -440,7 +446,9 @@ export class App {
     const c = this.controls;
     if (!host || !world || !c) return;
     const s = host.state;
-    const blocking = !!this.screenEl || this.manage?.isOpen || !!this.editor;
+    // 確認の画面（撮影の許可・取材）を開いている間も、ひとりプレイでは時間を止める
+    this.requestPrompt?.update(s);
+    const blocking = !!this.screenEl || this.manage?.isOpen || !!this.editor || !!this.requestPrompt?.isOpen;
     // 爆発事故: 気を失っている間は動けない。営業の画面は隠し、焼け跡を歩けるようにする
     const acc = s.events?.accident ?? null;
     const av = accidentView(acc);

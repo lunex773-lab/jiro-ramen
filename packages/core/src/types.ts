@@ -398,6 +398,8 @@ export type CustomerState =
   | 'afterMeal'
   /** 退店後に店の前でタバコを吸っている */
   | 'smoking'
+  /** テレビ取材のカメラマン・スタッフ（注文しない。撮影・待機） */
+  | 'crew'
   | 'leaving'
   | 'left'
   | 'abandoned';
@@ -474,8 +476,8 @@ export interface Customer {
   smoke?: SmokeState | null;
   /** 迷惑を受けた出来事（トラブルの ID。同じトラブルで二度不満を数えない） */
   botheredBy?: Id[];
-  /** 吹き出しの種類（第2版: 団体の会話・イベント） */
-  talk?: boolean;
+  /** イベントの吹き出し（第2版 13: 団体の会話・クレーム・トラブル・珍しい客・取材など。少し長く、縁を変える） */
+  sayEvent?: boolean;
 }
 
 /** 団体客 */
@@ -541,12 +543,17 @@ export interface CustomerComplaint {
   tried: ComplaintResponse[];
 }
 
-export type SpecialKind = 'critic' | 'couple_her' | 'couple_him' | 'ramen_lover';
+export type SpecialKind = 'critic' | 'couple_her' | 'couple_him' | 'ramen_lover' | 'youtuber' | 'tv_performer' | 'tv_camera' | 'tv_staff';
 
 export interface CustomerSpecial {
   kind: SpecialKind;
   /** 発生したイベントの ID */
   eventId: Id;
+  /** YouTuber の撮影 */
+  film?: FilmState;
+  /** テレビ取材の出演者（芸能人の ID）・食べ終えた */
+  celebId?: string;
+  ate?: boolean;
   /** セリフを言い終えた（一度の来店で一度だけ） */
   spoken: boolean;
 }
@@ -772,7 +779,7 @@ export interface TutorialState {
 // ───────────────────────── 営業中のイベント ─────────────────────────
 
 /** イベントの種類（安定した ID。設定値・記録・強制発生のキー） */
-export type EventKind = 'sns_buzz' | 'critic' | 'rare_couple' | 'rare_lover' | 'complaint_unreasonable' | 'explosion';
+export type EventKind = 'sns_buzz' | 'critic' | 'rare_couple' | 'rare_lover' | 'complaint_unreasonable' | 'explosion' | 'youtuber' | 'tv';
 
 export interface EventStat {
   /** 抽選した回数 */
@@ -818,6 +825,73 @@ export interface DemandEffect {
   source: EventKind;
   mult: number;
   untilDay: number;
+  /** この日から効く（ない場合はすぐ。テレビ取材の翌日・翌々日など） */
+  fromDay?: number;
+}
+
+/** YouTuber の撮影（許可の有無と撮影の状態は別に持つ。第2版 11） */
+export interface FilmState {
+  /** 許可: asking = 確認中、permitted = 許可した、denied = 許可しなかった（時間切れを含む）、unasked = 聞かれなかった */
+  permission: 'asking' | 'permitted' | 'denied' | 'unasked';
+  /** 撮影: none = まだ、filming = 撮影中、done = 撮り終えた、stopped = やめさせた */
+  filming: 'none' | 'filming' | 'done' | 'stopped';
+  /** 許可なく撮影する気がある（抽選の結果。撮影が始まるのは席に着いてから） */
+  sneaky: boolean;
+  /** やめるよう伝えた回数 */
+  warned: number;
+  /** 試した対応（同じ対応は続けて選べない） */
+  tried: string[];
+  requestId: Id | null;
+  troubleId: Id;
+  /** 次に撮影のセリフを言う時刻 */
+  talkAt: number;
+}
+
+/** ホストに判断を求める確認（撮影の許可・テレビ取材） */
+export interface HostRequest {
+  id: Id;
+  kind: 'filming' | 'tv';
+  /** 対象（YouTuber の客の ID、テレビ取材の ID） */
+  subjectId: Id;
+  text: string;
+  askedAt: number;
+  /** この時刻までに答えがなければ断ったことにする */
+  timeoutAt: number;
+}
+
+/** 許可した撮影が完了したことによる SNS バズの確率の上昇（重ねられる。オーナー回答） */
+export interface BuzzBoost {
+  id: Id;
+  /** 撮影した日。untilDay まで効く */
+  day: number;
+  untilDay: number;
+  add: number;
+}
+
+/** テレビ取材の来店 */
+export interface TvVisit {
+  id: Id;
+  day: number;
+  show: string;
+  /** 出演する芸能人（架空）の ID */
+  celebs: string[];
+  status: 'asking' | 'accepted' | 'declined' | 'done' | 'failed';
+  requestId: Id | null;
+  memberIds: Id[];
+  /** 通常の客への影響（1人1回だけ） */
+  troubleId: Id;
+}
+
+/** 芸能人のサイン（店の壁に飾る。収益への効果はない） */
+export interface CelebritySign {
+  celebId: string;
+  name: string;
+  show: string;
+  /** 初めてもらった日 */
+  day: number;
+  /** 取材に来た回数（同じ人のサインは1枚で、回数を数える） */
+  visits: number;
+  lastDay: number;
 }
 
 /** 爆発事故。warning = 設備の異常（営業は続く）、destroyed = 店が壊滅（営業処理は止まる） */
@@ -858,6 +932,18 @@ export interface ShopEvents {
   accident: AccidentState | null;
   /** 仕込み開始時点に戻した回数 */
   resets: number;
+  // 以下は第2版 Phase 4（sim/media.ts）。古いセーブにはないので任意の項目
+  /** ホストに判断を求めている確認 */
+  requests?: HostRequest[];
+  /** YouTuber が来る予定（開店時の抽選） */
+  youtuberPlan?: { day: number; afterOpenT: number; forced?: boolean } | null;
+  /** 許可した撮影による SNS バズの確率の上昇 */
+  buzzBoosts?: BuzzBoost[];
+  /** テレビ取材が来る予定・来ている取材 */
+  tvPlan?: { day: number; afterOpenT: number; forced?: boolean } | null;
+  tv?: TvVisit | null;
+  /** 芸能人のサイン（壁に飾る順） */
+  signs?: CelebritySign[];
 }
 
 /** 仕込み開始時点の状態の控え。日報・口コミ（営業中は変わらない）と、プレイヤー（接続で変わる）は入れない */

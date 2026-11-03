@@ -12,6 +12,8 @@ const LABELS: Record<EventKind, string> = {
   rare_lover: '🍜 一人でラーメンを愛する客（次の来店）',
   complaint_unreasonable: '😠 理不尽な要求（次に良い丼を出した客）',
   explosion: '💥 爆発事故（2日目以降・営業中ならすぐ）',
+  youtuber: '🎥 YouTuber が来る（次の一人客）',
+  tv: '📺 テレビ取材が来る（営業中ならすぐ）',
 };
 
 export function debugEventsEnabled(): boolean {

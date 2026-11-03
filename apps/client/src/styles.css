@@ -894,9 +894,20 @@ input, select { font: inherit; }
 /* 小声のセリフ */
 .bubble.whisper { background: rgba(255, 255, 255, 0.82); color: #555; font-weight: 600; font-style: italic; font-size: 11px; }
 .bubble.whisper::after { border-top-color: rgba(255, 255, 255, 0.82); }
-/* 団体の会話（通常の食事のコメントと区別する。第2版 8-3） */
-.bubble.talk { background: #e8f3ff; color: #1d3a5a; border: 1px solid #8fb8e8; font-weight: 600; }
-.bubble.talk::after { border-top-color: #e8f3ff; }
+/*
+ * イベントの吹き出し（第2版 13）: 団体の会話・クレーム・トラブル・珍しい客・取材など。
+ * 通常の吹き出し（コール・食事のコメント）は変えない。縁を金色の二重線にし、長い文は折り返して画面からはみ出さない
+ */
+.bubble.event {
+  border: 2px solid #e2a400;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 2px 8px rgba(0, 0, 0, 0.4);
+  white-space: normal;
+  max-width: min(58vw, 260px);
+  line-height: 1.3;
+  text-align: center;
+}
+.bubble.event::after { border-top-color: #e2a400; bottom: -8px; }
+.bubble.event.whisper { border-style: dashed; }
 /* 覆面調査員の記事 */
 .modal.critic { max-height: calc(100% - 16px); overflow-y: auto; }
 .critic-stars { font-size: 20px; color: var(--yellow); font-weight: 800; }
