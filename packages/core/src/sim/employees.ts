@@ -18,7 +18,7 @@ import type {
   TaskStep,
   Vec2,
 } from '../types';
-import { clamp01, dist, newId, pick, rand, randRange } from '../util';
+import { clamp01, dist, hashString, newId, pick, rand, randRange } from '../util';
 import { cash, recordPL } from './economy';
 import { defOf, isUsable } from './equipment';
 import { stockOf } from './inventory';
@@ -141,7 +141,10 @@ export function generateCandidate(s: GameState): Candidate {
     diligence,
     patience: clamp01(P.mean + (2 * evRand(s) - 1) * P.spread),
   };
-  return { id: newId(s, 'cand'), profile };
+  const id = newId(s, 'cand');
+  // 見た目の番号は乱数を使わずに決める（ゲームの乱数の並びを変えない）
+  profile.look = hashString(`${s.seed}:${id}`) % 1_000_000;
+  return { id, profile };
 }
 
 export function refreshCandidates(s: GameState): void {

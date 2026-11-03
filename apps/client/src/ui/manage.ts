@@ -56,6 +56,7 @@ import {
 import type { GameHost } from '../game/host';
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
+import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
 
 export type ManageTab = 'dash' | 'stock' | 'menu' | 'equip' | 'staff' | 'layout' | 'career' | 'system';
 
@@ -560,6 +561,7 @@ export class ManageMenu {
                   h('div', { class: 'tname' }, c.profile.name, h('small', null, `${ROLE_LABEL[c.profile.role]}・アルバイト・時給${yenStr(c.profile.hourly ?? Math.round(c.profile.wage / BALANCE.staff.employment.fullShiftHours / 10) * 10)}・採用費${yenStr(c.profile.hireFee)}`)),
                   h('button', { class: 'mini', onclick: () => this.act({ type: 'hire', candidateId: c.id }) }, '採用する'),
                 ),
+                lookLine(lookSeedOf(c)),
                 this.skillBars(c.profile.skills),
               ),
             ),
@@ -608,6 +610,7 @@ export class ManageMenu {
           (Object.keys(ROLE_LABEL) as EmployeeRole[]).map((r) => h('option', { value: r, selected: r === e.profile.role }, ROLE_LABEL[r])),
         ),
       ),
+      lookLine(lookSeedOf(e)),
       h(
         'div',
         { class: 'tbtns emp-btns' },
@@ -958,4 +961,18 @@ export class ManageMenu {
       ),
     );
   }
+}
+
+/** 従業員の見た目（制服の色の丸と説明）。3D の人物と同じ番号から決まる */
+function lookLine(seed: number): HTMLElement {
+  const l = staffLook(seed);
+  const dot = (color: string, title: string) => h('span', { class: 'look-dot', title, style: { background: color } });
+  return h(
+    'div',
+    { class: 'emp-look' },
+    dot(l.shirt, 'シャツ'),
+    dot(l.apron, '前掛け'),
+    l.headwear !== 'none' ? dot(l.headColor, '頭') : null,
+    h('span', null, staffLookText(l)),
+  );
 }

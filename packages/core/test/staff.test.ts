@@ -89,6 +89,26 @@ describe('雇用形態と採用', () => {
     expect(e.att?.prepWorked).toBe(true);
   });
 
+  it('採用の候補には見た目の番号があり、採用したあとも変わらない（同じ種・同じ手順なら同じ番号）', () => {
+    const { s, ctx } = newGame(3);
+    s.career.unlocked.push('hiring');
+    const rng0 = s.rng;
+    refreshCandidates(s);
+    const looks = s.candidates.map((c) => c.profile.look);
+    expect(looks.every((l) => typeof l === 'number')).toBe(true);
+    expect(new Set(looks).size).toBe(looks.length);
+    // 同じ種・同じ手順なら同じ番号・同じ乱数の進み方
+    const b = newGame(3);
+    b.s.career.unlocked.push('hiring');
+    refreshCandidates(b.s);
+    expect(b.s.candidates.map((c) => c.profile.look)).toEqual(looks);
+    expect(b.s.rng).toBe(s.rng);
+    expect(s.rng).not.toBe(rng0);
+    const c = s.candidates[1]!;
+    expect(applyAction(s, 'p1', { type: 'hire', candidateId: c.id }, ctx).ok).toBe(true);
+    expect(s.employees[0]!.profile.look).toBe(c.profile.look);
+  });
+
   it('古いセーブの従業員（雇用形態がない）は社員として扱い、今までと同じ日給・毎日の勤務。勤怠は以前の信頼性から読む', () => {
     const { s, ctx } = newGame(4);
     const e = makeEmployee(s, { id: 'old', profile: { name: '古株', role: 'cook', skills: { speed: 0.5, cooking: 0.5, service: 0.5, hygiene: 0.5, movement: 0.5, reliability: 0.4 }, wage: 8000, hireFee: 0, experience: 0 } });

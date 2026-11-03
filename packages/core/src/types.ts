@@ -236,6 +236,8 @@ export interface EmployeeProfile {
   diligence?: number;
   /** 隠しパラメータ「辛抱」0..1（画面には数値を出さない） */
   patience?: number;
+  /** 見た目の番号（制服の色・頭・メガネ・ひげなど。採用の候補のときから変わらない）。古いセーブにはない → id から */
+  look?: number;
 }
 
 export type EmployeeAiState = 'idle' | 'moving' | 'working' | 'waiting' | 'absent' | 'stuck' | 'slacking' | 'break' | 'off';

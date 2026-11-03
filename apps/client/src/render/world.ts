@@ -8,6 +8,7 @@ import { createSteam } from './models/fx';
 import { layoutBubbles, type BubbleBox } from '../ui/bubble-layout';
 import { createAutographs } from './autograph';
 import { signSlots } from './sign-slots';
+import { lookSeedOf } from './staff-look';
 
 import {
   CELL,
@@ -500,7 +501,7 @@ export class World {
     for (const e of s.employees) {
       if (!e.presentToday) continue;
       seen.add(e.id);
-      const c = this.charEntry(e.id, 'employee', hashId(e.id));
+      const c = this.charEntry(e.id, 'employee', lookSeedOf(e));
       if (this.burned) {
         this.placeChar(c, e.pos.x, e.pos.z, hash01(e.id, 7) * Math.PI * 2, dt, false);
         c.model.setHeld(null);

@@ -502,7 +502,7 @@ test('従業員: アルバイトとして採用し、曜日ごとのシフトを
         id: 'cand-e2e',
         profile: {
           name: '山田 花子', role: 'server', skills: { speed: 0.6, cooking: 0.4, service: 0.8, hygiene: 0.5, movement: 0.6 },
-          wage: 9000, hireFee: 10000, experience: 0, employment: 'part', hourly: 2000, diligence: 0.123, patience: 0.456,
+          wage: 9000, hireFee: 10000, experience: 0, employment: 'part', hourly: 2000, diligence: 0.123, patience: 0.456, look: 4242,
         },
       },
     ];
@@ -511,9 +511,13 @@ test('従業員: アルバイトとして採用し、曜日ごとのシフトを
   await page.getByRole('button', { name: '従業員', exact: true }).click();
   const body = page.locator('.manage-body');
   await expect(body).toContainText('時給¥2,000');
+  // 見た目の個性（制服の色・頭・小物）。候補のときと採用したあとで同じ
+  const candLook = (await body.locator('.emp .emp-look').first().textContent()) ?? '';
+  expect(candLook).toContain('前掛け');
   await body.getByRole('button', { name: '採用する' }).click();
   const card = body.locator('.emp[data-emp]').first();
   await expect(card).toContainText('アルバイト');
+  await expect(card.locator('.emp-look')).toHaveText(candLook);
   await expect(card).toContainText('勤務中（仕込み〜15:00）');
   await expect(body).toContainText('今日（1日目・月曜）の出勤');
   // シフト: 火曜を 12:00〜14:00（13:00 から30分休憩）にする

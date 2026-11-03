@@ -1,5 +1,5 @@
 // モデル確認用ギャラリー（model-gallery.html）。
-// #bowls / #people / #equipment / #shop / #closeup をハッシュで切り替える。
+// #bowls / #people / #staff / #equipment / #shop / #closeup をハッシュで切り替える。
 // ドラッグで回転、ホイール/ピンチで拡大縮小。Playwright のスクリーンショット用に window.__galleryReady を立てる。
 
 import * as THREE from 'three';
@@ -18,8 +18,9 @@ import {
   type GameState,
 } from '@jiro/core';
 import * as Models from './models';
+import { staffLook } from './staff-look';
 
-type Section = 'bowls' | 'people' | 'equipment' | 'shop' | 'closeup';
+type Section = 'bowls' | 'people' | 'staff' | 'equipment' | 'shop' | 'closeup';
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -37,8 +38,8 @@ const camera = new THREE.PerspectiveCamera(45, 1, 0.02, 200);
 
 // ───────────────────────── UI ─────────────────────────
 
-const SECTIONS: Section[] = ['bowls', 'people', 'equipment', 'shop', 'closeup'];
-const SECTION_LABEL: Record<Section, string> = { bowls: '丼', people: '人物', equipment: '設備', shop: '店舗', closeup: '一杯アップ' };
+const SECTIONS: Section[] = ['bowls', 'people', 'staff', 'equipment', 'shop', 'closeup'];
+const SECTION_LABEL: Record<Section, string> = { bowls: '丼', people: '人物', staff: '従業員', equipment: '設備', shop: '店舗', closeup: '一杯アップ' };
 
 const ui = document.createElement('div');
 ui.style.cssText = 'position:fixed;left:0;top:0;right:0;display:flex;gap:6px;padding:8px;flex-wrap:wrap;z-index:2;pointer-events:none';
@@ -289,6 +290,33 @@ function buildPeople(): void {
   orbit.yaw = Math.PI;
 }
 
+/** 従業員の見た目の個性（12人。前の列は正面、後ろの列は背中を見せる） */
+function buildStaff(): void {
+  scene.background = new THREE.Color('#8fa4b4');
+  addLights({ sunPos: new THREE.Vector3(2, 6, 5), extent: 6 });
+  floorPlane(30, '#7c7468');
+  const row: { m: Models.CharacterModel; pose: Models.CharacterPose }[] = [];
+  const seeds = [101, 202, 303, 404, 505, 606, 707, 808, 909, 1111, 1212, 1313];
+  seeds.forEach((seed, i) => {
+    const m = Models.createCharacter({ kind: 'employee', seed });
+    const back = i >= 6;
+    const x = -((i % 6) - 2.5) * 0.85;
+    const z = back ? -1.7 : 0;
+    m.group.position.set(x, 0, z);
+    if (back) m.group.rotation.y = Math.PI;
+    scene.add(m.group);
+    row.push({ m, pose: 'stand' });
+    addLabel(staffLook(seed).headName, new THREE.Vector3(x, back ? 2.0 : 1.95, z));
+  });
+  tickers.push((t, dt) => {
+    for (const r of row) r.m.update(r.pose, t, dt);
+  });
+  orbit.target.set(0, 1.0, -0.8);
+  orbit.dist = 6.6;
+  orbit.pitch = 0.12;
+  orbit.yaw = Math.PI;
+}
+
 function fakeState(): GameState {
   const s = createGame({ seed: 1 });
   s.phase = 'open';
@@ -507,6 +535,9 @@ window.addEventListener('hashchange', () => location.reload());
 switch (section) {
   case 'people':
     buildPeople();
+    break;
+  case 'staff':
+    buildStaff();
     break;
   case 'equipment':
     buildEquipment();
