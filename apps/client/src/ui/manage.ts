@@ -34,6 +34,7 @@ import {
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 import { confirmDialog, h, replace, stars, toast, yenStr } from './dom';
+import { debugEventsCard, debugEventsEnabled } from './debug-events';
 
 export type ManageTab = 'dash' | 'stock' | 'menu' | 'equip' | 'staff' | 'layout' | 'career' | 'system';
 
@@ -660,10 +661,11 @@ export class ManageMenu {
   }
 
   // ───────────────── セーブ・設定 ─────────────────
-  private system(_s: GameState): HTMLElement {
+  private system(s: GameState): HTMLElement {
     return h(
       'div',
       null,
+      this.host.mode === 'local' && debugEventsEnabled() ? debugEventsCard(s, this.host, this.root, () => this.cb.onClose()) : null,
       h(
         'section',
         { class: 'card wide' },

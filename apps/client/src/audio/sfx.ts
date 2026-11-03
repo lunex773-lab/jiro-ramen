@@ -7,6 +7,8 @@ export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private ambience: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
+  /** 爆発事故のあとの焼け跡の環境音（低いうなり・残り火のはぜる音） */
+  private eerie: { nodes: AudioScheduledSourceNode[]; gain: GainNode } | null = null;
   enabled = true;
   voice = true;
   volume = 0.7;
@@ -107,6 +109,79 @@ export class Sfx {
   stopAmbience(): void {
     this.ambience?.src.stop();
     this.ambience = null;
+    this.stopEerie();
+  }
+
+  /** 焼け跡の環境音に切り替える（店内の環境音は止める） */
+  startEerie(): void {
+    if (!this.ctx || !this.master || this.eerie) return;
+    this.ambience?.src.stop();
+    this.ambience = null;
+    const ctx = this.ctx;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.5, ctx.currentTime + 4);
+    g.connect(this.master);
+    // 低いうなり（わずかにずれた2つの音でゆっくりうねる）
+    const nodes: AudioScheduledSourceNode[] = [];
+    for (const [f, v] of [[55, 0.05], [55.7, 0.04], [82.4, 0.015]] as const) {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = v;
+      o.connect(og).connect(g);
+      o.start();
+      nodes.push(o);
+    }
+    // 残り火のはぜる音と、遠くの風
+    const len = ctx.sampleRate * 5;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    let b = 0;
+    for (let i = 0; i < len; i++) {
+      b = (b + (Math.random() * 2 - 1) * 0.01) * 0.998;
+      d[i] = b * 2 + (Math.random() < 0.0009 ? (Math.random() - 0.5) * 0.9 : 0);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 1400;
+    f.Q.value = 0.4;
+    const sg = ctx.createGain();
+    sg.gain.value = 0.25;
+    src.connect(f).connect(sg).connect(g);
+    src.start();
+    nodes.push(src);
+    this.eerie = { nodes, gain: g };
+  }
+
+  /** 焼け跡の環境音をやめて、店内の環境音に戻す */
+  stopEerie(restoreAmbience = false): void {
+    if (this.eerie) {
+      for (const n of this.eerie.nodes) {
+        try {
+          n.stop();
+        } catch {
+          // すでに止まっている
+        }
+      }
+      this.eerie.gain.disconnect();
+      this.eerie = null;
+    }
+    if (restoreAmbience) this.startAmbience();
+  }
+
+  /** 爆発（閃光と同時）: 低い衝撃音・破片の音・耳鳴り */
+  private explosion(): void {
+    this.noise(2.6, 180, 0.4, 0.9, 'lowpass');
+    this.tone(48, 1.8, 'sine', 0.6, -20);
+    this.noise(1.2, 2600, 0.6, 0.25, 'bandpass', 0.05);
+    for (let i = 0; i < 8; i++) this.tone(1800 + Math.random() * 2400, 0.06, 'triangle', 0.05, 0, 0.3 + Math.random() * 1.4);
+    // 耳鳴り（気を失っていく）
+    this.tone(3800, 4.5, 'sine', 0.03, 0, 0.6);
   }
 
   say(text: string, rate = 1.15, pitch = 1): void {
@@ -207,6 +282,36 @@ export class Sfx {
           break;
         case 'tutorialDone':
           [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.18, 'triangle', 0.1, 0, i * 0.11));
+          break;
+        case 'buzzStart':
+          // スマホの通知音が重なって鳴る
+          for (let i = 0; i < 5; i++) {
+            this.tone(1568, 0.07, 'sine', 0.07, 0, i * 0.22);
+            this.tone(2093, 0.09, 'sine', 0.06, 0, i * 0.22 + 0.08);
+          }
+          break;
+        case 'criticPublished':
+          [659, 880, 1175].forEach((f, i) => this.tone(f, 0.16, 'triangle', 0.08, 0, i * 0.12));
+          break;
+        case 'complaintResolved':
+          this.tone(740, 0.1, 'triangle', 0.05);
+          break;
+        case 'complaintRejected':
+        case 'complaintRefused':
+          this.tone(196, 0.3, 'sawtooth', 0.05, -40);
+          break;
+        case 'accidentWarning':
+          // ガスの漏れる音と警報
+          this.noise(5, 5200, 0.8, 0.06, 'highpass');
+          for (let i = 0; i < 8; i++) this.tone(i % 2 ? 660 : 880, 0.25, 'square', 0.05, 0, i * 0.5);
+          break;
+        case 'explosion':
+          this.explosion();
+          this.startEerie();
+          break;
+        case 'accidentReset':
+          this.stopEerie(true);
+          [523, 784, 1046].forEach((f, i) => this.tone(f, 0.25, 'sine', 0.07, 0, i * 0.14));
           break;
         default:
           break;

@@ -7,7 +7,8 @@ import { cached, clamp, makeRng, pickOf, rr, xformMatrix, type Disposable, type 
 import { canvasTexture, JP_FONT } from './textures';
 import { createHeldItem, type HeldKind } from './props';
 
-export type CharacterPose = 'stand' | 'walk' | 'sit' | 'eat' | 'work' | 'carry';
+/** down = 床に倒れて動かない（爆発事故のあと） */
+export type CharacterPose = 'stand' | 'walk' | 'sit' | 'eat' | 'work' | 'carry' | 'down';
 export type { HeldKind };
 
 export interface CharacterModel extends Disposable {
@@ -26,6 +27,8 @@ export interface CharacterOpts {
   kind: 'customer' | 'employee' | 'player';
   seed: number;
   color?: string;
+  /** 見た目の指定（珍しい客）。なければ seed から決まる */
+  look?: 'blonde_woman' | 'boyfriend' | null;
 }
 
 // ───────────────────────── 骨格 ─────────────────────────
@@ -234,6 +237,25 @@ function chooseLook(o: CharacterOpts): Look {
       look.top2 = pickOf(r, ['#e8e8e8', '#c23b3b', '#333333', '#d8c89a'] as const);
     }
     if (r() < 0.18) look.backpack = pickOf(r, ['#222222', '#3a4a6a', '#6a3a2a', '#556b2f'] as const);
+    if (o.look === 'blonde_woman') {
+      // 金髪の成人女性（彼氏と来店）
+      look.body = { s: rr(r, 0.93, 0.98), w: rr(r, 0.9, 1.0), female: true };
+      look.hairColor = '#e8c872';
+      look.hair = 'long';
+      look.outfit = 'jacket';
+      look.top = '#f2ece2';
+      look.top2 = '#d04a6a';
+      look.pants = '#2a2f3e';
+      look.glasses = false;
+      look.backpack = null;
+    } else if (o.look === 'boyfriend') {
+      look.body = { s: rr(r, 1.0, 1.06), w: rr(r, 0.95, 1.1), female: false };
+      look.hair = 'side';
+      look.hairColor = '#2c2019';
+      look.outfit = 'hoodie';
+      look.top = '#3d4450';
+      look.backpack = null;
+    }
   } else {
     // 次郎系の店員: 黒Tシャツ・白タオルの鉢巻・前掛け
     look.outfit = 'staff';
@@ -645,6 +667,14 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       setRot(target, B.foreR, -0.1, 0, 0);
       setRot(target, B.armL, -Math.sin(ph) * 0.4 * amp, 0, 0.06);
       setRot(target, B.foreL, -0.15, 0, 0);
+    } else if (heldKind === 'phone') {
+      // スマホを胸の前で見る
+      setRot(target, B.armR, -0.35, 0, 0.18);
+      setRot(target, B.foreR, -1.35, 0, 0);
+      setRot(target, B.armL, -Math.sin(ph) * 0.3 * amp, 0, 0.06);
+      setRot(target, B.foreL, -0.15, 0, 0);
+      headX = Math.max(headX, 0.3);
+      setRot(target, B.head, headX, 0, 0);
     } else if (heldKind === 'lostItem') {
       setRot(target, B.armR, -0.3, 0, 0.12);
       setRot(target, B.foreR, -1.1, 0, 0);
@@ -657,6 +687,20 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       setRot(target, B.armR, -sw - breathe, 0, -0.07);
       setRot(target, B.foreL, -0.12 - Math.max(0, sw) * 0.4, 0, 0);
       setRot(target, B.foreR, -0.12 - Math.max(0, -sw) * 0.4, 0, 0);
+    }
+    if (pose === 'down') {
+      // 床に倒れて動かない（体ごと倒すのは update で行う）
+      target.rot.fill(0);
+      target.hipsY = hipsY;
+      target.hipsZ = 0;
+      setRot(target, B.armL, 0.2, 0, 0.9);
+      setRot(target, B.armR, -0.3, 0, -1.1);
+      setRot(target, B.foreL, -0.5, 0, 0);
+      setRot(target, B.foreR, -0.2, 0, 0);
+      setRot(target, B.thighL, 0.15, 0, -0.12);
+      setRot(target, B.thighR, -0.25, 0, 0.1);
+      setRot(target, B.shinR, 0.6, 0, 0);
+      setRot(target, B.head, 0, 0.5, 0.3);
     }
     chopsticks.visible = pose === 'eat';
   }
@@ -676,8 +720,14 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
     heldAnchor,
     update(pose, t, dt, speed = 1) {
       computePose(pose, t, speed);
-      apply(first ? 1 : clamp(dt * 12, 0, 1));
+      apply(first || pose === 'down' ? 1 : clamp(dt * 12, 0, 1));
       first = false;
+      // 倒れた人は体ごと床に寝かせる（位置は呼び出し側が毎フレーム足元に置き直す）
+      if (pose === 'down') {
+        group.rotation.order = 'YXZ';
+        group.rotation.x = -1.48;
+        group.position.y += 0.13 * s;
+      } else if (group.rotation.x !== 0) group.rotation.x = 0;
     },
     setHeld(kind) {
       if (kind === heldKind) return;

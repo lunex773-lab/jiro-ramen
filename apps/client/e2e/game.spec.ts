@@ -7,8 +7,8 @@ async function shot(page: Page, name: string) {
 }
 
 /** 新しいキャリアを始めて店内に入る */
-async function startNewGame(page: Page) {
-  await page.goto('/');
+async function startNewGame(page: Page, path = '/') {
+  await page.goto(path);
   await page.evaluate(() => localStorage.clear());
   await page.reload();
   await expect(page.getByText('ひとりで経営する')).toBeVisible();
@@ -385,4 +385,91 @@ test.describe('チュートリアル', () => {
     await page.getByRole('button', { name: 'やめる' }).last().click();
     await expect(page.getByText('ひとりで経営する')).toBeVisible();
   });
+});
+
+// ───────────────── 営業中のイベント（テスト用の強制発生: URL に ?debug=1） ─────────────────
+
+/** 経営メニューの「セーブ・設定」にあるテスト用のボタンでイベントを起こす */
+async function forceEvent(page: Page, kind: string) {
+  await press(page.locator('.chip.menu'));
+  await press(page.getByRole('button', { name: 'セーブ・設定' }));
+  await press(page.locator(`[data-event="${kind}"]`));
+  await expect(page.locator('.manage')).toHaveCount(0);
+}
+
+type JiroState = { t: number; day: number; money: number; phase: string; players: { pos: { x: number; z: number } }[]; events?: { accident: unknown; buzz: unknown } };
+const jiroState = (page: Page) => page.evaluate(() => (window as unknown as { __jiro: { host: { state: JiroState } } }).__jiro.host.state);
+
+test('SNSでバズると、上部に「バズ中」と残り時間が出る', async ({ page }) => {
+  await startNewGame(page, '/?debug=1');
+  await page.getByRole('button', { name: /開店する/ }).click();
+  await forceEvent(page, 'sns_buzz');
+  await expect(page.locator('.hud-top .buzz')).toContainText('バズ中');
+  await expect(page.locator('.hud-top .buzz')).toContainText('分');
+  await page.waitForTimeout(600);
+  await shot(page, '30-buzz');
+});
+
+test('爆発事故: 気を失って目覚め、焼け跡を歩けて、「リセットする」で仕込みの開始時点に戻る', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await startNewGame(page, '/?debug=1');
+  // 事故は2日目から。2日目の仕込み開始時点にする（控えの日付も合わせる）
+  const money0 = await page.evaluate(() => {
+    const s = (window as unknown as { __jiro: { host: { state: { day: number; money: number; prepSnapshot: { day: number; state: { day: number } } } } } }).__jiro.host.state;
+    s.day = 2;
+    s.prepSnapshot.day = 2;
+    s.prepSnapshot.state.day = 2;
+    return s.money;
+  });
+  // 仕込み中に起こすと、開店の3秒後に起きる
+  await forceEvent(page, 'explosion');
+  await page.getByRole('button', { name: /開店する/ }).click();
+  // ヘッドレスの描画は遅く（1〜2fps）ゲーム内の時間がなかなか進まないので、待つ代わりに時刻を進める（各段階の時間の進み方は core のテストで確認）
+  const advance = (expr: string) =>
+    page.evaluate((code) => {
+      const s = (window as unknown as { __jiro: { host: { state: { openT: number; events: { accident: { t: number } | null } } } } }).__jiro.host.state;
+      new Function('s', code)(s);
+    }, expr);
+  await advance('s.openT = Math.max(s.openT, 2.95)');
+  await expect(page.locator('.acc-warn')).toBeVisible({ timeout: 20_000 });
+  await shot(page, '31-warning');
+  // 予兆が終わると爆発 → 暗転 →「数時間後」→ 目覚め
+  await advance('s.events.accident.t = 4.95');
+  await page.waitForFunction(() => (window as unknown as { __jiro: { host: { state: { events: { accident: { stage: string } | null } } } } }).__jiro.host.state.events.accident?.stage === 'destroyed', null, { timeout: 20_000 });
+  await advance('s.events.accident.t = 1.2');
+  await page.waitForTimeout(800);
+  await shot(page, '31b-blast');
+  await advance('s.events.accident.t = 5.5');
+  await expect(page.locator('.acc-caption')).toContainText('数時間後', { timeout: 20_000 });
+  const reset = page.getByRole('button', { name: 'リセットする' });
+  await expect(reset).toBeHidden();
+  await advance('s.events.accident.t = 9.2');
+  await expect(reset).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.acc-narration')).toContainText('誰ひとり動かない');
+  // 営業の画面は隠れ、営業は止まっている（時刻・資金が進まない）
+  await expect(page.locator('.hud-actions')).toBeHidden();
+  await expect(page.locator('.chip.menu')).toBeVisible();
+  const a = await jiroState(page);
+  await page.waitForTimeout(1500);
+  const b = await jiroState(page);
+  expect({ t: b.t, money: b.money, phase: b.phase }).toEqual({ t: a.t, money: a.money, phase: 'open' });
+  await shot(page, '32-aftermath');
+  // 焼け跡を歩ける（PC は W キー）
+  if (!test.info().project.use.hasTouch) {
+    await page.keyboard.down('KeyW');
+    await page.waitForTimeout(2000);
+    await page.keyboard.up('KeyW');
+    const c = await jiroState(page);
+    expect(Math.hypot(c.players[0]!.pos.x - b.players[0]!.pos.x, c.players[0]!.pos.z - b.players[0]!.pos.z)).toBeGreaterThan(0.2);
+  }
+  await press(reset);
+  await expect(page.locator('.toast', { hasText: '仕込みの開始時点に戻りました' })).toBeVisible();
+  const after = await jiroState(page);
+  expect({ phase: after.phase, day: after.day, money: after.money, accident: after.events?.accident }).toEqual({ phase: 'prep', day: 2, money: money0, accident: null });
+  await expect(page.getByRole('button', { name: /開店する/ })).toBeVisible();
+  await expect(reset).toBeHidden();
+  await page.waitForTimeout(500);
+  await shot(page, '33-after-reset');
+  expect(errors).toEqual([]);
 });

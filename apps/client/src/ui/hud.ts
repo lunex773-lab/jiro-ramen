@@ -23,6 +23,7 @@ import {
   noodlesStartedFor,
   isBowlComplete,
   INGREDIENTS,
+  COMPLAINT_CAUSE_LABEL,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 import { targetName, type FocusResult } from '../game/targeting';
@@ -46,6 +47,14 @@ export function clockText(s: GameState): string {
   const hh = Math.floor(mins / 60);
   const mm = Math.floor(mins % 60);
   return `${hh}:${String(mm).padStart(2, '0')}`;
+}
+
+/** SNS バズの残り時間（ゲーム内の分）。バズっていなければ null */
+export function buzzLeftMinutes(s: GameState): number | null {
+  const b = s.events?.buzz;
+  if (!b || s.phase !== 'open' || s.openT >= b.endT) return null;
+  const perSec = ((BALANCE.closeHour - BALANCE.openHour) * 60) / BALANCE.openDuration;
+  return Math.max(1, Math.ceil((b.endT - s.openT) * perSec));
 }
 
 export class Hud {
@@ -168,6 +177,7 @@ export class Hud {
     repStars: HTMLElement;
     repNum: HTMLElement;
     queue: HTMLElement;
+    buzz: HTMLElement;
     speed: HTMLElement;
   } | null = null;
 
@@ -190,6 +200,7 @@ export class Hud {
       repStars: h('span', { class: 'rep-stars' }),
       repNum: h('span', { class: 'rep-num' }),
       queue: h('div', { class: 'queue', title: '行列（店外 / 店内）' }),
+      buzz: h('div', { class: 'buzz', title: 'SNSでバズっています（しばらくお客さんが増えます）' }),
       speed:
         this.host.mode === 'local'
           ? h(
@@ -212,6 +223,7 @@ export class Hud {
       h(
         'div',
         { class: 'top-right' },
+        parts.buzz,
         parts.money,
         parts.rep,
         parts.queue,
@@ -225,7 +237,8 @@ export class Hud {
   }
 
   private updateTop(s: GameState): void {
-    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}`;
+    const buzz = buzzLeftMinutes(s);
+    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}|${buzz}`;
     if (key === this.lastTopKey) return;
     this.lastTopKey = key;
     const t = (this.topParts ??= this.buildTop());
@@ -239,6 +252,8 @@ export class Hud {
     t.repStars.textContent = stars(s.reputation);
     t.repNum.textContent = `★${s.reputation.toFixed(1)}`;
     t.queue.textContent = `🚶${s.queue.length}/${s.insideQueue.length}`;
+    t.buzz.textContent = buzz !== null ? `📱 バズ中 あと${buzz}分` : '';
+    t.buzz.hidden = buzz === null;
     if (this.host.mode === 'local') t.speed.textContent = `×${this.host.speed}`;
     else {
       t.speed.className = `chip conn ${this.host.conn}`;
@@ -304,7 +319,8 @@ export class Hud {
     this.crosshair.classList.toggle('far', far);
     // 操作ボタンは押せるものだけ出す。押せるものがないときは、何か持っているか設備を見ているときだけ、理由を照準の下に小さく出す
     // （空いた席を見ただけで「下げる丼がありません」などが出ると邪魔なため）
-    const enabled = this.verbs.filter((v) => v.enabled);
+    // クレームの対応（最大5つ）は先に出す
+    const enabled = this.verbs.filter((v) => v.enabled).sort((a, b) => Number(b.verb.startsWith('complaint_')) - Number(a.verb.startsWith('complaint_')));
     const shown = enabled.slice(0, 5);
     const first = this.verbs[0];
     const explain = me.hand.kind !== 'none' || t?.kind === 'equipment';
@@ -594,14 +610,16 @@ export class Hud {
       // 空いていてきれいな席は何も出さない
       const c = s.customers.find((x) => x.id === t.seat.customerId);
       const o = s.orders.find((x) => x.seatId === t.seat.id && x.customerId === t.seat.customerId);
-      key += `${c?.state}:${o?.status}:${o?.callRevealed}:${Math.floor(t.seat.dirt * 10)}:${c ? Math.floor(c.patience / 10) : ''}`;
+      key += `${c?.state}:${o?.status}:${o?.callRevealed}:${Math.floor(t.seat.dirt * 10)}:${c ? Math.floor(c.patience / 10) : ''}:${c?.complaint?.id ?? ''}:${c?.complaint?.tried.length ?? 0}`;
+      const cp = c && c.state === 'complaint' ? c.complaint : null;
       content = h(
         'div',
         null,
         h('div', { class: 'detail-title' }, `${t.seat.index + 1}番席`),
         c ? h('div', { class: 'slot' }, `${o ? MENU[o.menuId]?.name : '注文待ち'}${o?.status === 'served' ? '（食事中）' : ''}`) : h('div', { class: 'slot empty' }, '空席'),
         o ? h('div', { class: 'slot' }, o.callRevealed ? `コール: ${callToShort(o.call)}` : 'コール: まだ聞いていません') : null,
-        c && c.state === 'complaint' ? h('div', { class: 'slot bad' }, `クレーム: ${c.complaintReason}`) : null,
+        c && c.state === 'complaint' ? h('div', { class: 'slot bad' }, cp ? `クレーム（${COMPLAINT_CAUSE_LABEL[cp.cause]}）: ${cp.text}` : `クレーム: ${c.complaintReason}`) : null,
+        cp?.cause === 'unreasonable' ? h('div', { class: 'slot' }, '無理な要求は ✋断る か 💬説明 でもかまいません') : null,
         t.seat.dirt > 0.05 ? h('div', { class: 'slot warn' }, `カウンターの汚れ ${Math.round(t.seat.dirt * 100)}%`) : null,
       );
     }

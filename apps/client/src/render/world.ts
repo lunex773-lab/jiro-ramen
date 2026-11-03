@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { ResolutionGovernor } from './resolution';
+import { Aftermath, hash01 } from './aftermath';
 
 import {
   CELL,
@@ -11,6 +12,7 @@ import {
   seatPos,
   stageOf,
   STAGES,
+  type AccidentState,
   type Bowl,
   type Customer,
   type Employee,
@@ -93,6 +95,15 @@ export class World {
   private tutPos: THREE.Vector3 | null = null;
   /** 目印が画面の外にあるときに、画面の端で向きを示す矢印 */
   private tutEdge: HTMLElement;
+  private hemi: THREE.HemisphereLight;
+  private sun: THREE.DirectionalLight;
+  /** 爆発事故の演出（予兆・焼け跡） */
+  private after: Aftermath;
+  private accident: AccidentState | null = null;
+  /** 焼け跡を表示中（人物は倒れ、椅子は倒れ、丼は床に散らばる） */
+  private burned = false;
+  /** カメラの演出（揺れ・目の高さ・傾き。爆発で倒れて、目覚めて起き上がる） */
+  private camFx = { shake: 0, eyeY: EYE_HEIGHT, roll: 0 };
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -114,7 +125,9 @@ export class World {
     this.scene.fog = new THREE.Fog('#bcd3e6', 18, 60);
     const hemi = new THREE.HemisphereLight('#fff6e8', '#5b4a3a', 0.85);
     this.scene.add(hemi);
+    this.hemi = hemi;
     const sun = new THREE.DirectionalLight('#fff1d6', 1.2);
+    this.sun = sun;
     sun.position.set(-6, 12, -10);
     sun.castShadow = quality === 'high';
     sun.shadow.mapSize.set(1024, 1024);
@@ -131,7 +144,20 @@ export class World {
     this.tutEdge.className = 'tut-edge';
     this.tutEdge.textContent = '➤';
     this.overlay.appendChild(this.tutEdge);
+    this.after = new Aftermath(this.scene);
     this.resize();
+  }
+
+  /** 爆発事故の状態（なければ null）。毎フレーム渡す */
+  setAccident(acc: AccidentState | null): void {
+    this.accident = acc;
+  }
+
+  /** カメラの演出（揺れの大きさ m・目の高さ m・傾き rad） */
+  setCameraFx(shake: number, eyeY: number, roll: number): void {
+    this.camFx.shake = shake;
+    this.camFx.eyeY = eyeY;
+    this.camFx.roll = roll;
   }
 
   /** チュートリアルで見てほしい物（設備・席・床の汚れの ID）。null で消す */
@@ -282,6 +308,9 @@ export class World {
       const c = equipmentCenter(e);
       entry.model.group.position.set(c.x, 0, c.z);
       entry.model.group.rotation.y = -e.rot * (Math.PI / 2);
+      // 焼け跡では設備が少し傾き、壊れたように見せる
+      entry.model.group.rotation.z = this.burned ? (hash01(e.id, 1) - 0.5) * 0.22 : 0;
+      entry.model.group.rotation.x = this.burned ? (hash01(e.id, 2) - 0.5) * 0.1 : 0;
       entry.model.update(e, s, t, dt);
     }
     for (const [id, entry] of this.equip) {
@@ -309,10 +338,10 @@ export class World {
     }
   }
 
-  private charEntry(id: string, kind: 'customer' | 'employee' | 'player', seed: number, color?: string): CharEntry {
+  private charEntry(id: string, kind: 'customer' | 'employee' | 'player', seed: number, color?: string, look?: Customer['look']): CharEntry {
     let c = this.chars.get(id);
     if (!c) {
-      const model = createCharacter({ kind, seed, color });
+      const model = createCharacter({ kind, seed, color, look });
       c = { model, shown: new THREE.Vector3(), lastTarget: new THREE.Vector3(Number.NaN, 0, 0), moving: 0, yaw: 0, kind };
       this.chars.set(id, c);
       this.scene.add(model.group);
@@ -349,8 +378,17 @@ export class World {
     for (const cu of s.customers) {
       if (cu.state === 'left' || cu.state === 'abandoned') continue;
       seen.add(cu.id);
-      const c = this.charEntry(cu.id, 'customer', cu.appearance);
+      const c = this.charEntry(cu.id, 'customer', cu.appearance, undefined, cu.look);
       const seated = cu.state === 'seated' || cu.state === 'eating' || cu.state === 'complaint';
+      if (this.burned) {
+        // 焼け跡: 座っていた客は椅子から後ろへ倒れ、ほかの客もその場に倒れて動かない
+        const seat = seated && cu.seatId ? s.seats.find((x) => x.id === cu.seatId) : undefined;
+        const p = seat ? seatPos(s, seat) : cu.pos;
+        this.placeChar(c, p.x, p.z, seat ? (hash01(cu.id, 6) - 0.5) * 0.6 : hash01(cu.id, 7) * Math.PI * 2, dt, false);
+        c.model.setHeld(null);
+        c.model.update('down', t, dt);
+        continue;
+      }
       if (seated && cu.seatId) {
         const seat = s.seats.find((x) => x.id === cu.seatId);
         const p = seat ? seatPos(s, seat) : cu.pos;
@@ -358,6 +396,8 @@ export class World {
       } else {
         this.placeChar(c, cu.pos.x, cu.pos.z, cu.state === 'queue' || cu.state === 'waitingSeat' ? (cu.path.length === 0 ? waitYaw(cu) : null) : null, dt, smooth);
       }
+      // SNS を見て来た客は、並んでいる間スマホを見ている
+      c.model.setHeld(cu.fromBuzz && (cu.state === 'arriving' || cu.state === 'queue' || cu.state === 'waitingSeat') ? 'phone' : null);
       const pose: CharacterPose = cu.state === 'eating' ? 'eat' : seated ? 'sit' : c.moving > 0 ? 'walk' : 'stand';
       c.model.update(pose, t, dt);
     }
@@ -365,6 +405,12 @@ export class World {
       if (!e.presentToday) continue;
       seen.add(e.id);
       const c = this.charEntry(e.id, 'employee', hashId(e.id));
+      if (this.burned) {
+        this.placeChar(c, e.pos.x, e.pos.z, hash01(e.id, 7) * Math.PI * 2, dt, false);
+        c.model.setHeld(null);
+        c.model.update('down', t, dt);
+        continue;
+      }
       this.placeChar(c, e.pos.x, e.pos.z, e.ai.state === 'working' || e.work ? e.yaw : null, dt, smooth);
       c.model.setHeld(heldKind(e.hand));
       const pose: CharacterPose = e.work ? 'work' : c.moving > 0 ? (e.hand.kind !== 'none' ? 'carry' : 'walk') : 'stand';
@@ -420,10 +466,16 @@ export class World {
   private syncBowls(s: GameState, myId: string): void {
     const seen = new Set<string>();
     const camPos = this.camera.position;
+    const st = stageOf(s);
     for (const b of s.bowls) {
-      if (b.loc.at === 'rack' || b.loc.at === 'sink') continue;
-      if (b.loc.at === 'hand' && b.loc.actorId === myId) continue;
-      if (!this.bowlPosition(s, b, myId, this.tmpV)) continue;
+      if (this.burned) {
+        // 焼け跡: 丼は床に散らばる（場所は丼ごとに決まっている）
+        this.tmpV.set(0.4 + hash01(b.id, 4) * (st.w * CELL - 0.8), 0.05, 0.4 + hash01(b.id, 5) * (st.d * CELL - 0.8));
+      } else {
+        if (b.loc.at === 'rack' || b.loc.at === 'sink') continue;
+        if (b.loc.at === 'hand' && b.loc.actorId === myId) continue;
+        if (!this.bowlPosition(s, b, myId, this.tmpV)) continue;
+      }
       seen.add(b.id);
       let m = this.bowls.get(b.id);
       if (!m) {
@@ -433,13 +485,18 @@ export class World {
         (m as BowlModel & { _key?: string })._key = '';
       }
       m.group.position.copy(this.tmpV);
+      if (this.burned) m.group.rotation.set((hash01(b.id, 8) - 0.5) * 2.6, hash01(b.id, 9) * 6.28, 1.2 + hash01(b.id, 10) * 0.6);
+      else if (m.group.rotation.z !== 0) m.group.rotation.set(0, 0, 0);
       const near = this.tmpV.distanceTo(camPos) < 2.2;
-      const key = `${b.state}|${b.contents ? `${b.contents.steps.length}|${b.contents.buta}|${b.contents.noodleG}|${Object.values(b.contents.toppings).join(',')}|${b.contents.tare}|${Math.round(b.contents.heat / 10)}` : 'x'}|${near ? 'h' : 'l'}`;
+      const key = this.burned
+        ? `burned|${near ? 'h' : 'l'}`
+        : `${b.state}|${b.contents ? `${b.contents.steps.length}|${b.contents.buta}|${b.contents.noodleG}|${Object.values(b.contents.toppings).join(',')}|${b.contents.tare}|${Math.round(b.contents.heat / 10)}` : 'x'}|${near ? 'h' : 'l'}`;
       const mm = m as BowlModel & { _key?: string };
       if (mm._key !== key) {
         mm._key = key;
         m.setDetail(near ? 'high' : 'low');
-        m.setContents(b.state === 'dirty' ? null : b.contents, { dirty: b.state === 'dirty' });
+        if (this.burned) m.setContents(null, { dirty: true });
+        else m.setContents(b.state === 'dirty' ? null : b.contents, { dirty: b.state === 'dirty' });
       }
     }
     for (const [id, m] of this.bowls) {
@@ -532,8 +589,11 @@ export class World {
   setCamera(x: number, z: number, yaw: number, pitch: number, moving: boolean, dt: number): void {
     if (moving) this.bob += dt * 7;
     const bobY = moving ? Math.sin(this.bob * 2) * 0.025 : 0;
-    this.camera.position.set(x, EYE_HEIGHT + bobY, z);
-    this.camera.rotation.set(pitch, yaw + Math.PI, 0);
+    const fx = this.camFx;
+    const sx = fx.shake > 0 ? (Math.random() - 0.5) * fx.shake : 0;
+    const sy = fx.shake > 0 ? (Math.random() - 0.5) * fx.shake : 0;
+    this.camera.position.set(x + sx, fx.eyeY + bobY + sy, z + sx * 0.5);
+    this.camera.rotation.set(pitch + sy * 0.3, yaw + Math.PI, fx.roll);
   }
 
   /** 視線の方向（正規化） */
@@ -545,8 +605,10 @@ export class World {
 
   update(s: GameState, myId: string, t: number, dt: number, smooth: boolean): void {
     this.syncShell(s);
+    this.updateAccident(s, t, dt);
     this.syncEquipment(s, t, dt);
     this.syncStools(s);
+    this.tipStools();
     this.syncCharacters(s, myId, t, dt, smooth);
     this.syncBowls(s, myId);
     this.syncDirtAndLost(s);
@@ -559,6 +621,32 @@ export class World {
       this.overlayAcc = 0;
       this.updateOverlay(s);
       this.updateTutorialEdge();
+    }
+  }
+
+  /** 爆発事故: 予兆の火花・ガス、焼け跡への切り替えと戻し */
+  private updateAccident(s: GameState, t: number, dt: number): void {
+    const acc = this.accident;
+    const burned = acc?.stage === 'destroyed';
+    if (burned && !this.after.burned) {
+      const st = stageOf(s);
+      this.after.enter([this.hemi, this.sun, ...this.lights], { w: st.w * CELL, d: st.d * CELL }, acc.pos);
+    } else if (!burned && this.after.burned) {
+      this.after.exit();
+    }
+    this.burned = burned;
+    this.after.setWarning(acc?.stage === 'warning', acc?.pos ?? null, t);
+    if (acc?.stage === 'warning') this.after.tickWarning(dt);
+    this.after.update(t, dt, burned ? acc.pos : null);
+  }
+
+  /** 焼け跡では椅子を倒す（戻ったら起こす） */
+  private tipStools(): void {
+    for (const [id, o] of this.stools) {
+      const want = this.burned ? (hash01(id, 3) > 0.5 ? 1 : -1) * 1.45 : 0;
+      if (o.rotation.z === want) continue;
+      o.rotation.z = want;
+      o.position.y = this.burned ? 0.17 : 0;
     }
   }
 
@@ -593,11 +681,11 @@ export class World {
     };
     for (const cu of s.customers) {
       const c = this.chars.get(cu.id);
-      if (!c) continue;
+      if (!c || this.burned) continue;
       const head = c.model.group.position.clone();
       const seated = cu.state === 'seated' || cu.state === 'eating' || cu.state === 'complaint';
       head.y += seated ? 1.45 : 1.95;
-      if (cu.say && cu.sayUntil > s.t) show(`say:${cu.id}`, cu.say, head, `bubble ${cu.state === 'complaint' ? 'angry' : ''}`);
+      if (cu.say && cu.sayUntil > s.t) show(`say:${cu.id}`, cu.say, head, `bubble ${cu.state === 'complaint' ? 'angry' : cu.sayStyle === 'whisper' ? 'whisper' : ''}`);
       else if (cu.state === 'seated') {
         const seat = s.seats.find((x) => x.id === cu.seatId);
         const ratio = cu.patience / 150;
@@ -616,6 +704,7 @@ export class World {
   }
 
   dispose(): void {
+    this.after.dispose();
     for (const e of this.equip.values()) e.model.dispose();
     for (const c of this.chars.values()) c.model.dispose();
     for (const b of this.bowls.values()) b.dispose();

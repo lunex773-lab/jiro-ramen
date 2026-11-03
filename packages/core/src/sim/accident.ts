@@ -123,7 +123,8 @@ function blast(s: GameState, ctx: SimCtx, ev: ShopEvents): void {
     e.ai.path = [];
   }
   ev.buzz = null;
-  notify(s, ctx, 'accident', 'danger', '店が爆発した');
+  // 画面の演出（閃光・暗転）の邪魔をしないよう、通知はトーストの出ない info にする
+  notify(s, ctx, 'accident', 'info', '店が爆発した');
   emit(ctx, { type: 'explosion', targetId: acc.sourceId ?? undefined, pos: acc.pos });
 }
 

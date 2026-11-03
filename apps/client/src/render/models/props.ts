@@ -8,7 +8,7 @@ import { MAT, plastic } from './materials';
 import { BOWL_DIMS, bowlDirtyPool, bowlShellGeometry, bowlStainGeometry, bowlStainMaterial } from './bowl';
 import { canvasTexture, JP_FONT, texGrime, texSpill } from './textures';
 
-export type HeldKind = 'bowl' | 'clean' | 'dirty' | 'mop' | 'lostItem' | 'trash';
+export type HeldKind = 'bowl' | 'clean' | 'dirty' | 'mop' | 'lostItem' | 'trash' | 'phone';
 
 type Parts = { geo: THREE.BufferGeometry; mat: THREE.Material }[];
 
@@ -128,6 +128,16 @@ function lostBagParts(): Parts {
   });
 }
 
+/** スマートフォン（SNS を見て来た客が手に持つ。画面が光る） */
+function phoneParts(): Parts {
+  return cached('phone', () => {
+    const b = new GeoBuilder();
+    b.box(std('phone-body', { color: '#1b1d22', roughness: 0.35, metalness: 0.4 }), 0.075, 0.15, 0.009, { y: -0.04 });
+    b.box(std('phone-screen', { color: '#6fb6ff', emissive: '#4aa0ff', emissiveIntensity: 1.4, roughness: 0.2 }), 0.066, 0.135, 0.002, { y: -0.04, z: 0.0055 });
+    return b.merged();
+  });
+}
+
 /**
  * 手に持つ物。一人称の手元表示と、人物の手（setHeld）で共用する。
  * 'bowl' は呼び出し側が本物の BowlModel を使うので空の Group を返す。
@@ -158,6 +168,12 @@ export function createHeldItem(kind: HeldKind): THREE.Object3D {
       return instantiate(trashParts());
     case 'lostItem':
       return instantiate(lostBagParts());
+    case 'phone': {
+      const g = instantiate(phoneParts(), false);
+      // 画面を顔の方へ向けて持つ
+      g.rotation.x = -1.1;
+      return g;
+    }
   }
 }
 

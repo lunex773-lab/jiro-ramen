@@ -20,6 +20,10 @@ export function nextHint(s: GameState, myId: string): string | null {
     return null;
   }
   if (s.phase !== 'open' && s.phase !== 'closing') return null;
+  // クレームは先に対応する（放っておくと怒って帰る）
+  const angry = s.customers.find((c) => c.state === 'complaint');
+  const angrySeat = angry ? s.seats.find((x) => x.id === angry.seatId) : undefined;
+  if (angrySeat) return `${angrySeat.index + 1}番席でクレーム。席を見て 🙇謝る・🔁作り直し・💴返金・💬説明・✋断る から選ぶ`;
   const orders = waitingOrders(s);
   const roleOf = (id: string) => EQUIPMENT[s.equipment.find((e) => e.id === id)?.type ?? '']?.role;
   const asms = s.equipment.filter((e) => e.placed && roleOf(e.id) === 'assembly');

@@ -23,6 +23,8 @@ import { Hud } from '../ui/hud';
 import { LayoutEditor } from '../ui/layout-editor';
 import { ManageMenu } from '../ui/manage';
 import { TutorialPanel } from '../ui/tutorial';
+import { AccidentOverlay, accidentView } from '../ui/accident';
+import { showCriticReport } from '../ui/critic';
 import { bankruptScreen, helpScreen, resultScreen, settingsScreen, slotScreen, titleScreen } from '../ui/screens';
 import { Controls } from './controls';
 import { nextHint } from './guide';
@@ -89,6 +91,12 @@ export class App {
   private unsub: (() => void)[] = [];
   private onLeaveGame: (() => void) | null = null;
   private tutorial: TutorialPanel | null = null;
+  /** 爆発事故の画面の演出 */
+  private accidentUi: AccidentOverlay | null = null;
+  private lastAccidentId: string | null = null;
+  private accidentMode = false;
+  /** 表示済みの覆面調査員の記事 */
+  private shownCritics = new Set<string>();
   /** チュートリアルで目立たせている対象（変わったときだけ画面を更新する） */
   private tutorialHi = '';
   /** 注視対象は 1 秒に 10 回求める（毎フレームは要らない） */
@@ -286,6 +294,8 @@ export class App {
       onFinished: () => this.finishTutorial(),
     });
     this.stripObserver?.observe(this.tutorial.el);
+    this.accidentUi = new AccidentOverlay(this.uiLayer, host);
+    this.lastAccidentId = host.state.events?.accident?.id ?? null;
     this.manage = new ManageMenu(this.uiLayer, host, {
       onClose: () => this.closeManage(),
       onLayoutEditor: () => this.openEditor(),
@@ -342,6 +352,10 @@ export class App {
     this.tutorial?.dispose();
     this.tutorial = null;
     this.tutorialHi = '';
+    this.accidentUi?.dispose();
+    this.accidentUi = null;
+    this.lastAccidentId = null;
+    this.setAccidentMode(false);
     this.controls?.dispose();
     this.world?.dispose();
     this.host?.dispose();
@@ -376,7 +390,11 @@ export class App {
     if (!host || !world || !c) return;
     const s = host.state;
     const blocking = !!this.screenEl || this.manage?.isOpen || !!this.editor;
-    c.enabled = !blocking;
+    // 爆発事故: 気を失っている間は動けない。営業の画面は隠し、焼け跡を歩けるようにする
+    const acc = s.events?.accident ?? null;
+    const av = accidentView(acc);
+    c.enabled = !blocking && av.awake;
+    this.setAccidentMode(acc?.stage === 'destroyed');
     // シングルプレイではメニュー中は時間を止める
     const pauseLocal = host.mode === 'local' && (blocking || s.phase === 'closed');
     if (!pauseLocal) host.tick(dt);
@@ -413,6 +431,8 @@ export class App {
         if (Math.hypot(me.pos.x - this.localPos.x, me.pos.z - this.localPos.z) > 1.5) this.localPos = { ...me.pos };
       }
     }
+    world.setAccident(acc);
+    world.setCameraFx(av.shake, av.eyeY, av.roll);
     world.setCamera(this.localPos.x, this.localPos.z, c.yaw, c.pitch, moving, dt);
     // 注視対象（自分の位置はローカル予測を使う）。1 秒に 10 回で足りる（HUD の更新も同じ間隔）
     this.focusAcc += dt;
@@ -436,9 +456,39 @@ export class App {
       world.adaptResolution(interval);
     }
     this.hud?.update(dt);
+    this.accidentUi?.update(s, av);
+    this.checkAccidentReset(s);
     this.updateTutorial(s, dt);
     this.updateHint(s, dt);
     this.checkPhaseScreens(false);
+  }
+
+  /** 事故の間は営業の画面（伝票・操作ボタン・案内など）を隠す */
+  private setAccidentMode(on: boolean): void {
+    if (on === this.accidentMode) return;
+    this.accidentMode = on;
+    this.root.classList.toggle('accident-mode', on);
+    // 爆発の瞬間に押していた指は離したことにする（歩き続けないように）
+    if (on) this.controls?.releaseAll();
+  }
+
+  /** リセットで事故が消えたら、仕込みの開始時点の位置へ視点を戻す */
+  private checkAccidentReset(s: GameState): void {
+    const id = s.events?.accident?.id ?? null;
+    if (id === this.lastAccidentId) return;
+    const was = this.lastAccidentId;
+    this.lastAccidentId = id;
+    if (!was || id) return;
+    const me = s.players.find((p) => p.id === this.host?.playerId);
+    if (me) {
+      this.localPos = { ...me.pos };
+      if (this.controls) {
+        this.controls.yaw = me.yaw;
+        this.controls.pitch = -0.12;
+      }
+    }
+    this.controls?.releaseAll();
+    toast(this.uiLayer, `${s.day}日目の仕込みの開始時点に戻りました`, 'good', 3500);
   }
 
   private hintAcc = 0;
@@ -512,6 +562,7 @@ export class App {
       const me = s.players.find((p) => p.id === host.playerId);
       if (me) this.localPos = { ...me.pos };
       void this.offerStaffTutorial();
+      this.showCritics(s);
     }
   }
 
@@ -645,6 +696,15 @@ export class App {
   }
 
   /** 3日目（以降）の準備時間に、従業員のチュートリアルを受けるかを聞く（ひとりプレイで一度だけ） */
+  /** 朝に公開された覆面調査員（グルメ評論家）の記事を見せる */
+  private showCritics(s: GameState): void {
+    for (const r of s.events?.critics ?? []) {
+      if (!r.published || r.publishDay !== s.day || this.shownCritics.has(r.id)) continue;
+      this.shownCritics.add(r.id);
+      showCriticReport(this.uiLayer, r);
+    }
+  }
+
   private async offerStaffTutorial(): Promise<void> {
     const host = this.host;
     if (!host || host.mode !== 'local') return;
