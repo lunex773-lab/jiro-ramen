@@ -52,7 +52,7 @@ function accidentBlocked(s: GameState): string | null {
 }
 
 /**
- * 今、爆発事故を強制的に起こせるか（設定の「爆発事故を起こす」とテスト用の強制発生）。起こせなければ理由。読むだけ
+ * 今、爆発事故を強制的に起こせるか（開発用の欄 ?debug=1 からの強制発生）。起こせなければ理由。読むだけ
  */
 export function explosionUnavailable(s: GameState): string | null {
   const blocked = accidentBlocked(s);

@@ -4,7 +4,6 @@ import {
   BALANCE,
   createGame,
   equipmentCenter,
-  explosionUnavailable,
   resolveTarget,
   seatCounterPoint,
   targetPoints,
@@ -27,7 +26,7 @@ import { TutorialPanel } from '../ui/tutorial';
 import { AccidentOverlay, accidentView } from '../ui/accident';
 import { RequestPrompt } from '../ui/request';
 import { showCriticReport } from '../ui/critic';
-import { bankruptScreen, helpScreen, resultScreen, settingsScreen, slotScreen, titleScreen, type ExplosionOption } from '../ui/screens';
+import { bankruptScreen, helpScreen, resultScreen, settingsScreen, slotScreen, titleScreen } from '../ui/screens';
 import { Controls } from './controls';
 import { nextHint } from './guide';
 import { LocalHost, type GameHost } from './host';
@@ -239,7 +238,7 @@ export class App {
     this.show(helpScreen(back, this.controls?.isTouch ?? matchMedia('(pointer: coarse)').matches));
   }
 
-  /** 設定の画面。店の中から開いたときは「爆発事故を起こす」も出す */
+  /** 設定の画面。店の中から開いたときは「タイトル画面に戻る」も出す（爆発事故はランダムで起きるもの。起こすボタンは開発用の欄 ?debug=1 だけ） */
   showSettings(back: () => void, inGame = false): void {
     const remote = this.host?.mode === 'remote';
     this.show(
@@ -257,41 +256,9 @@ export class App {
           }
         },
         back,
-        inGame ? this.explosionOption() : undefined,
         inGame ? { onTitle: () => void this.returnToTitle(), nameNote: remote ? '共同経営の間に変えた名前は、次に参加したときから使われます。' : undefined } : undefined,
       ),
     );
-  }
-
-  /** 設定の「爆発事故を起こす」。ひとりプレイのみ（共同経営のサーバーは受け付けない） */
-  private explosionOption(): ExplosionOption | undefined {
-    const host = this.host;
-    if (!host) return undefined;
-    const s = host.state;
-    const reason =
-      host.mode !== 'local'
-        ? '共同経営では使えません（ひとりプレイのみ）'
-        : s.events?.forced.includes('explosion')
-          ? '予約済みです。開店すると3秒後に起きます'
-          : explosionUnavailable(s);
-    return { reason, onTrigger: () => void this.triggerExplosion() };
-  }
-
-  /** 確かめてから爆発事故を起こし、設定と経営メニューを閉じる */
-  private async triggerExplosion(): Promise<void> {
-    const host = this.host;
-    if (!host) return;
-    const open = host.state.phase === 'open';
-    const body = open ? 'すぐに爆発事故が起きます。よろしいですか？' : '開店すると3秒後に爆発事故が起きます。よろしいですか？';
-    if (!(await confirmDialog(this.uiLayer, '💥 爆発事故を起こす', body, '起こす', true))) return;
-    const r = await host.act({ type: 'debugEvent', kind: 'explosion' });
-    if (!r.ok) {
-      toast(this.uiLayer, r.reason ?? '起こせません', 'warn', 2500);
-      return;
-    }
-    this.show(null);
-    this.closeManage();
-    if (!open) toast(this.uiLayer, '開店すると3秒後に爆発事故が起きます', 'warn', 3500);
   }
 
   showLobby(): void {
