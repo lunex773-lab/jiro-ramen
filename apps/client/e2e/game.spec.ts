@@ -738,6 +738,158 @@ test('イベントの吹き出しは縁が違い、複数出ても重ならず�
   await shot(page, '46-event-bubbles');
 });
 
+test.describe('設定画面とタイトルへの帰還（第2版 21）', () => {
+  type SetApp = { __jiro: { host: { state: { players: { name: string }[]; t: number; version: number } } | null; settings: Record<string, unknown>; controls: { settings: { lookSensitivity: number; invertY: boolean } } | null; world: { quality: string } | null } };
+  const app = (page: Page) => page.evaluate(() => {
+    const a = (window as unknown as SetApp).__jiro;
+    return { name: a.host?.state.players[0]?.name, t: a.host?.state.t ?? -1, sens: a.controls?.settings.lookSensitivity, invert: a.controls?.settings.invertY, quality: a.world?.quality, settings: a.settings };
+  });
+  const closeSettings = (page: Page) => press(page.locator('.screen.settings').getByRole('button', { name: '閉じる', exact: true }));
+
+  test('店の中で設定を開き、各項目を変えるとゲームに反映され、保存されて再読み込み後も保たれる。何度開閉しても固まらず、閉じたら操作に戻れる', async ({ page }) => {
+    await startNewGame(page);
+    await openSettings(page);
+    const scr = page.locator('.screen.settings');
+    await expect(scr).toBeVisible();
+    // 各項目を操作する
+    await scr.locator('label', { hasText: '効果音' }).locator('input').uncheck();
+    await scr.locator('label', { hasText: 'コールの読み上げ' }).locator('input').uncheck();
+    await scr.locator('label', { hasText: '音量' }).locator('input').fill('0.3');
+    await scr.locator('label', { hasText: '視点の感度' }).locator('input').fill('1.8');
+    await scr.locator('label', { hasText: '上下の視点操作を反転' }).locator('input').check();
+    await scr.locator('label', { hasText: '画質' }).locator('select').selectOption('low');
+    await scr.locator('label', { hasText: '動作の重さを表示' }).locator('input').check();
+    await scr.locator('[data-setting="playerName"]').fill('ラーメン太郎');
+    await scr.locator('[data-setting="playerName"]').blur();
+    // ゲームに反映される（名前は店の中でもすぐ変わる）
+    const a1 = await app(page);
+    expect(a1.settings).toMatchObject({ sound: false, voice: false, volume: 0.3, lookSensitivity: 1.8, invertY: true, quality: 'low', showFps: true, playerName: 'ラーメン太郎' });
+    expect(a1.sens).toBe(1.8);
+    expect(a1.invert).toBe(true);
+    expect(a1.quality).toBe('low');
+    expect(a1.name).toBe('ラーメン太郎');
+    await shot(page, '47-settings');
+    // 何度開閉しても固まらない
+    await closeSettings(page);
+    for (let i = 0; i < 4; i++) {
+      await press(page.getByRole('button', { name: '設定（音・操作・画質）' }));
+      await expect(scr).toBeVisible();
+      await closeSettings(page);
+      await expect(scr).toHaveCount(0);
+    }
+    // メニューを閉じると操作に戻れる（fps の表示が出て、時間が進み、設備の操作ボタンが出る）
+    await press(page.locator('.manage .close'));
+    await expect(page.locator('.fps')).toBeVisible();
+    const t0 = (await app(page)).t;
+    await expect.poll(async () => (await app(page)).t).toBeGreaterThan(t0);
+    await face(page, 'bowl_rack');
+    await expect(page.locator('.act').first()).toBeVisible();
+    // 再読み込み後も保たれる
+    await page.reload();
+    await page.getByText('ひとりで経営する').waitFor();
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('jiro.settings') ?? '{}'));
+    expect(saved).toMatchObject({ sound: false, voice: false, volume: 0.3, lookSensitivity: 1.8, invertY: true, quality: 'low', showFps: true, playerName: 'ラーメン太郎' });
+    await press(page.getByRole('button', { name: '設定', exact: true }));
+    await expect(page.locator('.screen.settings label', { hasText: '画質' }).locator('select')).toHaveValue('low');
+    await expect(page.locator('.screen.settings [data-setting="playerName"]')).toHaveValue('ラーメン太郎');
+  });
+
+  test('設定からタイトル画面に戻れる。キャンセルでゲームに戻り、確定すると保存するか聞いてからタイトルへ。保存したデータは壊れていない', async ({ page }) => {
+    await startNewGame(page);
+    await page.getByRole('button', { name: /開店する/ }).click();
+    await page.evaluate(() => {
+      const a = (window as unknown as { __jiro: { host: { tick(dt: number): void } } }).__jiro;
+      for (let i = 0; i < 50; i++) a.host.tick(0.1);
+    });
+    await openSettings(page);
+    const scr = page.locator('.screen.settings');
+    // キャンセル → 設定とゲームに戻る
+    await press(scr.locator('[data-title]'));
+    await expect(page.locator('.modal')).toContainText('タイトル画面に戻りますか？');
+    await press(page.locator('.modal').getByRole('button', { name: 'キャンセル' }));
+    await expect(page.locator('.modal')).toHaveCount(0);
+    await expect(scr).toBeVisible();
+    expect(await page.evaluate(() => !!(window as unknown as SetApp).__jiro.host)).toBe(true);
+    // 確定 → 保存していない進み具合があるので保存するか聞かれる → 保存して戻る
+    await press(scr.locator('[data-title]'));
+    await press(page.locator('.modal').getByRole('button', { name: 'タイトル画面に戻る' }));
+    await expect(page.locator('.modal')).toContainText('保存しますか？');
+    await shot(page, '48-title-save');
+    await press(page.locator('.modal').getByRole('button', { name: '保存して戻る' }));
+    await expect(page.getByText('ひとりで経営する')).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as SetApp).__jiro.host)).toBeNull();
+    // 保存したデータは読み込める（壊れていない）。営業中の状態のまま続きから
+    await page.getByText('ひとりで経営する').click();
+    await page.getByRole('button', { name: '続きから' }).first().click();
+    await expect(page.locator('.hud-top')).toContainText('1日目');
+    const phase = await page.evaluate(() => (window as unknown as { __jiro: { host: { state: { phase: string; openT: number } } } }).__jiro.host.state);
+    expect(phase.phase).toBe('open');
+    expect(phase.openT).toBeGreaterThan(1);
+  });
+
+  test('共同経営のゲスト: ホストが終了するとお知らせが出てタイトルへ戻る。ゲストは設定からタイトルへ戻れる（退出を伝える）', async ({ page }) => {
+    const SERVER = 'https://mock.jiro.test';
+    await startNewGame(page);
+    const state = await page.evaluate(() => {
+      const s = JSON.parse(JSON.stringify((window as unknown as { __jiro: { host: { state: unknown } } }).__jiro.host.state)) as { players: Record<string, unknown>[]; prepSnapshot?: unknown };
+      s.players.push({ ...s.players[0], id: 'g1', name: 'ゲスト', isHost: false, color: '#2e86de' });
+      delete s.prepSnapshot;
+      return s;
+    });
+    const left: string[] = [];
+    await page.route(`${SERVER}/api/v1/**`, async (route) => {
+      const url = new URL(route.request().url());
+      const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+      if (url.pathname === '/api/v1/session/leave') left.push(url.pathname);
+      const bodies: Record<string, unknown> = {
+        '/api/v1/game-version': { gameVersion: '0.9.0', minClientVersion: '0.1.0', protocol: 1 },
+        '/api/v1/auth/anonymous': { playerId: 'u2', token: 'tok2' },
+        '/api/v1/session/join': { roomId: 'room1', joinToken: 'jt2', isHost: false },
+        '/api/v1/session/leave': { ok: true, ended: false },
+      };
+      return route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(bodies[url.pathname] ?? {}) });
+    });
+    let sock: { send(m: string): void } | null = null;
+    await page.routeWebSocket(/mock\.jiro\.test\/api\/v1\/room\//, (ws) => {
+      sock = ws;
+      ws.onMessage((raw) => {
+        const msg = JSON.parse(String(raw)) as { t: string };
+        if (msg.t === 'hello') {
+          ws.send(JSON.stringify({ t: 'welcome', playerId: 'g1', roomId: 'room1', isHost: false, protocol: 1, needInit: false }));
+          ws.send(JSON.stringify({ t: 'full', seq: 0, state }));
+        }
+      });
+    });
+    const join = async () => {
+      await page.goto('/');
+      await closeHomeTip(page);
+      await page.getByRole('button', { name: /オンライン共同経営/ }).click();
+      await page.locator('.lobby input.input').first().fill(SERVER);
+      await page.locator('.lobby input.code').fill('XYZ789');
+      await page.getByRole('button', { name: '参加する' }).click();
+      await expect(page.locator('.hud-cta')).toContainText('ホストが開店するのを待っています');
+    };
+    // 1. ゲストが設定からタイトルへ戻る（退出をサーバーへ伝える。保存の確認は出ない）
+    await join();
+    await openSettings(page);
+    await expect(page.locator('.screen.settings')).toContainText('次に参加したときから');
+    await press(page.locator('.screen.settings [data-title]'));
+    await expect(page.locator('.modal')).toContainText('ホストとほかのゲストはそのまま続けられます');
+    await press(page.locator('.modal').getByRole('button', { name: 'タイトル画面に戻る' }));
+    await expect(page.getByText('ひとりで経営する')).toBeVisible();
+    await expect.poll(() => left.length).toBeGreaterThan(0);
+    // 2. ホストがルームを終了したら、お知らせを出してタイトルへ戻す
+    await join();
+    await expect.poll(() => sock !== null).toBe(true);
+    sock!.send(JSON.stringify({ t: 'error', code: 'room_closed', message: 'ホストがルームを終了しました' }));
+    await expect(page.locator('.modal')).toContainText('共同経営が終了しました');
+    await shot(page, '49-room-closed');
+    await press(page.locator('.modal').getByRole('button', { name: 'タイトル画面へ' }));
+    await expect(page.getByText('ひとりで経営する')).toBeVisible();
+  });
+});
+
 test('SNSでバズると、上部に「バズ中」と残り時間が出る', async ({ page }) => {
   await startNewGame(page, '/?debug=1');
   await page.getByRole('button', { name: /開店する/ }).click();

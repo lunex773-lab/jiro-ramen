@@ -440,6 +440,29 @@ describe('切断と再接続', () => {
   });
 });
 
+describe('退出（第2版 21-1）', () => {
+  it('ゲストがタイトルに戻って退出しても、ルームは終わらず、ホストとほかのゲストは続けられる', async () => {
+    const { room, hc, hostActor } = await startRoom();
+    const g1 = await addGuest(room, 'ゲスト1');
+    const g2 = await addGuest(room, 'ゲスト2');
+    const res = await fetchLeave(g1.p, room.roomId);
+    expect(res.ended).toBe(false);
+    // 退出したゲストの接続は閉じる
+    await g1.c.waitClose();
+    // ほかの人には「つながっていない」と届き、ルームは続く
+    const peers = await hc.next('peers', (m) => m.list.some((p) => p.id === g1.id && !p.connected));
+    expect(peers.list.find((p) => p.id === hostActor)?.connected).toBe(true);
+    expect(await inRoom(room.roomId, (r) => r.meta!.ended)).toBe(false);
+    // ホストは開店でき、もう一人のゲストも動ける
+    const open1 = await hc.act(rid('open'), { type: 'openShop' });
+    expect(open1.r.ok).toBe(true);
+    const me = g2.c.mirror!.players.find((p) => p.id === g2.id)!;
+    const mv = await g2.c.act(rid('mv'), { type: 'move', x: me.pos.x, z: me.pos.z + 0.1, yaw: 0 });
+    expect(mv.r.ok).toBe(true);
+    expect(await inRoom(room.roomId, (r) => r.state!.paused)).toBe(false);
+  });
+});
+
 /** ルームの保存の控え（D1 の room_snapshots）の種類 */
 async function snapshotKinds(roomId: string): Promise<string[]> {
   const r = await env.DB.prepare('SELECT kind FROM room_snapshots WHERE room_id = ? ORDER BY kind, revision').bind(roomId).all<{ kind: string }>();

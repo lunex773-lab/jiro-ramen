@@ -19,7 +19,7 @@ import {
 } from '@jiro/core';
 import { Sfx } from '../audio/sfx';
 import { World } from '../render/world';
-import { alertDialog, confirmDialog, h, replace, toast } from '../ui/dom';
+import { alertDialog, choiceDialog, confirmDialog, h, replace, toast } from '../ui/dom';
 import { Hud } from '../ui/hud';
 import { LayoutEditor } from '../ui/layout-editor';
 import { ManageMenu } from '../ui/manage';
@@ -241,16 +241,24 @@ export class App {
 
   /** 設定の画面。店の中から開いたときは「爆発事故を起こす」も出す */
   showSettings(back: () => void, inGame = false): void {
+    const remote = this.host?.mode === 'remote';
     this.show(
       settingsScreen(
         this.settings,
         (st) => {
+          const renamed = st.playerName !== this.settings.playerName;
           this.settings = st;
           saveSettings(st);
           this.applySettings();
+          // プレイヤー名: ひとりプレイでは店の中の名前もすぐ変える（以前は次に始めたときまで変わらなかった）
+          if (renamed && inGame && this.host?.mode === 'local') {
+            const me = this.host.state.players.find((p) => p.id === this.host!.playerId);
+            if (me) me.name = st.playerName;
+          }
         },
         back,
         inGame ? this.explosionOption() : undefined,
+        inGame ? { onTitle: () => void this.returnToTitle(), nameNote: remote ? '共同経営の間に変えた名前は、次に参加したときから使われます。' : undefined } : undefined,
       ),
     );
   }
@@ -308,6 +316,8 @@ export class App {
       if (this.settings.playerName) me.name = this.settings.playerName;
     }
     this.startGame(new LocalHost(state, me?.id ?? 'p1'));
+    // 読み込んだ（または今保存した）状態から始める
+    this.lastSavedVersion = state.version;
   }
 
   startGame(host: GameHost, onLeave?: () => void): void {
@@ -364,6 +374,20 @@ export class App {
       c.yaw = me.yaw;
     }
     this.unsub.push(host.onEvents((ev) => this.sfx.onEvents(ev, host.playerId)));
+    // 共同経営: ルームが終了した（ホストがタイトルに戻った など）ら、ゲストに知らせてタイトルへ戻す
+    if (host.mode === 'remote') {
+      let told = false;
+      this.unsub.push(
+        host.onStatus(() => {
+          const rh = host as GameHost & { roomClosed?: boolean; lastError?: string };
+          if (!rh.roomClosed || told || this.host !== host) return;
+          told = true;
+          void alertDialog(this.uiLayer, '共同経営が終了しました', `${rh.lastError || 'ホストがルームを終了しました'}。タイトル画面に戻ります。`, 'タイトル画面へ').then(() => {
+            if (this.host === host) this.showTitle();
+          });
+        }),
+      );
+    }
     // 上部の表示（日・時刻・資金）は最初の 3D の描画を待たずに出す（重い端末では最初の描画に時間がかかる）
     this.hud.update(1);
     this.lastPhase = host.state.phase;
@@ -433,9 +457,80 @@ export class App {
   }
 
   private async backToTitle(): Promise<void> {
-    if (this.host?.mode === 'local') this.saveNow(false);
-    else if (!(await confirmDialog(this.uiLayer, '退出', '共同経営から退出します。', '退出する'))) return;
-    this.showTitle();
+    await this.returnToTitle();
+  }
+
+  /** 最後に保存した時点の状態の版（ひとりプレイ。保存していない進み具合があるかを見る） */
+  private lastSavedVersion = -1;
+  private leaving = false;
+
+  /**
+   * タイトル画面に戻る（第2版 21-1）。確認 →（保存していない進み具合があれば）保存するかを聞く → 終了処理 → タイトル。
+   * 保存は既存の仕組み（saveNow: ひとりプレイはスロットへ、共同経営のホストはサーバーの状態をスロットへ）を使う。
+   * 共同経営: ホストが戻るとサーバーがルームを終了してゲストに知らせる。ゲストが戻ってもホストとほかのゲストは続けられる
+   */
+  async returnToTitle(): Promise<void> {
+    if (this.leaving) return;
+    const host = this.host;
+    if (!host) {
+      this.showTitle();
+      return;
+    }
+    const remote = host.mode === 'remote';
+    const body = remote
+      ? host.isHost
+        ? '共同経営を終了してタイトル画面に戻ります。ゲストにはお知らせが届き、ルームは終了します。'
+        : '共同経営から退出してタイトル画面に戻ります。ホストとほかのゲストはそのまま続けられます。'
+      : this.slot === 0
+        ? 'タイトル画面に戻ります。タイトルから始めたチュートリアルは保存されません。'
+        : 'タイトル画面に戻ります。';
+    if (!(await confirmDialog(this.uiLayer, 'タイトル画面に戻りますか？', body, 'タイトル画面に戻る', false, 'キャンセル'))) return;
+    if (this.host !== host) return;
+    let save = false;
+    const unsaved = this.slot !== 0 && (remote ? host.isHost : host.state.version !== this.lastSavedVersion);
+    if (unsaved) {
+      const c = await choiceDialog(
+        this.uiLayer,
+        '保存しますか？',
+        remote ? `この共同経営の今の状態を、スロット${this.slot}に保存できます。` : '前回の保存のあとに進めた分（今日の売上・支出・在庫・従業員・お客さんの様子など）が保存されていません。',
+        [
+          { label: 'キャンセル', value: 'cancel', kind: 'ghost' },
+          { label: '保存せずに戻る', value: 'discard' },
+          { label: '保存して戻る', value: 'save', kind: 'primary' },
+        ],
+      );
+      if (c === 'cancel' || this.host !== host) return;
+      save = c === 'save';
+    }
+    this.leaving = true;
+    try {
+      if (save && !(await this.saveNowAsync())) {
+        if (!(await confirmDialog(this.uiLayer, '保存できませんでした', '保存せずにタイトル画面に戻りますか？', '保存せずに戻る', true, 'キャンセル'))) return;
+      }
+      if (this.host === host) this.showTitle();
+    } finally {
+      this.leaving = false;
+    }
+  }
+
+  /** 保存して結果を返す（タイトルへ戻る前など、保存を待つとき） */
+  private async saveNowAsync(): Promise<boolean> {
+    const host = this.host;
+    if (!host || this.slot === 0) return false;
+    if (host.mode === 'remote') {
+      const rh = host as GameHost & { requestSave?: () => Promise<GameState | null> };
+      const st = (await rh.requestSave?.()) ?? null;
+      if (!st) return false;
+      const r = saveToSlot(this.store, this.slot, st);
+      if (r.ok) toast(this.uiLayer, `スロット${this.slot}に保存しました（ホスト）`, 'good');
+      return r.ok;
+    }
+    const r = saveToSlot(this.store, this.slot, host.state);
+    if (r.ok) {
+      this.lastSavedVersion = host.state.version;
+      toast(this.uiLayer, `スロット${this.slot}に保存しました`, 'good');
+    }
+    return r.ok;
   }
 
   // ───────────────── 毎フレーム ─────────────────
@@ -835,12 +930,14 @@ export class App {
       return;
     }
     const r = saveToSlot(this.store, this.slot, host.state);
+    if (r.ok) this.lastSavedVersion = host.state.version;
     if (notify || !r.ok) toast(this.uiLayer, r.ok ? `スロット${this.slot}に保存しました` : r.error, r.ok ? 'good' : 'danger');
   }
 
   private autosave(reason: 'dayEnd' | 'hidden'): void {
     if (!this.host || this.host.mode !== 'local' || this.slot === 0) return;
     const r = saveToSlot(this.store, this.slot, this.host.state);
+    if (r.ok) this.lastSavedVersion = this.host.state.version;
     if (!r.ok && reason === 'dayEnd') toast(this.uiLayer, `自動保存に失敗: ${r.error}`, 'danger', 5000);
   }
 }

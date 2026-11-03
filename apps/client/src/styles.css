@@ -951,3 +951,6 @@ input, select { font: inherit; }
 .app.accident-mode .hud { visibility: hidden; }
 .app.accident-mode .hud .chip.menu { visibility: visible; }
 .app.accident-mode .hint, .app.accident-mode .tutorial-panel { display: none !important; }
+/* 設定: プレイヤー名の欄が広すぎて見出しが折り返していた（第2版 21-2） */
+.screen.settings .kv > span { white-space: nowrap; }
+.screen.settings .kv input.input { width: min(260px, 55%); }

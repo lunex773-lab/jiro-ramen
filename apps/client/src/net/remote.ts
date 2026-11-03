@@ -51,6 +51,8 @@ export class RemoteHost implements GameHost {
   state: GameState;
   layoutHolder: string | null = null;
   lastError = '';
+  /** ルームが終了した（ホストが退出した・長時間使われなかった）。ゲストはタイトルへ戻る */
+  roomClosed = false;
   private ws: WebSocket | null = null;
   private seq = -1;
   private pending = new Map<string, Pending>();
@@ -233,6 +235,7 @@ export class RemoteHost implements GameHost {
         // 再接続しても回復しない理由のときは再試行しない
         if (['room_full', 'unauthorized', 'room_closed', 'client_outdated', 'protocol_mismatch'].includes(msg.code)) {
           this.closedByUser = true;
+          if (msg.code === 'room_closed') this.roomClosed = true;
           this.readyResolve?.(false);
           this.readyResolve = null;
         }

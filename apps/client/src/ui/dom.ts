@@ -84,6 +84,40 @@ export function confirmDialog(root: HTMLElement, title: string, body: string, ok
   });
 }
 
+/** 選択肢が3つ以上のダイアログ。選んだ value を返す（背景を押しても閉じない） */
+export function choiceDialog(root: HTMLElement, title: string, body: string, choices: { label: string; value: string; kind?: 'primary' | 'danger' | 'ghost' }[]): Promise<string> {
+  return new Promise((resolve) => {
+    const overlay = h(
+      'div',
+      { class: 'modal-overlay' },
+      h(
+        'div',
+        { class: 'modal' },
+        h('h3', null, title),
+        h('p', { class: 'modal-body' }, body),
+        h(
+          'div',
+          { class: 'row end wrap' },
+          choices.map((c) =>
+            h(
+              'button',
+              {
+                class: `btn ${c.kind ?? ''}`,
+                onclick: () => {
+                  overlay.remove();
+                  resolve(c.value);
+                },
+              },
+              c.label,
+            ),
+          ),
+        ),
+      ),
+    );
+    root.appendChild(overlay);
+  });
+}
+
 /** 確認ダイアログ（本文に表やリストを入れられる） */
 export function confirmNode(root: HTMLElement, title: string, body: HTMLElement, okLabel = 'OK', danger = false, cancelLabel = 'キャンセル'): Promise<boolean> {
   return new Promise((resolve) => {
