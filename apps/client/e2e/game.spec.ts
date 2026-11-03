@@ -560,9 +560,12 @@ test('店の前に「禁煙」の張り紙があり、店の外でタバコを�
   // お客さんが来るまで進め、その人を店の前で吸っている客にする（食事のあとの喫煙の場面を作る）
   const id = await page.evaluate(() => {
     const app = (window as unknown as W).__jiro;
-    for (let i = 0; i < 600 && app.host.state.customers.length === 0; i++) app.host.tick(0.1);
+    // 来店は確率で決まるので、評判を上げて来やすくし、来るまで（最大300秒）進める
+    app.host.state.reputation = 5;
+    for (let i = 0; i < 3000 && app.host.state.customers.length === 0; i++) app.host.tick(0.1);
     const s = app.host.state;
     const c = s.customers[0];
+    if (!c) throw new Error('お客さんが来なかった');
     s.queue = s.queue.filter((x: string) => x !== c.id);
     c.state = 'smoking';
     c.path = [];
