@@ -412,7 +412,8 @@ export class World {
         continue;
       }
       this.placeChar(c, e.pos.x, e.pos.z, e.ai.state === 'working' || e.work ? e.yaw : null, dt, smooth);
-      c.model.setHeld(heldKind(e.hand));
+      // サボっている従業員はスマホを見ている
+      c.model.setHeld(e.ai.state === 'slacking' && e.hand.kind === 'none' ? 'phone' : heldKind(e.hand));
       const pose: CharacterPose = e.work ? 'work' : c.moving > 0 ? (e.hand.kind !== 'none' ? 'carry' : 'walk') : 'stand';
       c.model.update(pose, t, dt);
     }
@@ -691,6 +692,15 @@ export class World {
         const ratio = cu.patience / 150;
         if (seat) show(`seat:${cu.id}`, `${seat.index + 1}`, head, `seatno ${ratio < 0.25 ? 'late' : ratio < 0.5 ? 'warn' : ''}`);
       }
+    }
+    // 従業員の吹き出し（クレームで言い返したときなど）
+    for (const e of s.employees) {
+      if (!e.say || e.say.until <= s.t || this.burned) continue;
+      const c = this.chars.get(e.id);
+      if (!c) continue;
+      const head = c.model.group.position.clone();
+      head.y += 1.95;
+      show(`say:${e.id}`, e.say.text, head, 'bubble angry staff');
     }
     for (const [id, b] of this.bubbles) {
       if (seen.has(id)) continue;

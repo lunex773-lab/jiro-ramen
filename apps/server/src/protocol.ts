@@ -13,7 +13,7 @@ export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire',
-  'fire', 'setRole', 'setPriority', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
+  'fire', 'setRole', 'setPriority', 'setShift', 'promote', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
   'accidentReset',
 ] as const satisfies readonly ActionType[];
 
@@ -51,6 +51,13 @@ const isSmall = (v: unknown): boolean => isFiniteNum(v) && Math.abs(v) <= 2;
 const isVec = (v: unknown): boolean => isObj(v) && isSmall(v.x) && isSmall(v.z) && Object.keys(v).length === 2;
 const optVec = (v: unknown): boolean => v === undefined || isVec(v);
 const isRole = (v: unknown): boolean => v === 'cook' || v === 'server' || v === 'cleaner';
+/** シフト（null はその曜日を休みにする）。中身の範囲は core の shiftProblem でも確かめる */
+function isShift(v: unknown): boolean {
+  if (v === null) return true;
+  if (!isObj(v) || Object.keys(v).length !== 5) return false;
+  const m = isIntIn(0, 240);
+  return m(v.start) && m(v.end) && m(v.breakAt) && isIntIn(0, 60)(v.breakLen) && isBool(v.fromPrep);
+}
 function isArgs(v: unknown): boolean {
   if (v === undefined || v === null) return true;
   if (!isObj(v)) return false;
@@ -83,6 +90,8 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   fire: { employeeId: isId },
   setRole: { employeeId: isId, role: isRole },
   setPriority: { employeeId: isId, kind: isId, value: isNum },
+  setShift: { employeeId: isId, weekday: isIntIn(0, 6), shift: isShift },
+  promote: { employeeId: isId },
   expand: {},
   setPrice: { menuId: isId, price: isNum },
   pauseMenu: { menuId: isId, paused: isBool },

@@ -6,13 +6,14 @@
 //   - 謝る・説明する・断るは受け入れてもらえないことがある（接客の上手さと客の性格で決まる）。だめだった対応は、同じクレームの間は選べない
 
 import { BALANCE } from '../data/balance';
-import { COMPLAINT_CAUSE_LABEL, COMPLAINT_REPLY, COMPLAINT_RESPONSE_LABEL } from '../data/events';
+import { COMPLAINT_CAUSE_LABEL, COMPLAINT_REPLY, COMPLAINT_RESPONSE_LABEL, STAFF_TALKBACK } from '../data/events';
 import type { ComplaintCause, ComplaintResponse, Customer, CustomerComplaint, Employee, GameState, Player, Seat } from '../types';
 import { clamp01, newId, pick } from '../util';
 import { addReview, leaveAngry, leaveWithoutEating, sayFor } from './customers';
 import { cash, recordPL } from './economy';
 import { ensureEvents, evRand } from './events';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
+import { argueChance, noteComplaintHandled, noteTemper } from './staff';
 
 const C = BALANCE.events.complaint;
 
@@ -93,8 +94,31 @@ export function respondToComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Act
   if (!c) return;
   const cp = (c.complaint ??= complaintOf(c));
   const o = s.orders.find((x) => x.id === c.orderId);
-  const svc = serviceSkill(a);
+  let svc = serviceSkill(a);
   ensureEvents(s);
+  // 辛抱（接客の上手さとは別）: 辛抱が低い従業員は、言い返して口論になる・対応を放棄する・態度が悪くなることがある
+  let rude = false;
+  if (a.kind === 'employee' && evRand(s) < argueChance(a, cp.cause === 'unreasonable', c.traits.complaintPropensity)) {
+    const T = BALANCE.staff.temper;
+    const roll = evRand(s);
+    if (roll < T.abandonShare) {
+      abandon(s, ctx, c, seat, a);
+      return;
+    }
+    if (roll < T.abandonShare + T.rudeShare) {
+      // 態度が悪い: 対応はするが、受け入れてもらいにくく、満足度も下がる
+      rude = true;
+      svc *= T.rudeServiceMult;
+      c.sat.service *= 0.7;
+      a.say = { text: pick(ensureEvents(s), STAFF_TALKBACK.rude), until: s.t + T.sayFor };
+      noteTemper(s, a, 'rude');
+    } else {
+      argue(s, ctx, c, seat, a, resp);
+      return;
+    }
+  }
+  // 冷静に対応できたときだけ「冷静にこなした」と記録する
+  const by = rude ? undefined : a;
   if (resp === 'remake') {
     if (!cp.served || !o) return;
     // 提供済みの丼を下げて、同じ注文を作り直す
@@ -122,7 +146,7 @@ export function respondToComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Act
     c.stateTime = 0;
     c.patience = Math.max(c.patience, 60);
     c.sat.service = Math.max(c.sat.service * 0.8, svc * 0.85);
-    resolved(s, ctx, c, seat, 'じゃあ作り直しでお願いします', resp);
+    resolved(s, ctx, c, seat, 'じゃあ作り直しでお願いします', resp, by);
     emit(ctx, { type: 'complaintRemake', targetId: seat.id });
     return;
   }
@@ -133,7 +157,7 @@ export function respondToComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Act
       o.status = 'refunded';
       c.sat.service = Math.max(c.sat.service * 0.7, svc * 0.7);
       c.sat.value = Math.max(c.sat.value, 0.8);
-      resolved(s, ctx, c, seat, 'まあ、返金してくれるなら…', resp);
+      resolved(s, ctx, c, seat, 'まあ、返金してくれるなら…', resp, by);
       leaveWithoutEating(s, c, ctx);
       emit(ctx, { type: 'complaintRefund', targetId: seat.id, value: o.price });
     } else {
@@ -141,7 +165,7 @@ export function respondToComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Act
       if (o && o.status === 'waiting') o.status = 'cancelled';
       c.sat.service = Math.max(c.sat.service * 0.7, svc * 0.6);
       c.sat.value = Math.max(c.sat.value, 0.6);
-      resolved(s, ctx, c, seat, COMPLAINT_REPLY.ticketBack, resp);
+      resolved(s, ctx, c, seat, COMPLAINT_REPLY.ticketBack, resp, by);
       s.today.lost += 1;
       leaveWithoutEating(s, c, ctx);
       emit(ctx, { type: 'complaintRefund', targetId: seat.id, value: 0 });
@@ -165,7 +189,7 @@ export function respondToComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Act
     if (resp === 'refuse') {
       // 理不尽な要求を断られて帰る。店の対応は正当なので口コミは書かない（相手にされない）。返金もしない
       c.traits.reviewPropensity = 0;
-      resolved(s, ctx, c, seat, pick(ensureEvents(s), COMPLAINT_REPLY.rejected.refuse), resp);
+      resolved(s, ctx, c, seat, pick(ensureEvents(s), COMPLAINT_REPLY.rejected.refuse), resp, by);
       leaveAngry(s, c, ctx);
       emit(ctx, { type: 'complaintRefused', targetId: seat.id, value: 1 });
       return;
@@ -192,11 +216,44 @@ export function respondToComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Act
     c.patience += resp === 'apologize' ? C.patienceBack : C.patienceBack * 0.75;
   }
   c.stateTime = 0;
-  resolved(s, ctx, c, seat, pick(ensureEvents(s), COMPLAINT_REPLY.accepted[resp]), resp);
+  resolved(s, ctx, c, seat, pick(ensureEvents(s), COMPLAINT_REPLY.accepted[resp]), resp, by);
+}
+
+/**
+ * 従業員が言い返して口論になった。客は怒って帰り、悪い口コミを書く（口コミは1件だけ。評判への影響はこの口コミだけで、重ねて下げない）。
+ * 返金・作り直しはしない
+ */
+function argue(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, e: Employee, resp: ComplaintResponse): void {
+  const ev = ensureEvents(s);
+  e.say = { text: pick(ev, STAFF_TALKBACK.staff), until: s.t + BALANCE.staff.temper.sayFor };
+  noteComplaintHandled(s, e, false);
+  c.sat.service = 0;
+  c.traits.reviewPropensity = 0;
+  addReview(s, c, 1, [STAFF_TALKBACK.review], !!c.regularId);
+  c.complaint = null;
+  c.complaintReason = null;
+  sayFor(c, s, pick(ev, STAFF_TALKBACK.customer), 4);
+  clearNotice(s, `complaint:${seat.id}`);
+  notify(s, ctx, `argue:${e.id}`, 'danger', `${e.profile.name}さんがお客さんと口論になりました（${seat.index + 1}番席）`);
+  emit(ctx, { type: 'staffArgue', actorId: e.id, targetId: seat.id, text: resp });
+  leaveAngry(s, c, ctx);
+}
+
+/** 従業員が対応を途中で放棄した。クレームは続き（放っておくと怒って帰る）、しばらく仕事に戻らない */
+function abandon(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, e: Employee): void {
+  const T = BALANCE.staff.temper;
+  e.say = { text: pick(ensureEvents(s), STAFF_TALKBACK.abandon), until: s.t + T.sayFor };
+  e.ai.cooldown = T.abandonCooldown;
+  e.ai.note = 'クレーム対応を放棄した';
+  c.sat.service *= 0.7;
+  noteTemper(s, e, 'abandon');
+  notify(s, ctx, `abandon:${e.id}`, 'warn', `${e.profile.name}さんがクレーム対応を途中で放棄しました（${seat.index + 1}番席）`);
+  emit(ctx, { type: 'staffAbandon', actorId: e.id, targetId: seat.id });
 }
 
 /** クレームが終わった（受け入れた・帰った） */
-function resolved(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, reply: string, resp: ComplaintResponse): void {
+function resolved(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, reply: string, resp: ComplaintResponse, by?: Actor): void {
+  if (by?.kind === 'employee') noteComplaintHandled(s, by, true);
   c.complaint = null;
   c.complaintReason = null;
   sayFor(c, s, reply, 3);

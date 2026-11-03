@@ -24,6 +24,8 @@ import {
   isBowlComplete,
   INGREDIENTS,
   COMPLAINT_CAUSE_LABEL,
+  WEEKDAY_LABEL,
+  weekdayOf,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 import { targetName, type FocusResult } from '../game/targeting';
@@ -242,7 +244,8 @@ export class Hud {
     if (key === this.lastTopKey) return;
     this.lastTopKey = key;
     const t = (this.topParts ??= this.buildTop());
-    t.day.textContent = `${s.day}日目`;
+    // 曜日（シフトは曜日ごと）。0日目は練習の日なので出さない
+    t.day.textContent = s.day > 0 ? `${s.day}日目（${WEEKDAY_LABEL[weekdayOf(s.day)]}）` : `${s.day}日目`;
     t.clock.className = `clock ${s.phase}`;
     t.clock.textContent = clockText(s);
     t.money.className = `money ${s.money < 0 ? 'neg' : ''}`;

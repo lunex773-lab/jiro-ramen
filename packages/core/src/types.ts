@@ -139,19 +139,106 @@ export interface EmployeeSkills {
   service: number;
   hygiene: number;
   movement: number;
-  reliability: number;
+  /**
+   * 第2版より前の「信頼性」（画面に出していた能力）。今は隠しパラメータ「勤怠」（EmployeeProfile.diligence）に置き換えた。
+   * 古いセーブの値は勤怠の初期値として読むだけで、新しく作る人には付けない
+   */
+  reliability?: number;
+}
+
+/** 雇用形態。part = アルバイト（時給・シフト）、full = 社員（日給・毎日・仕込みから閉店まで） */
+export type Employment = 'part' | 'full';
+
+/**
+ * 1日分のシフト（営業 11:00〜15:00 の中で、開店からの分。30分刻み）。
+ * fromPrep のときは仕込みの時間から出勤する（start は 0）
+ */
+export interface ShiftDay {
+  start: number;
+  end: number;
+  /** 休憩の開始（開店からの分）と長さ（分）。休憩なしは breakLen = 0 */
+  breakAt: number;
+  breakLen: number;
+  fromPrep: boolean;
+}
+
+/** 勤務の出来事（実際に起きたことだけを記録する） */
+export type StaffLogKind = 'late' | 'absent' | 'slack' | 'private' | 'postpone' | 'argue' | 'rude' | 'abandon' | 'calm' | 'promoted' | 'calledIn';
+
+export interface StaffLogEntry {
+  day: number;
+  kind: StaffLogKind;
+  text: string;
+}
+
+/** 勤務の記録（昇格の参考情報・履歴） */
+export interface StaffRecord {
+  daysWorked: number;
+  /** 予定のあった日（休みの日は数えない） */
+  daysScheduled: number;
+  late: number;
+  absent: number;
+  slack: number;
+  postpone: number;
+  argue: number;
+  /** 客への態度が悪かった（クレーム対応） */
+  rude: number;
+  /** クレーム対応を途中で放棄した */
+  abandon: number;
+  calm: number;
+  /** 対応したクレームの数（受け入れてもらえたもの） */
+  complaintsSettled: number;
+  /** 提供した丼の数 */
+  served: number;
+  log: StaffLogEntry[];
+}
+
+export type AttendanceStatus = 'off' | 'scheduled' | 'late' | 'working' | 'break' | 'left' | 'absent' | 'closed';
+
+/** その日の出勤の状況（毎朝の出勤確認で作る） */
+export interface Attendance {
+  day: number;
+  /** その日の予定（休みは null）。予定を変えたら作り直す */
+  shift: ShiftDay | null;
+  /** 朝に引いた結果（その日のうちは引き直さない） */
+  absent: boolean;
+  lateMin: number;
+  status: AttendanceStatus;
+  /** 店に着く時刻（開店からの sim 秒。仕込みから来る人は -1） */
+  arriveAt: number;
+  leaveAt: number;
+  breakFrom: number;
+  breakTo: number;
+  arrived: boolean;
+  /** その日の勤務（営業中の sim 秒）。給与の計算に使う */
+  workedSec: number;
+  /** 仕込みの時間に出勤した */
+  prepWorked: boolean;
+  /** 休みの日に呼び出した */
+  calledIn: boolean;
+  /** 遅刻・サボりの記録を一度だけ残すための印 */
+  lateNoted: boolean;
 }
 
 export interface EmployeeProfile {
   name: string;
   role: EmployeeRole;
   skills: EmployeeSkills;
+  /** 日給（社員）。古いセーブの従業員は社員として扱うのでこの値をそのまま使う */
   wage: number;
   hireFee: number;
   experience: number;
+  /** 雇用形態（古いセーブにはない → 社員） */
+  employment?: Employment;
+  /** 時給（アルバイト） */
+  hourly?: number;
+  /** 隠しパラメータ「勤怠」0..1（画面には数値を出さない）。古いセーブは skills.reliability */
+  diligence?: number;
+  /** 隠しパラメータ「辛抱」0..1（画面には数値を出さない） */
+  patience?: number;
 }
 
-export type EmployeeAiState = 'idle' | 'moving' | 'working' | 'waiting' | 'absent' | 'stuck';
+export type EmployeeAiState = 'idle' | 'moving' | 'working' | 'waiting' | 'absent' | 'stuck' | 'slacking' | 'break' | 'off';
 
 export interface Employee extends ActorBase {
   kind: 'employee';
@@ -171,8 +258,28 @@ export interface Employee extends ActorBase {
     cooldown: number;
     note: string;
   };
+  /** 今、店で働いている（休憩中・退勤後・出勤前は false） */
   presentToday: boolean;
   tasksDone: number;
+  /** 曜日（月=0 … 日=6）ごとのシフト。アルバイトだけが使う（ない曜日は休み）。古いセーブにはない → 毎日・全時間 */
+  shifts?: (ShiftDay | null)[];
+  /** その日の出勤の状況 */
+  att?: Attendance;
+  /** 勤務の記録 */
+  record?: StaffRecord;
+  /** サボり・私的な休憩の状況（営業中の sim 秒） */
+  conduct?: {
+    nextCheck: number;
+    until: number;
+    kind: 'slack' | 'private' | null;
+    lastAt: number;
+    today: number;
+    day: number;
+  };
+  /** その日に伸びた能力の量（1日の上限のため） */
+  growth?: { day: number; gained: Partial<Record<keyof EmployeeSkills, number>> };
+  /** 従業員の吹き出し（クレームで言い返したときなど） */
+  say?: { text: string; until: number } | null;
 }
 
 export interface TaskStep {

@@ -28,6 +28,7 @@ import type {
 import { clamp01, dist, newId } from '../util';
 import { emptyContents, evaluateBowl, isBowlComplete, menuOf, noodleQualityFor, soupPerBowl, toppingAmount } from './cooking';
 import { cash, recordPL } from './economy';
+import { growFromWork, noteServed } from './staff';
 import {
   defOf,
   distanceFactor,
@@ -837,6 +838,7 @@ const VERBS: VerbDef[] = [
       if (q.mistakes.length > 0) s.today.mistakes += 1;
       addTrash(s, BALANCE.cleaning.trashPerBowl);
       onServed(s, ctx, o, q);
+      if (a.kind === 'employee') noteServed(a);
       emit(ctx, { type: 'served', actorId: a.id, targetId: seat.id, value: q.quality, text: q.mistakes.join('、') });
     },
   },
@@ -1231,7 +1233,10 @@ export function interact(s: GameState, actorId: Id, targetId: Id, verb: string, 
   const p = scaledPlan(s, a, t, v, args);
   if (p.reason !== null) return { ok: false, reason: p.reason };
   if (p.unitTime <= 0) {
-    for (let i = 0; i < p.units; i++) v.applyUnit(s, a, t, args, ctx, i);
+    for (let i = 0; i < p.units; i++) {
+      v.applyUnit(s, a, t, args, ctx, i);
+      if (a.kind === 'employee') growFromWork(s, a, v.skill, v.id);
+    }
     v.finish?.(s, a, t, args, ctx);
     return { ok: true };
   }
@@ -1263,6 +1268,8 @@ export function progressWork(s: GameState, a: Actor, dt: number, ctx: SimCtx): b
       break;
     }
     v.applyUnit(s, a, t, w.args, ctx, w.done);
+    // 仕事の経験で能力が伸びる（従業員だけ。1日の上限あり）
+    if (a.kind === 'employee') growFromWork(s, a, v.skill, v.id);
     w.done += 1;
   }
   if (w.done >= w.units) {

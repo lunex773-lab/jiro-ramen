@@ -116,8 +116,112 @@ export const BALANCE = {
     hireFeeMax: 25_000,
     candidatesPerDay: 4,
     baseWalkSpeed: 1.9,
-    /** 経験値による能力上昇（1日あたり） */
+    /** 勤務した日ごとに増える経験（作業の速さに最大 +20% で効く） */
     experiencePerDay: 0.01,
+
+    // ── 第2版: 雇用形態・シフト・勤怠・辛抱・成長（docs/SALES_IMPROVEMENT_IMPLEMENTATION_PLAN.md「第2版 Phase 2」）。値はすべて初期のバランス案 ──
+
+    /** 雇用形態 */
+    employment: {
+      /** 採用はアルバイトから */
+      hireAs: 'part' as const,
+      /** 仕込みから出勤したときに給与を払う時間（仕込みは時刻がないので固定の時間で数える） */
+      prepPaidHours: 0.5,
+      /** 時給 = 候補者の日給の目安 ÷（営業4時間＋仕込み）。毎日・仕込みから閉店までのシフトなら今までの日給と同じ額になる */
+      fullShiftHours: 4.5,
+      /** 社員にすると日給はアルバイトの1日分（仕込みから閉店まで）× この倍率 */
+      fullTimeRaise: 1.15,
+      /** 社員は勤怠が安定する（勤怠の値に足す） */
+      fullTimeDiligenceBonus: 0.15,
+    },
+    /** 社員への昇格の目安（画面に参考として出すだけ。昇格するかはプレイヤーが決める） */
+    promotionGuide: {
+      minDaysWorked: 5,
+      /** 遅刻と欠勤の合計（直近 recentDays 日） */
+      maxLateAbsent: 1,
+      maxSlack: 1,
+      maxArgue: 0,
+      /** 担当の仕事の能力 */
+      minRoleSkill: 0.55,
+      recentDays: 10,
+    },
+    /** 隠しパラメータの初期分布（平均 ± 幅の一様分布） */
+    diligence: { mean: 0.68, spread: 0.3 },
+    patience: { mean: 0.6, spread: 0.35 },
+    /**
+     * 遅刻・当日欠勤（毎朝の出勤確認で1回だけ引く）。確率 = 最大値 ×（1 − 勤怠）^exponent。
+     * 勤怠 0.7 で 欠勤 約2.5%・遅刻 約5%、勤怠 0.3 で 欠勤 約9%・遅刻 約18%
+     */
+    attendance: {
+      absentMax: 0.16,
+      lateMax: 0.32,
+      exponent: 1.5,
+      /** 遅刻の分数（ゲーム内の分） */
+      lateMinFrom: 10,
+      lateMinTo: 50,
+      /** 欠勤した次の日から、この日数は欠勤しない（続けて休まない） */
+      absentGapDays: 3,
+      /** 遅刻した次の日から、この日数は遅刻しない */
+      lateGapDays: 1,
+      /** 休みの人を当日に呼び出したとき、着くまでの時間（ゲーム内の分） */
+      callInMin: 30,
+    },
+    /**
+     * サボり・私的な休憩（営業中、checkEvery 秒ごとに引く。毎フレームは引かない）。確率 = 最大値 ×（1 − 勤怠）^exponent
+     * 勤怠 0.7 で1回 約1.4%（1日に約15%）、勤怠 0.3 で1回 約7%
+     */
+    conduct: {
+      checkEvery: 45,
+      chanceMax: 0.15,
+      exponent: 2,
+      /** サボっている時間（営業の sim 秒） */
+      durationFrom: 14,
+      durationTo: 30,
+      /** そのうち、持ち場を離れる私的な休憩の割合 */
+      privateShare: 0.4,
+      /** 次に起きるまでの最短の間隔（sim 秒） */
+      gap: 150,
+      maxPerDay: 2,
+      /** 仕事を後回しにする（仕事を選ぶときに引く） */
+      postponeMax: 0.12,
+      postponeDelayFrom: 3,
+      postponeDelayTo: 7,
+      /** 後回しの記録は1日にこの回数まで（同じ日に何度も記録しない） */
+      postponeLogPerDay: 1,
+    },
+    /**
+     * クレーム対応での口論（従業員が謝る・説明する・断るときに引く）。確率 = 最大値 ×（1 − 辛抱）^exponent × 原因の倍率 × 客の言いやすさ。
+     * 接客の能力（受け入れてもらえる確率）とは別に効く
+     */
+    temper: {
+      argueMax: 0.5,
+      exponent: 1.6,
+      unreasonableMult: 1.6,
+      /** 客の「クレームの言いやすさ」（0..1）による倍率 0.6〜1.4 */
+      propensityFrom: 0.6,
+      propensityTo: 1.4,
+      /** 言い返したときの吹き出しの秒数 */
+      sayFor: 4,
+      /** 辛抱が切れたときの出方: 対応を放棄する・態度が悪くなる・残りは言い返して口論になる */
+      abandonShare: 0.15,
+      rudeShare: 0.25,
+      /** 対応を放棄したあと、仕事に戻るまでの秒数 */
+      abandonCooldown: 10,
+      /** 態度が悪いと、受け入れてもらえる確率・満足度に効く接客の上手さがこの倍率になる */
+      rudeServiceMult: 0.4,
+    },
+    /**
+     * 仕事の経験による成長。1回の作業で 能力 += perUnit ×（1 − 能力）。1日に伸びる量は dailyCap まで（急に伸びない）
+     * 調理 → 調理、清掃・洗い物 → 衛生、接客 → 接客、配膳・運ぶ → 速さ・移動
+     */
+    growth: {
+      perUnit: { cooking: 0.004, hygiene: 0.004, service: 0.005, speed: 0.002, movement: 0.002 },
+      dailyCap: 0.012,
+    },
+    /** 履歴に残す出来事の数 */
+    logMax: 40,
+    /** シフトの刻み（分） */
+    shiftStepMin: 30,
   },
 
   /**

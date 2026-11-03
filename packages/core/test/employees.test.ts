@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, refreshCandidates, step, buildTasks } from '../src';
+import { applyAction, buildTasks, dailyWageOf, expectedPay, refreshCandidates, step } from '../src';
 import { addBot, newGame, runDay } from './helpers';
 
 describe('従業員', () => {
@@ -52,10 +52,13 @@ describe('従業員', () => {
     applyAction(s, 'p1', { type: 'openShop' }, ctx);
     expect(applyAction(s, 'p1', { type: 'fire', employeeId: emp.id }, ctx).ok).toBe(false);
     runDay(s, ctx);
-    expect(s.history[0]!.wages).toBe(emp.profile.wage);
+    // アルバイトとして採用され、初めのシフト（毎日・仕込みから閉店まで）どおりに働いた分の給与（時給 × 時間）
+    expect(emp.profile.employment).toBe('part');
+    expect(s.history[0]!.wages).toBe(expectedPay(emp, s.day));
+    expect(Math.abs(expectedPay(emp, s.day) - cand.profile.wage)).toBeLessThanOrEqual(50);
     const m2 = s.money;
     expect(applyAction(s, 'p1', { type: 'fire', employeeId: emp.id }, ctx).ok).toBe(true);
-    expect(s.money).toBe(m2 - emp.profile.wage);
+    expect(s.money).toBe(m2 - dailyWageOf(emp));
     expect(s.employees).toHaveLength(0);
   });
 

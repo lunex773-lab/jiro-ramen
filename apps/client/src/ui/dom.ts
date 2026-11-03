@@ -84,6 +84,33 @@ export function confirmDialog(root: HTMLElement, title: string, body: string, ok
   });
 }
 
+/** 確認ダイアログ（本文に表やリストを入れられる） */
+export function confirmNode(root: HTMLElement, title: string, body: HTMLElement, okLabel = 'OK', danger = false, cancelLabel = 'キャンセル'): Promise<boolean> {
+  return new Promise((resolve) => {
+    const close = (v: boolean) => {
+      overlay.remove();
+      resolve(v);
+    };
+    const overlay = h(
+      'div',
+      { class: 'modal-overlay' },
+      h(
+        'div',
+        { class: 'modal' },
+        h('h3', null, title),
+        h('div', { class: 'modal-body' }, body),
+        h(
+          'div',
+          { class: 'row end' },
+          h('button', { class: 'btn ghost', onclick: () => close(false) }, cancelLabel),
+          h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => close(true) }, okLabel),
+        ),
+      ),
+    );
+    root.appendChild(overlay);
+  });
+}
+
 /** 知らせるだけのダイアログ（ボタン1つ） */
 export function alertDialog(root: HTMLElement, title: string, body: string, okLabel = 'OK'): Promise<void> {
   return new Promise((resolve) => {

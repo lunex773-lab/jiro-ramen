@@ -82,6 +82,15 @@ describe('メッセージ検証', () => {
     expect(parseAction({ type: 'setPriority', employeeId: 'e1', kind: 'constructor', value: 1 })).toBeNull();
     expect(parseAction({ type: 'interact', targetId: 'e1', verb: 'use', args: { a: { nested: 1 } } })).toBeNull();
     expect(parseAction({ type: 'hack' })).toBeNull();
+    // シフト（第2版 5-1）: 形と範囲を確かめる。null はその曜日を休みにする
+    const sh = { start: 30, end: 180, breakAt: 90, breakLen: 30, fromPrep: false };
+    expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 2, shift: sh })).toEqual({ type: 'setShift', employeeId: 'e1', weekday: 2, shift: sh });
+    expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 2, shift: null })).toEqual({ type: 'setShift', employeeId: 'e1', weekday: 2, shift: null });
+    expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 7, shift: sh })).toBeNull();
+    expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, end: 999 } })).toBeNull();
+    expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, extra: 1 } })).toBeNull();
+    expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1 })).toBeNull();
+    expect(parseAction({ type: 'promote', employeeId: 'e1' })).toEqual({ type: 'promote', employeeId: 'e1' });
     expect(parseAction({ type: 'giveUp' })).toEqual({ type: 'giveUp' });
     // チュートリアルはひとりプレイのみ
     expect(parseAction({ type: 'tutorial', op: 'next' })).toBeNull();

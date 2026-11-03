@@ -28,12 +28,31 @@ import {
   stockOf,
   TASK_KINDS,
   UNLOCK_NAMES,
+  ATTENDANCE_LABEL,
+  EMPLOYMENT_LABEL,
+  WEEKDAY_LABEL,
+  attendanceText,
+  dailyWageOf,
+  employmentOf,
+  expectedPay,
+  hourlyOf,
+  isPartTime,
+  promotionInfo,
+  shiftPaidHours,
+  shiftProblem,
+  shiftsOf,
+  shiftTimeText,
+  staffLog,
+  staffSummary,
+  weekdayOf,
   type Action,
+  type Employee,
   type EmployeeRole,
   type GameState,
+  type ShiftDay,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
-import { confirmDialog, h, replace, stars, toast, yenStr } from './dom';
+import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
 
 export type ManageTab = 'dash' | 'stock' | 'menu' | 'equip' | 'staff' | 'layout' | 'career' | 'system';
@@ -74,7 +93,10 @@ export class ManageMenu {
   private tabsEl: HTMLElement;
   private tab: ManageTab = 'dash';
   private timer: number | null = null;
-  private expandedEmp: string | null = null;
+  /** 開いている従業員の欄（シフト・記録・担当設定） */
+  private empPanel: { id: string; kind: 'shift' | 'record' | 'prio' } | null = null;
+  /** シフトの編集中の内容（保存するまで状態は変えない。自動更新で消えないようここに持つ） */
+  private shiftEdit: { id: string; weekday: number; draft?: ShiftDay | null } | null = null;
   private tabButtons = new Map<ManageTab, HTMLElement>();
   /** 押している最中は自動更新しない（押した要素が差し替わるとタップが外れる） */
   private pressing = false;
@@ -180,7 +202,7 @@ export class ManageMenu {
     // ゲストは押せる入力がないので、どのタブもホストの更新（状態の版が変わったとき）を受けて描き直す
     if (live && !ro && this.tab !== 'dash' && this.tab !== 'staff') return;
     if (live && ro && s.version === this.renderedVersion) return;
-    if (live && this.el.contains(document.activeElement) && document.activeElement?.tagName === 'INPUT') return;
+    if (live && this.el.contains(document.activeElement) && (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'SELECT')) return;
     if (live && this.pressing) return;
     this.renderedVersion = s.version;
     const scroll = this.body.scrollTop;
@@ -498,7 +520,13 @@ export class ManageMenu {
   // ───────────────── 従業員 ─────────────────
   private staff(s: GameState): HTMLElement {
     const hiring = s.career.unlocked.includes('hiring');
-    const skillBar = (label: string, v: number) => h('div', { class: 'skill' }, h('span', null, label), h('div', { class: 'meter small' }, h('div', { class: 'meter-fill', style: { width: `${Math.round(v * 100)}%` } })));
+    const wd = weekdayOf(s.day);
+    const counts = new Map<string, number>();
+    for (const e of s.employees) {
+      const st = e.att && e.att.day === s.day ? ATTENDANCE_LABEL[e.att.status] : e.presentToday ? '勤務中' : '休み';
+      counts.set(st, (counts.get(st) ?? 0) + 1);
+    }
+    const today = [...counts].map(([k, n]) => `${k} ${n}`).join('・');
     return h(
       'div',
       null,
@@ -506,72 +534,16 @@ export class ManageMenu {
         'section',
         { class: 'card wide' },
         h('h4', null, `従業員（${s.employees.length}人）`),
+        s.employees.length > 0 ? h('p', { class: 'note staff-today' }, `今日（${s.day}日目・${WEEKDAY_LABEL[wd]}曜）の出勤: ${today}`) : null,
         s.employees.length === 0 ? h('p', { class: 'note' }, hiring ? 'まだ誰も雇っていません。' : '「初めての黒字」を達成すると採用できるようになります。') : null,
-        s.employees.map((e) => {
-          const open = this.expandedEmp === e.id;
-          return h(
-            'div',
-            { class: 'emp' },
-            h(
-              'div',
-              { class: 'trow' },
-              h('div', { class: 'tname' }, e.profile.name, h('small', null, `${ROLE_LABEL[e.profile.role]}・日給${yenStr(e.profile.wage)}・${e.presentToday ? (e.ai.note || '待機中') : '欠勤'}・こなした仕事${e.tasksDone}`)),
-              h(
-                'select',
-                {
-                  class: 'select',
-                  onchange: (ev: Event) => this.act({ type: 'setRole', employeeId: e.id, role: (ev.target as HTMLSelectElement).value as EmployeeRole }),
-                },
-                (Object.keys(ROLE_LABEL) as EmployeeRole[]).map((r) => h('option', { value: r, selected: r === e.profile.role }, ROLE_LABEL[r])),
-              ),
-              h('button', { class: 'mini ghost', 'data-guest-ok': '1', onclick: () => { this.expandedEmp = open ? null : e.id; this.render(); } }, open ? '閉じる' : '担当設定'),
-              this.host.isHost
-                ? h(
-                    'button',
-                    {
-                      class: 'mini danger',
-                      onclick: async () => {
-                        if (await confirmDialog(this.root, '解雇', `${e.profile.name}さんを解雇します。解雇手当 ${yenStr(e.profile.wage * BALANCE.severanceDays)} がかかります。`, '解雇する', true)) await this.act({ type: 'fire', employeeId: e.id });
-                      },
-                    },
-                    '解雇',
-                  )
-                : null,
-            ),
-            h('div', { class: 'skills' }, skillBar('速さ', e.profile.skills.speed), skillBar('調理', e.profile.skills.cooking), skillBar('接客', e.profile.skills.service), skillBar('衛生', e.profile.skills.hygiene), skillBar('移動', e.profile.skills.movement), skillBar('安定', e.profile.skills.reliability)),
-            open
-              ? h(
-                  'div',
-                  { class: 'prio' },
-                  h('p', { class: 'note' }, '仕事ごとの優先度を調整できます。「担当外」にするとその仕事をしません。担当以外の仕事も＋にすると任せられます。'),
-                  Object.entries(TASK_KINDS).map(([kind, info]) => {
-                    const v = e.priorities[kind] ?? 0;
-                    const roleDefault = info.roles.includes(e.profile.role);
-                    return h(
-                      'div',
-                      { class: 'kv' },
-                      h('span', null, `${info.label}${roleDefault ? '' : '（担当外）'}`),
-                      h(
-                        'div',
-                        { class: 'tbtns' },
-                        h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setPriority', employeeId: e.id, kind, value: -100 }) }, 'しない'),
-                        h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setPriority', employeeId: e.id, kind, value: v - 10 }) }, '−'),
-                        h('b', null, v <= -100 ? 'しない' : v > 0 ? `+${v}` : String(v)),
-                        h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setPriority', employeeId: e.id, kind, value: Math.max(-90, v) + 10 }) }, '＋'),
-                      ),
-                    );
-                  }),
-                )
-              : null,
-          );
-        }),
+        s.employees.map((e) => this.staffCard(s, e)),
       ),
       hiring
         ? h(
             'section',
             { class: 'card wide' },
             h('h4', null, '採用候補（毎朝入れ替わります）'),
-            h('p', { class: 'note' }, '採用は閉店後か仕込み時間にできます。採用費はその場で、給与は勤務した営業日ごとに閉店後の精算で支払います。'),
+            h('p', { class: 'note' }, '採用はアルバイトから（時給・シフト制）。採用は閉店後か仕込み時間にできます。採用費はその場で、給与は働いた時間ぶんを閉店後の精算で支払います。真面目さや我慢強さは数字では分かりません。働きぶりは勤務の記録で確かめましょう。'),
             s.candidates.length === 0 ? h('p', { class: 'note' }, '今日の候補者はいません。') : null,
             s.candidates.map((c) =>
               h(
@@ -580,15 +552,252 @@ export class ManageMenu {
                 h(
                   'div',
                   { class: 'trow' },
-                  h('div', { class: 'tname' }, c.profile.name, h('small', null, `${ROLE_LABEL[c.profile.role]}・日給${yenStr(c.profile.wage)}・採用費${yenStr(c.profile.hireFee)}`)),
-                  h('button', { class: 'mini', onclick: () => this.act({ type: 'hire', candidateId: c.id }, `${c.profile.name}さんを採用しました`) }, '採用する'),
+                  h('div', { class: 'tname' }, c.profile.name, h('small', null, `${ROLE_LABEL[c.profile.role]}・アルバイト・時給${yenStr(c.profile.hourly ?? Math.round(c.profile.wage / BALANCE.staff.employment.fullShiftHours / 10) * 10)}・採用費${yenStr(c.profile.hireFee)}`)),
+                  h('button', { class: 'mini', onclick: () => this.act({ type: 'hire', candidateId: c.id }) }, '採用する'),
                 ),
-                h('div', { class: 'skills' }, skillBar('速さ', c.profile.skills.speed), skillBar('調理', c.profile.skills.cooking), skillBar('接客', c.profile.skills.service), skillBar('衛生', c.profile.skills.hygiene), skillBar('移動', c.profile.skills.movement), skillBar('安定', c.profile.skills.reliability)),
+                this.skillBars(c.profile.skills),
               ),
             ),
           )
         : null,
     );
+  }
+
+  /** 見える能力（勤怠・辛抱は隠しパラメータなので出さない） */
+  private skillBars(sk: Employee['profile']['skills']): HTMLElement {
+    const bar = (label: string, v: number) => h('div', { class: 'skill' }, h('span', null, label), h('div', { class: 'meter small' }, h('div', { class: 'meter-fill', style: { width: `${Math.round(v * 100)}%` } })));
+    return h('div', { class: 'skills' }, bar('速さ', sk.speed), bar('調理', sk.cooking), bar('接客', sk.service), bar('衛生', sk.hygiene), bar('移動', sk.movement));
+  }
+
+  private togglePanel(e: Employee, kind: 'shift' | 'record' | 'prio'): void {
+    const open = this.empPanel?.id === e.id && this.empPanel.kind === kind;
+    this.empPanel = open ? null : { id: e.id, kind };
+    if (kind === 'shift' && !open) this.shiftEdit = null;
+    this.render();
+  }
+
+  private staffCard(s: GameState, e: Employee): HTMLElement {
+    const part = isPartTime(e);
+    const panel = this.empPanel?.id === e.id ? this.empPanel.kind : null;
+    const pay = part ? `時給${yenStr(hourlyOf(e))}` : `日給${yenStr(e.profile.wage)}`;
+    const summary = staffSummary(e, s);
+    const host = this.host.isHost;
+    return h(
+      'div',
+      { class: 'emp', 'data-emp': e.id },
+      h(
+        'div',
+        { class: 'trow' },
+        h(
+          'div',
+          { class: 'tname' },
+          h('span', null, e.profile.name, h('span', { class: `emp-type ${employmentOf(e)}` }, EMPLOYMENT_LABEL[employmentOf(e)])),
+          h('small', null, `${ROLE_LABEL[e.profile.role]}・${pay}・${attendanceText(e, s)}${e.presentToday && e.ai.note ? `（${e.ai.note}）` : ''}`),
+        ),
+        h(
+          'select',
+          {
+            class: 'select',
+            onchange: (ev: Event) => this.act({ type: 'setRole', employeeId: e.id, role: (ev.target as HTMLSelectElement).value as EmployeeRole }),
+          },
+          (Object.keys(ROLE_LABEL) as EmployeeRole[]).map((r) => h('option', { value: r, selected: r === e.profile.role }, ROLE_LABEL[r])),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'tbtns emp-btns' },
+        h('button', { class: `mini ghost ${panel === 'shift' ? 'on' : ''}`, 'data-guest-ok': '1', onclick: () => this.togglePanel(e, 'shift') }, '📅 シフト'),
+        h('button', { class: `mini ghost ${panel === 'record' ? 'on' : ''}`, 'data-guest-ok': '1', onclick: () => this.togglePanel(e, 'record') }, '📝 記録'),
+        h('button', { class: `mini ghost ${panel === 'prio' ? 'on' : ''}`, 'data-guest-ok': '1', onclick: () => this.togglePanel(e, 'prio') }, '担当設定'),
+        part && host ? h('button', { class: 'mini', onclick: () => void this.promoteDialog(e) }, '社員にする') : null,
+        host
+          ? h(
+              'button',
+              {
+                class: 'mini danger',
+                onclick: async () => {
+                  if (await confirmDialog(this.root, '解雇', `${e.profile.name}さんを解雇します。解雇手当 ${yenStr(dailyWageOf(e) * BALANCE.severanceDays)} がかかります。`, '解雇する', true)) await this.act({ type: 'fire', employeeId: e.id });
+                },
+              },
+              '解雇',
+            )
+          : null,
+      ),
+      this.skillBars(e.profile.skills),
+      h('p', { class: 'note emp-summary' }, summary.slice(0, 3).join('・')),
+      panel === 'shift' ? this.shiftPanel(s, e) : null,
+      panel === 'record' ? this.recordPanel(s, e) : null,
+      panel === 'prio' ? this.prioPanel(e) : null,
+    );
+  }
+
+  private prioPanel(e: Employee): HTMLElement {
+    return h(
+      'div',
+      { class: 'prio' },
+      h('p', { class: 'note' }, '仕事ごとの優先度を調整できます。「担当外」にするとその仕事をしません。担当以外の仕事も＋にすると任せられます。'),
+      Object.entries(TASK_KINDS).map(([kind, info]) => {
+        const v = e.priorities[kind] ?? 0;
+        const roleDefault = info.roles.includes(e.profile.role);
+        return h(
+          'div',
+          { class: 'kv' },
+          h('span', null, `${info.label}${roleDefault ? '' : '（担当外）'}`),
+          h(
+            'div',
+            { class: 'tbtns' },
+            h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setPriority', employeeId: e.id, kind, value: -100 }) }, 'しない'),
+            h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setPriority', employeeId: e.id, kind, value: v - 10 }) }, '−'),
+            h('b', null, v <= -100 ? 'しない' : v > 0 ? `+${v}` : String(v)),
+            h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setPriority', employeeId: e.id, kind, value: Math.max(-90, v) + 10 }) }, '＋'),
+          ),
+        );
+      }),
+    );
+  }
+
+  /** 勤務の記録（実際に起きた出来事だけ。勤怠・辛抱の数値は出さない） */
+  private recordPanel(s: GameState, e: Employee): HTMLElement {
+    const log = staffLog(e, 10);
+    return h(
+      'div',
+      { class: 'prio emp-record' },
+      h('ul', { class: 'emp-lines' }, staffSummary(e, s).map((l) => h('li', null, l))),
+      log.length > 0 ? h('h5', null, '最近の出来事') : null,
+      log.length > 0 ? h('ul', { class: 'emp-log' }, log.map((l) => h('li', { class: `log-${l.kind}` }, h('b', null, `${l.day}日目`), ` ${l.text}`))) : null,
+    );
+  }
+
+  private shiftText(sh: ShiftDay | null): string {
+    if (!sh) return '休み';
+    const b = sh.breakLen > 0 ? `（休憩${sh.breakLen}分）` : '';
+    return `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start)}〜${shiftTimeText(sh.end)}${b}`;
+  }
+
+  /** シフトの欄: 曜日ごとの予定と、選んだ曜日の編集（アルバイト）。社員は毎日・全時間 */
+  private shiftPanel(s: GameState, e: Employee): HTMLElement {
+    const today = weekdayOf(s.day);
+    if (!isPartTime(e)) {
+      return h('div', { class: 'prio' }, h('p', { class: 'note' }, `社員は毎日、仕込みから閉店まで勤務します（日給 ${yenStr(e.profile.wage)}）。遅刻・欠勤が少なく安定します。`));
+    }
+    const list = shiftsOf(e);
+    const ed = this.shiftEdit?.id === e.id ? this.shiftEdit : null;
+    const sel = ed ? ed.weekday : today;
+    const draft: ShiftDay | null = ed && ed.draft !== undefined ? ed.draft : list[sel] ?? null;
+    const step = BALANCE.staff.shiftStepMin;
+    const close = (BALANCE.closeHour - BALANCE.openHour) * 60;
+    const setDraft = (d: ShiftDay | null) => {
+      this.shiftEdit = { id: e.id, weekday: sel, draft: d };
+      this.render();
+    };
+    const pick = (wdi: number) => {
+      this.shiftEdit = { id: e.id, weekday: wdi };
+      this.render();
+    };
+    const week = h(
+      'div',
+      { class: 'week', 'data-guest-ok': '1' },
+      WEEKDAY_LABEL.map((w, i) =>
+        h(
+          'button',
+          { class: `wday ${i === sel ? 'on' : ''} ${i === today ? 'today' : ''} ${list[i] ? '' : 'off'}`, onclick: () => pick(i) },
+          h('b', null, `${w}${i === today ? '（今日）' : ''}`),
+          h('small', null, this.shiftText(list[i] ?? null)),
+        ),
+      ),
+    );
+    const opt = (v: number, label: string, cur: number) => h('option', { value: String(v), selected: v === cur }, label);
+    let editor: HTMLElement;
+    if (!draft) {
+      editor = h(
+        'div',
+        { class: 'shift-edit' },
+        h('p', { class: 'note' }, `${WEEKDAY_LABEL[sel]}曜は休みです。`),
+        h('button', { class: 'mini', onclick: () => setDraft({ start: 0, end: close, breakAt: 0, breakLen: 0, fromPrep: true }) }, 'この曜日に勤務を入れる'),
+      );
+    } else {
+      const starts: HTMLElement[] = [h('option', { value: 'prep', selected: draft.fromPrep }, '仕込みから')];
+      for (let m = 0; m < close; m += step) starts.push(opt(m, shiftTimeText(m), draft.fromPrep ? -1 : draft.start));
+      const ends: HTMLElement[] = [];
+      for (let m = draft.start + step; m <= close; m += step) ends.push(opt(m, shiftTimeText(m), draft.end));
+      const breaks: HTMLElement[] = [opt(0, 'なし', draft.breakLen), opt(30, '30分', draft.breakLen), opt(60, '60分', draft.breakLen)];
+      const breakAts: HTMLElement[] = [];
+      for (let m = draft.start + step; m + draft.breakLen < draft.end; m += step) breakAts.push(opt(m, `${shiftTimeText(m)}から`, draft.breakAt));
+      const problem = shiftProblem(draft);
+      const hours = shiftPaidHours(draft);
+      const fixBreak = (d: ShiftDay): ShiftDay => {
+        if (d.breakLen <= 0) return { ...d, breakAt: 0, breakLen: 0 };
+        let at = d.breakAt;
+        if (at <= d.start || at + d.breakLen >= d.end) at = d.start + Math.max(step, Math.floor((d.end - d.start - d.breakLen) / 2 / step) * step);
+        return { ...d, breakAt: at };
+      };
+      editor = h(
+        'div',
+        { class: 'shift-edit' },
+        h(
+          'div',
+          { class: 'shift-row' },
+          h('label', null, '出勤', h('select', {
+            class: 'select',
+            onchange: (ev: Event) => {
+              const v = (ev.target as HTMLSelectElement).value;
+              const start = v === 'prep' ? 0 : Number(v);
+              setDraft(fixBreak({ ...draft, start, fromPrep: v === 'prep', end: Math.max(draft.end, start + step) }));
+            },
+          }, starts)),
+          h('label', null, '退勤', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, end: Number((ev.target as HTMLSelectElement).value) })) }, ends)),
+          h('label', null, '休憩', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, breakLen: Number((ev.target as HTMLSelectElement).value) })) }, breaks)),
+          draft.breakLen > 0 && breakAts.length > 0 ? h('label', null, '休憩の開始', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, breakAt: Number((ev.target as HTMLSelectElement).value) })) }, breakAts)) : null,
+        ),
+        h('p', { class: `note ${problem ? 'bad' : ''}` }, problem ?? `${WEEKDAY_LABEL[sel]}曜: ${this.shiftText(draft)}・給与の目安 ${yenStr(Math.round((hourlyOf(e) * hours) / 10) * 10)}（${hours}時間）`),
+        h(
+          'div',
+          { class: 'tbtns' },
+          h('button', { class: 'mini', disabled: !!problem, onclick: () => void this.saveShift(e, sel, [sel], draft) }, '保存'),
+          h('button', { class: 'mini ghost', disabled: !!problem, onclick: () => void this.saveShift(e, sel, [0, 1, 2, 3, 4, 5, 6].filter((i) => list[i] !== null || i === sel), draft) }, '勤務の曜日すべてに同じ時間'),
+          h('button', { class: 'mini danger', onclick: () => void this.saveShift(e, sel, [sel], null) }, 'この曜日を休みにする'),
+        ),
+      );
+    }
+    const weekPay = list.reduce((a, x) => a + Math.round((hourlyOf(e) * shiftPaidHours(x)) / 10) * 10, 0);
+    return h(
+      'div',
+      { class: 'prio shift' },
+      week,
+      editor,
+      h('p', { class: 'note' }, `1週間の給与の目安 ${yenStr(weekPay)}・今日の見込み ${yenStr(expectedPay(e, s.day))}。今日の予定を変えるとすぐに反映します（休みの人に勤務を入れると呼び出し、着くまで少しかかります）。`),
+    );
+  }
+
+  private async saveShift(e: Employee, sel: number, weekdays: number[], sh: ShiftDay | null): Promise<void> {
+    let ok = true;
+    for (const weekday of weekdays) ok = (await this.act({ type: 'setShift', employeeId: e.id, weekday, shift: sh })) && ok;
+    if (ok) {
+      const wd = weekdays.length === 1 ? `${WEEKDAY_LABEL[weekdays[0]!]}曜` : `${weekdays.length}つの曜日`;
+      toast(this.root, sh ? `${e.profile.name}さんの${wd}のシフトを保存しました` : `${e.profile.name}さんの${wd}を休みにしました`, 'good', 1600);
+      // 保存した曜日を選んだまま（編集中の内容は消す）
+      this.shiftEdit = { id: e.id, weekday: sel };
+      this.render();
+    }
+  }
+
+  /** 社員への昇格（参考情報を見て、プレイヤーが決める） */
+  private async promoteDialog(e: Employee): Promise<void> {
+    const s = this.host.state;
+    const info = promotionInfo(e, s);
+    const body = h(
+      'div',
+      { class: 'promote' },
+      h('p', null, `${e.profile.name}さん（${ROLE_LABEL[e.profile.role]}・アルバイト 時給${yenStr(hourlyOf(e))}）を社員にします。`),
+      h('p', null, `社員は日給 ${yenStr(info.newWage)} で、毎日 仕込みから閉店まで勤務します（シフトはなくなります）。遅刻・欠勤が少なく安定し、接客担当がいないときは担当に関係なくクレームに対応します。`),
+      h('h5', null, '昇格の目安（参考）'),
+      h('ul', { class: 'promote-checks' }, info.checks.map((c) => h('li', { class: c.ok ? 'ok' : 'ng' }, `${c.ok ? '✓' : '・'} ${c.label}`))),
+      h('h5', null, '勤務の様子'),
+      h('ul', { class: 'emp-lines' }, staffSummary(e, s).map((l) => h('li', null, l))),
+      info.canPromote ? h('p', { class: 'note bad' }, info.canPromote) : null,
+    );
+    if (!(await confirmNode(this.root, '社員にする', body, '社員にする'))) return;
+    await this.act({ type: 'promote', employeeId: e.id });
   }
 
   // ───────────────── 店舗（レイアウト・席・拡張） ─────────────────

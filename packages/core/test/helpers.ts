@@ -43,10 +43,14 @@ export function addBot(s: GameState, role: EmployeeRole, skill = 0.75, wage = 0)
     profile: {
       name: `bot-${role}`,
       role,
-      skills: { speed: skill, cooking: skill, service: skill, hygiene: skill, movement: skill, reliability: 1 },
+      skills: { speed: skill, cooking: skill, service: skill, hygiene: skill, movement: skill },
       wage,
       hireFee: 0,
       experience: 0,
+      // ボットは遅刻・欠勤・サボり・口論をしない（社員・勤怠と辛抱が最大）
+      employment: 'full',
+      diligence: 1,
+      patience: 1,
     },
   });
   e.presentToday = true;

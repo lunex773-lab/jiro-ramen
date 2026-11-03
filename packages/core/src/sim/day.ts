@@ -12,6 +12,7 @@ import { cash, emptyDayStats, operatingProfit, recordPL, totalDebt } from './eco
 import { finishRepair, resaleValue, runMaintenance, upkeepTotal, useEquipment } from './equipment';
 import { dropHand } from './interact';
 import { morningRollCall, refreshCandidates, wagesDue } from './employees';
+import { closeStaffDay, expectedWages } from './staff';
 import { expireLots, receiveDeliveries, runAutoOrder } from './inventory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { drawAccident, takePrepSnapshot } from './accident';
@@ -48,7 +49,8 @@ export function allCustomersGone(s: GameState): boolean {
 export function fixedCosts(s: GameState): { rent: number; wages: number; upkeep: number; utilities: number; loans: number; total: number } {
   const st = STAGES[s.career.stage]!;
   const rent = st.rent;
-  const wages = s.employees.reduce((a, e) => a + e.profile.wage, 0);
+  // 給与はシフトどおりに働いた場合の見込み（閉店後は翌日の分）
+  const wages = expectedWages(s, s.phase === 'closed' ? s.day + 1 : s.day);
   const upkeep = upkeepTotal(s);
   const utilities = BALANCE.utilitiesBase;
   const loans = s.loans.reduce((a, l) => a + Math.min(l.remaining, l.dailyPayment) + Math.round(l.remaining * l.dailyRate), 0);
@@ -139,6 +141,7 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
   payArrears(s, ctx);
   const st = STAGES[s.career.stage]!;
   const wages = wagesDue(s);
+  closeStaffDay(s);
   recordPL(s, 'rent', st.rent);
   payOrAccrue(s, 'rent', st.rent, `家賃（${s.day}日目）`, key('rent'));
   recordPL(s, 'wages', wages);

@@ -24,6 +24,7 @@ export * from './sim/cooking';
 export * from './sim/interact';
 export * from './sim/customers';
 export * from './sim/employees';
+export * from './sim/staff';
 export * from './sim/layout';
 export * from './sim/day';
 export * from './sim/step';

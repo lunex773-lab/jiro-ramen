@@ -6,7 +6,7 @@ import { BOWL_PACK, EQUIPMENT, SEAT_PRICE } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
 import { MENU } from '../data/menu';
 import { moveWithCollision, stageOf } from '../geometry';
-import type { EmployeeRole, EventKind, GameState, Id, Rot, Vec2 } from '../types';
+import type { EmployeeRole, EventKind, GameState, Id, Rot, ShiftDay, Vec2 } from '../types';
 import { dist, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipment';
@@ -20,6 +20,7 @@ import { currentTutorialStep, inBasicsTutorial, tutorialAction, updateTutorial, 
 import { accidentHalted, EVENT_KINDS } from './events';
 import { accidentFainted, resetAccident } from './accident';
 import { forceEvent } from './visitors';
+import { promote, setShift } from './staff';
 
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
@@ -42,6 +43,10 @@ export type Action =
   | { type: 'fire'; employeeId: Id }
   | { type: 'setRole'; employeeId: Id; role: EmployeeRole }
   | { type: 'setPriority'; employeeId: Id; kind: string; value: number }
+  /** アルバイトの曜日ごとのシフト（weekday: 月=0 … 日=6、shift: null でその曜日は休み） */
+  | { type: 'setShift'; employeeId: Id; weekday: number; shift: ShiftDay | null }
+  /** アルバイトを社員にする */
+  | { type: 'promote'; employeeId: Id }
   | { type: 'expand' }
   | { type: 'setPrice'; menuId: string; price: number }
   | { type: 'pauseMenu'; menuId: string; paused: boolean }
@@ -240,6 +245,10 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return setRole(s, a.employeeId, a.role) ? { ok: true } : fail('変更できません');
     case 'setPriority':
       return setPriority(s, a.employeeId, a.kind, a.value) ? { ok: true } : fail('変更できません');
+    case 'setShift':
+      return setShift(s, ctx, a.employeeId, a.weekday, a.shift);
+    case 'promote':
+      return promote(s, ctx, a.employeeId);
     case 'expand':
       return expand(s, ctx);
     case 'setPrice': {

@@ -612,6 +612,33 @@ input, select { font: inherit; }
 .skill span { flex: 0 0 30px; }
 .emp { border-bottom: 1px solid var(--line); }
 .prio { padding: 6px 0 10px; }
+/* 従業員: 雇用形態・当日の出勤・シフト・記録（第2版） */
+.emp-type { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 700; vertical-align: 2px; }
+.emp-type.part { background: #2c3a4f; color: #a9c8f0; }
+.emp-type.full { background: #4a3a12; color: var(--yellow); }
+.emp-btns { padding: 2px 0 4px; }
+.emp-summary { margin: 0 0 6px; font-size: 12px; }
+.staff-today { margin: 0 0 6px; }
+.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 8px; }
+.wday { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: #1a1511; color: inherit; font: inherit; }
+.wday b { font-size: 12px; }
+.wday small { font-size: 10px; color: var(--muted); line-height: 1.2; text-align: center; word-break: keep-all; overflow-wrap: anywhere; }
+.wday.off small { color: #7f756a; }
+.wday.today { border-color: var(--yellow); }
+.wday.on { background: #3a2f14; border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow) inset; }
+.shift-edit { display: flex; flex-direction: column; gap: 6px; }
+.shift-row { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.shift-row label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.emp-lines, .emp-log, .promote-checks { margin: 4px 0; padding-left: 18px; font-size: 13px; }
+.emp-log li { color: var(--muted); }
+.emp-log b { color: inherit; font-weight: 700; margin-right: 2px; }
+.emp-log .log-argue, .emp-log .log-absent { color: #ff8a7a; }
+.emp-log .log-calm, .emp-log .log-promoted { color: var(--good); }
+.emp-record h5, .promote h5 { margin: 8px 0 2px; font-size: 13px; }
+.promote-checks { list-style: none; padding-left: 4px; }
+.promote-checks .ok { color: var(--good); }
+.promote-checks .ng { color: var(--muted); }
+.promote p { margin: 4px 0; }
 .goal { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .goal.done .tname { color: var(--good); }
 .review { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }

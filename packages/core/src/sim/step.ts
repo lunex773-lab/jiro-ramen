@@ -10,6 +10,7 @@ import { coolBowl } from './cooking';
 import { addDirt, spawnLostItemOwners, updateArrivals, updateCustomers } from './customers';
 import { allCustomersGone, checkGoals, settleDay, startClosing } from './day';
 import { onEmployeeWorkDone, updateEmployees } from './employees';
+import { updateAttendance } from './staff';
 import { defOf, effectSum, updateRepairs } from './equipment';
 import { assignBowls, completeProcess, progressWork, roleOf } from './interact';
 import { receiveDeliveries, stockOf } from './inventory';
@@ -51,6 +52,8 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
   for (const a of [...s.players, ...s.employees]) {
     if (a.work && progressWork(s, a, dt, ctx)) onEmployeeWorkDone(a);
   }
+  // 出勤・退勤・休憩・サボり（シフトと勤怠）
+  updateAttendance(s, dt, ctx);
   updateEmployees(s, dt, ctx);
 
   if (s.phase === 'open') {

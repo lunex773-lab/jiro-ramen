@@ -40,6 +40,8 @@ import {
 import { isBowlComplete } from './cooking';
 import { emit, notify, type SimCtx } from './notices';
 import { complaintVerbFor } from './complaints';
+import { evRand } from './events';
+import { attendHireDay, dailyWageOf, initNewHire, isPartTime, isSlacking, rollCall, rollPostpone, wagesDueToday } from './staff';
 
 export const ROLE_LABEL: Record<EmployeeRole, string> = {
   cook: '調理担当',
@@ -112,8 +114,11 @@ export function generateCandidate(s: GameState): Candidate {
     service: skill(s, role === 'server' ? talent + 0.1 : talent - 0.1),
     hygiene: skill(s, role === 'cleaner' ? talent + 0.1 : talent - 0.05),
     movement: skill(s, talent),
-    reliability: skill(s, 0.7),
   };
+  // 隠しパラメータ。勤怠は以前の「信頼性」と同じ乱数の引き方（既存の乱数の並びを変えない）、辛抱はイベント専用の乱数で引く
+  const D = BALANCE.staff.diligence;
+  const P = BALANCE.staff.patience;
+  const diligence = clamp01(D.mean + randRange(s, -D.spread, D.spread));
   const sc = (skills.speed + skills.movement + (role === 'cook' ? skills.cooking : role === 'server' ? skills.service : skills.hygiene)) / 3;
   const st = BALANCE.staff;
   // 能力と給与は相関するが、掘り出し物（安くて有能）や割高な人もいる
@@ -126,6 +131,10 @@ export function generateCandidate(s: GameState): Candidate {
     wage,
     hireFee,
     experience: randRange(s, 0, 0.1),
+    employment: BALANCE.staff.employment.hireAs,
+    hourly: Math.round(wage / BALANCE.staff.employment.fullShiftHours / 10) * 10,
+    diligence,
+    patience: clamp01(P.mean + (2 * evRand(s) - 1) * P.spread),
   };
   return { id: newId(s, 'cand'), profile };
 }
@@ -166,12 +175,14 @@ export function hire(s: GameState, ctx: SimCtx, candidateId: string): { ok: bool
   if (!cash(s, 'hire', -c.profile.hireFee, `${c.profile.name}さんを採用`, `hire:${c.id}`)) return { ok: false, reason: '採用費が足りません' };
   recordPL(s, 'hiring', c.profile.hireFee);
   const e = makeEmployee(s, c);
+  // アルバイトとして採用（初めのシフトは毎日・仕込みから閉店まで。経営メニューで変えられる）
+  initNewHire(e);
   // 準備時間中に雇った場合は当日から勤務（当日分の給与が発生）
-  e.presentToday = s.phase === 'prep';
+  attendHireDay(s, e);
   s.employees.push(e);
   s.candidates = s.candidates.filter((x) => x.id !== candidateId);
   emit(ctx, { type: 'hire', text: e.profile.name });
-  notify(s, ctx, `hire:${e.id}`, 'good', `${e.profile.name}さん（${ROLE_LABEL[e.profile.role]}）を採用しました`);
+  notify(s, ctx, `hire:${e.id}`, 'good', `${e.profile.name}さん（${ROLE_LABEL[e.profile.role]}・アルバイト）を採用しました`);
   return { ok: true };
 }
 
@@ -180,7 +191,7 @@ export function fire(s: GameState, ctx: SimCtx, employeeId: string): { ok: boole
   if (s.phase === 'open' || s.phase === 'closing') return { ok: false, reason: '営業中は解雇できません' };
   const e = s.employees.find((x) => x.id === employeeId);
   if (!e) return { ok: false, reason: '従業員が見つかりません' };
-  const fee = e.profile.wage * BALANCE.severanceDays;
+  const fee = dailyWageOf(e) * BALANCE.severanceDays;
   // 解雇手当は払えなくても未払金として計上する（支払義務は消えない）
   if (!cash(s, 'severance', -fee, `${e.profile.name}さんの解雇手当`, `sev:${e.id}`)) {
     s.arrears.push({ id: newId(s, 'ar'), amount: fee, reason: `${e.profile.name}さんの解雇手当`, sinceDay: s.day, dueDay: s.day + BALANCE.arrearsGraceDays });
@@ -210,18 +221,9 @@ export function setPriority(s: GameState, employeeId: string, kind: string, valu
   return true;
 }
 
-/** 出勤判定（勤務安定性が低いと欠勤がある） */
+/** 出勤確認（シフト・勤怠による遅刻と当日欠勤。staff.ts） */
 export function morningRollCall(s: GameState, ctx: SimCtx): void {
-  const st = stageOf(s);
-  for (const e of s.employees) {
-    e.presentToday = rand(s) > (1 - e.profile.skills.reliability) * 0.12;
-    e.pos = { x: st.staffSpawn.x + randRange(s, 0, 0.4), z: st.staffSpawn.z + randRange(s, 0, 0.4) };
-    e.hand = { kind: 'none' };
-    e.work = null;
-    releaseTask(e);
-    e.ai.state = e.presentToday ? 'idle' : 'absent';
-    if (!e.presentToday) notify(s, ctx, `absent:${e.id}`, 'warn', `${e.profile.name}さんが今日は欠勤です`);
-  }
+  rollCall(s, ctx);
 }
 
 function releaseTask(e: Employee): void {
@@ -498,8 +500,11 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
   let tasks: Task[] | null = null;
   const busyTargets = playerBusyTargets(s);
   for (const e of s.employees) {
-    if (!e.presentToday) {
-      e.ai.state = 'absent';
+    // 出勤前・休憩中・退勤後・欠勤（状態は staff.ts の出勤の処理が決める）
+    if (!e.presentToday) continue;
+    // サボっている間は仕事を選ばない（作業の途中では始まらない）
+    if (isSlacking(e, s)) {
+      e.ai.state = 'slacking';
       continue;
     }
     if (e.work) {
@@ -605,6 +610,8 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
       }
     }
     if (!best && e.hand.kind !== 'none') best = tidyHandTask(s, e);
+    // 勤怠が低いと、仕事を後回しにすることがある（手に物を持っていないときだけ）
+    if (best && e.hand.kind === 'none' && rollPostpone(s, e)) continue;
     if (best) {
       startTask(e, best);
       e.ai.idleTime = 0;
@@ -630,8 +637,9 @@ export function onEmployeeWorkDone(e: Actor): void {
   if (e.ai.steps.length === 0) finishTask(e);
 }
 
+/** 閉店後の精算の給与（アルバイトは時給 × 働いた時間、社員は日給） */
 export function wagesDue(s: GameState): number {
-  return s.employees.filter((e) => e.presentToday).reduce((a, e) => a + e.profile.wage, 0);
+  return wagesDueToday(s);
 }
 
 export function employeeById(s: GameState, id: string): Employee | undefined {

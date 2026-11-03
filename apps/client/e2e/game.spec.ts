@@ -491,6 +491,67 @@ async function openSettings(page: Page) {
 type JiroState = { t: number; day: number; money: number; phase: string; players: { pos: { x: number; z: number } }[]; events?: { accident: unknown; buzz: unknown } };
 const jiroState = (page: Page) => page.evaluate(() => (window as unknown as { __jiro: { host: { state: JiroState } } }).__jiro.host.state);
 
+test('従業員: アルバイトとして採用し、曜日ごとのシフトを決め、記録を見て社員にできる（勤怠・辛抱の数値は出ない）', async ({ page }) => {
+  await startNewGame(page);
+  // 採用を解放し、候補者を1人入れる（隠しパラメータの値は画面に出てはいけない）
+  await page.evaluate(() => {
+    const s = (window as unknown as { __jiro: { host: { state: { career: { unlocked: string[] }; candidates: unknown[] } } } }).__jiro.host.state;
+    s.career.unlocked.push('hiring');
+    s.candidates = [
+      {
+        id: 'cand-e2e',
+        profile: {
+          name: '山田 花子', role: 'server', skills: { speed: 0.6, cooking: 0.4, service: 0.8, hygiene: 0.5, movement: 0.6 },
+          wage: 9000, hireFee: 10000, experience: 0, employment: 'part', hourly: 2000, diligence: 0.123, patience: 0.456,
+        },
+      },
+    ];
+  });
+  await page.locator('.chip.menu').click();
+  await page.getByRole('button', { name: '従業員', exact: true }).click();
+  const body = page.locator('.manage-body');
+  await expect(body).toContainText('時給¥2,000');
+  await body.getByRole('button', { name: '採用する' }).click();
+  const card = body.locator('.emp[data-emp]').first();
+  await expect(card).toContainText('アルバイト');
+  await expect(card).toContainText('勤務中（仕込み〜15:00）');
+  await expect(body).toContainText('今日（1日目・月曜）の出勤');
+  // シフト: 火曜を 12:00〜14:00（13:00 から30分休憩）にする
+  await card.getByRole('button', { name: '📅 シフト' }).click();
+  const week = card.locator('.week .wday');
+  await expect(week).toHaveCount(7);
+  await week.nth(1).click();
+  const edit = card.locator('.shift-edit');
+  await edit.locator('label', { hasText: '出勤' }).locator('select').selectOption('60');
+  await edit.locator('label', { hasText: '退勤' }).locator('select').selectOption('180');
+  await edit.locator('label', { hasText: /^休憩/ }).first().locator('select').selectOption('30');
+  await edit.locator('label', { hasText: '休憩の開始' }).locator('select').selectOption('120');
+  await expect(edit).toContainText('給与の目安 ¥3,000（1.5時間）');
+  await edit.getByRole('button', { name: '保存' }).click();
+  await expect(week.nth(1)).toContainText('12:00〜14:00（休憩30分）');
+  await shot(page, '40-staff-shift');
+  // 水曜を休みにする
+  await week.nth(2).click();
+  await card.locator('.shift-edit').getByRole('button', { name: 'この曜日を休みにする' }).click();
+  await expect(week.nth(2)).toContainText('休み');
+  // 記録（まだ何も起きていない）
+  await card.getByRole('button', { name: '📝 記録' }).click();
+  await expect(card).toContainText('まだ勤務の記録がありません');
+  // 隠しパラメータの名前と値は出さない
+  const text = (await body.textContent()) ?? '';
+  for (const w of ['勤怠', '辛抱', '信頼性', '安定', '0.123', '0.456', '12.3', '45.6']) expect(text).not.toContain(w);
+  // 社員にする（参考情報を見てから決める）
+  await card.getByRole('button', { name: '社員にする' }).click();
+  const modal = page.locator('.modal');
+  await expect(modal).toContainText('昇格の目安');
+  await expect(modal.locator('.promote-checks li')).toHaveCount(5);
+  await shot(page, '41-staff-promote');
+  await modal.getByRole('button', { name: '社員にする' }).click();
+  await expect(card.locator('.emp-type')).toHaveText('社員');
+  await expect(card).toContainText('日給');
+  await expect(card.getByRole('button', { name: '社員にする' })).toHaveCount(0);
+});
+
 test('SNSでバズると、上部に「バズ中」と残り時間が出る', async ({ page }) => {
   await startNewGame(page, '/?debug=1');
   await page.getByRole('button', { name: /開店する/ }).click();
