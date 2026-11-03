@@ -2,6 +2,14 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const SHOTS = process.env.SHOTS_DIR;
 
+// ページ内の例外・エラーをテストの出力に出す（CI で失敗したときに原因を追えるように）
+test.beforeEach(({ page }) => {
+  page.on('pageerror', (e) => console.log(`[pageerror] ${test.info().title}: ${e.message}\n${e.stack ?? ''}`));
+  page.on('console', (m) => {
+    if (m.type() === 'error') console.log(`[console.error] ${test.info().title}: ${m.text()}`);
+  });
+});
+
 async function shot(page: Page, name: string) {
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` });
 }

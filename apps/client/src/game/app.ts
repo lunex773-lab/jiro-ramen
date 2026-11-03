@@ -360,9 +360,9 @@ export class App {
       c.yaw = me.yaw;
     }
     this.unsub.push(host.onEvents((ev) => this.sfx.onEvents(ev, host.playerId)));
-    this.sfx.startAmbience();
+    // 上部の表示（日・時刻・資金）は最初の 3D の描画を待たずに出す（重い端末では最初の描画に時間がかかる）
+    this.hud.update(1);
     this.lastPhase = host.state.phase;
-    this.checkPhaseScreens(true);
     this.lastT = performance.now();
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
@@ -372,7 +372,24 @@ export class App {
       this.frame(Math.min(0.1, interval), now / 1000, interval);
       this.updateFps(interval, performance.now() - t0);
     };
+    // 毎フレームの処理は、下の付随する処理（音・結果画面の確認）が失敗しても必ず始める
     this.raf = requestAnimationFrame(loop);
+    this.guard('ambience', () => this.sfx.startAmbience());
+    this.guard('phaseScreens', () => this.checkPhaseScreens(true));
+  }
+
+  private reported = new Set<string>();
+
+  /** 付随する処理の失敗でゲーム全体が止まらないようにする（同じ場所の失敗は一度だけ記録） */
+  private guard(where: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (e) {
+      if (!this.reported.has(where)) {
+        this.reported.add(where);
+        console.error(`[jiro] ${where} failed`, e);
+      }
+    }
   }
 
   leaveGame(): void {
@@ -484,10 +501,13 @@ export class App {
     // 経営メニューとレイアウト編集は画面全体を覆うので、その間は 3D を描かない（電池と CPU の節約）
     const covered = this.manage?.isOpen || !!this.editor;
     if (!covered) {
-      world.update(s, host.playerId, t, dt, host.mode === 'remote');
-      world.render();
-      // 重い端末では描画の解像度を下げる
-      world.adaptResolution(interval);
+      // 3D の描画に失敗しても、HUD・操作・時間の進行は止めない
+      this.guard('render', () => {
+        world.update(s, host.playerId, t, dt, host.mode === 'remote');
+        world.render();
+        // 重い端末では描画の解像度を下げる
+        world.adaptResolution(interval);
+      });
     }
     this.hud?.update(dt);
     this.accidentUi?.update(s, av);
