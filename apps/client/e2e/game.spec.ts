@@ -464,6 +464,11 @@ test('爆発事故: 設定から起こし、気を失って目覚め、焼け跡
   await advance('s.events.accident.t = 9.2');
   await expect(reset).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.acc-narration')).toContainText('誰ひとり動かない');
+  // 一文は少しのあいだだけで、操作の説明（「歩くことができます」など）は出さない
+  await advance('s.events.accident.t = 30');
+  await expect(page.locator('.acc-narration')).toBeHidden();
+  await expect(page.getByText('歩くことができます')).toHaveCount(0);
+  await expect(reset).toBeVisible();
   // 営業の画面は隠れ、営業は止まっている（時刻・資金が進まない）
   await expect(page.locator('.hud-actions')).toBeHidden();
   await expect(page.locator('.chip.menu')).toBeVisible();

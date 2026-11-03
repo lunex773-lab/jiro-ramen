@@ -1,4 +1,4 @@
-// 爆発事故の画面の演出: 閃光・揺れ・暗転・「数時間後」・目覚め、焼け跡を歩く間の案内と「リセットする」ボタン。
+// 爆発事故の画面の演出: 閃光・揺れ・暗転・「数時間後」・目覚め、目覚めた直後の一文と「リセットする」ボタン。
 // 進み具合はゲームの状態（事故の経過秒）から決まる。演出は状態を読むだけなので、ここが失敗してもゲームの状態は壊れない。
 
 import { BALANCE, type AccidentState, type GameState } from '@jiro/core';
@@ -65,7 +65,7 @@ export function accidentView(acc: AccidentState | null | undefined, faintSec = B
   };
 }
 
-/** 目覚めてから語りを出す秒数 */
+/** 目覚めてから一文を出す秒数（そのあとは何も出さない。操作の説明は出さない） */
 const NARRATION_SEC = 9;
 
 export class AccidentOverlay {
@@ -132,22 +132,17 @@ export class AccidentOverlay {
     const showPanel = v.burned && v.awake && !!acc;
     if (showPanel !== L.panel) {
       L.panel = showPanel;
-      this.panel.style.display = showPanel ? 'flex' : 'none';
       this.actions.style.display = showPanel ? 'flex' : 'none';
       this.pending = false;
       this.resetBtn.disabled = false;
     }
+    const text = showPanel && acc && acc.t - BALANCE.events.explosion.faintSec < NARRATION_SEC ? '店は焼け落ちた。店員も、お客さんも、誰ひとり動かない。' : '';
+    if (text !== L.narration) {
+      L.narration = text;
+      this.narration.textContent = text;
+      this.panel.style.display = text ? 'flex' : 'none';
+    }
     if (showPanel && acc) {
-      const since = acc.t - BALANCE.events.explosion.faintSec;
-      const text =
-        since < NARRATION_SEC
-          ? '店は焼け落ちた。店員も、お客さんも、誰ひとり動かない。'
-          : `焼け跡を歩くことができます。「リセットする」で、${acc.day}日目の仕込みの開始時点に戻ります`;
-      if (text !== L.narration) {
-        L.narration = text;
-        this.narration.textContent = text;
-        this.narration.classList.toggle('dim', since >= NARRATION_SEC);
-      }
       const host = this.host.isHost;
       this.resetBtn.style.display = host ? '' : 'none';
       this.guestNote.style.display = host ? 'none' : '';

@@ -892,7 +892,6 @@ input, select { font: inherit; }
   gap: 8px;
 }
 .acc-narration { color: #eadfce; background: rgba(0, 0, 0, 0.6); padding: 8px 12px; border-radius: 10px; font-size: 14px; line-height: 1.5; text-align: center; text-shadow: 0 1px 2px #000; }
-.acc-narration.dim { font-size: 12px; opacity: 0.85; }
 .acc-actions {
   left: 50%;
   bottom: calc(var(--sab, 0px) + 14px);
