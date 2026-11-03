@@ -894,6 +894,9 @@ input, select { font: inherit; }
 /* 小声のセリフ */
 .bubble.whisper { background: rgba(255, 255, 255, 0.82); color: #555; font-weight: 600; font-style: italic; font-size: 11px; }
 .bubble.whisper::after { border-top-color: rgba(255, 255, 255, 0.82); }
+/* 団体の会話（通常の食事のコメントと区別する。第2版 8-3） */
+.bubble.talk { background: #e8f3ff; color: #1d3a5a; border: 1px solid #8fb8e8; font-weight: 600; }
+.bubble.talk::after { border-top-color: #e8f3ff; }
 /* 覆面調査員の記事 */
 .modal.critic { max-height: calc(100% - 16px); overflow-y: auto; }
 .critic-stars { font-size: 20px; color: var(--yellow); font-weight: 800; }

@@ -8,7 +8,7 @@ import { MAT, plastic } from './materials';
 import { BOWL_DIMS, bowlDirtyPool, bowlShellGeometry, bowlStainGeometry, bowlStainMaterial } from './bowl';
 import { canvasTexture, JP_FONT, texGrime, texSpill } from './textures';
 
-export type HeldKind = 'bowl' | 'clean' | 'dirty' | 'mop' | 'lostItem' | 'trash' | 'phone';
+export type HeldKind = 'bowl' | 'clean' | 'dirty' | 'mop' | 'lostItem' | 'trash' | 'phone' | 'cigarette';
 
 type Parts = { geo: THREE.BufferGeometry; mat: THREE.Material }[];
 
@@ -129,6 +129,17 @@ function lostBagParts(): Parts {
 }
 
 /** スマートフォン（SNS を見て来た客が手に持つ。画面が光る） */
+/** タバコ（店の前の喫煙客）。先は赤く光る */
+function cigaretteParts(): Parts {
+  return cached('cigarette', () => {
+    const b = new GeoBuilder();
+    b.box(std('cig-paper', { color: '#f2efe8', roughness: 0.8 }), 0.008, 0.008, 0.07, { z: 0.035 });
+    b.box(std('cig-filter', { color: '#d99a4e', roughness: 0.8 }), 0.0085, 0.0085, 0.018, { z: 0.002 });
+    b.box(std('cig-ember', { color: '#ff5a1f', emissive: '#ff3a0a', emissiveIntensity: 2.2, roughness: 0.6 }), 0.009, 0.009, 0.006, { z: 0.072 });
+    return b.merged();
+  });
+}
+
 function phoneParts(): Parts {
   return cached('phone', () => {
     const b = new GeoBuilder();
@@ -172,6 +183,11 @@ export function createHeldItem(kind: HeldKind): THREE.Object3D {
       const g = instantiate(phoneParts(), false);
       // 画面を顔の方へ向けて持つ
       g.rotation.x = -1.1;
+      return g;
+    }
+    case 'cigarette': {
+      const g = instantiate(cigaretteParts(), false);
+      g.rotation.set(0.4, 0.3, 0);
       return g;
     }
   }

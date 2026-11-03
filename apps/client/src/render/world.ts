@@ -3,6 +3,8 @@
 import * as THREE from 'three';
 import { ResolutionGovernor } from './resolution';
 import { Aftermath, hash01 } from './aftermath';
+import { eatenContents, eatenStep, eatMotion, eatProgress } from './eat-motion';
+import { createSteam } from './models/fx';
 
 import {
   CELL,
@@ -55,6 +57,8 @@ interface CharEntry {
   moving: number;
   yaw: number;
   kind: 'customer' | 'employee' | 'player';
+  /** タバコの煙（店の前の喫煙客） */
+  smoke?: THREE.Object3D | null;
 }
 
 interface Bubble {
@@ -373,13 +377,29 @@ export class World {
     c.model.group.rotation.y = cur + diff * Math.min(1, dt * 10);
   }
 
+  /** タバコの煙を出す・消す */
+  private setSmoke(c: CharEntry, on: boolean): void {
+    if (on && !c.smoke) {
+      const plume = createSteam({ count: 5, radius: 0.03, rise: 0.7, size: 0.16, speed: 0.35, spread: 0.05, color: '#d8d8d8', opacity: 0.4, seed: 17 });
+      plume.position.set(0.12, 1.55, 0.22);
+      c.model.group.add(plume);
+      c.smoke = plume;
+    } else if (!on && c.smoke) {
+      c.smoke.removeFromParent();
+      const m = c.smoke as THREE.Mesh;
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+      c.smoke = null;
+    }
+  }
+
   private syncCharacters(s: GameState, myId: string, t: number, dt: number, smooth: boolean): void {
     const seen = new Set<string>();
     for (const cu of s.customers) {
       if (cu.state === 'left' || cu.state === 'abandoned') continue;
       seen.add(cu.id);
       const c = this.charEntry(cu.id, 'customer', cu.appearance, undefined, cu.look);
-      const seated = cu.state === 'seated' || cu.state === 'eating' || cu.state === 'complaint';
+      const seated = cu.state === 'seated' || cu.state === 'eating' || cu.state === 'complaint' || cu.state === 'afterMeal';
       if (this.burned) {
         // 焼け跡: 座っていた客は椅子から後ろへ倒れ、ほかの客もその場に倒れて動かない
         const seat = seated && cu.seatId ? s.seats.find((x) => x.id === cu.seatId) : undefined;
@@ -396,9 +416,14 @@ export class World {
       } else {
         this.placeChar(c, cu.pos.x, cu.pos.z, cu.state === 'queue' || cu.state === 'waitingSeat' ? (cu.path.length === 0 ? waitYaw(cu) : null) : null, dt, smooth);
       }
-      // SNS を見て来た客は、並んでいる間スマホを見ている
-      c.model.setHeld(cu.fromBuzz && (cu.state === 'arriving' || cu.state === 'queue' || cu.state === 'waitingSeat') ? 'phone' : null);
-      const pose: CharacterPose = cu.state === 'eating' ? 'eat' : seated ? 'sit' : c.moving > 0 ? 'walk' : 'stand';
+      // SNS を見て来た客は、並んでいる間スマホを見ている。店の前の喫煙客はタバコ
+      const smoking = cu.state === 'smoking' && cu.path.length === 0;
+      c.model.setHeld(smoking ? 'cigarette' : cu.fromBuzz && (cu.state === 'arriving' || cu.state === 'queue' || cu.state === 'waitingSeat') ? 'phone' : null);
+      this.setSmoke(c, smoking);
+      // 食事の動き（顔を近づける・麺を持ち上げる・すする・スープ・具・箸を置く）。食後の団体は話している
+      if (cu.state === 'eating') c.model.setEat(eatMotion(eatProgress(cu.eatLeft, cu.eatTotal), t, hash01(cu.id, 3), !!cu.messy && !cu.messy.calmed));
+      const groupChat = cu.state === 'afterMeal' && !!cu.group && cu.group.size > 1;
+      const pose: CharacterPose = cu.state === 'eating' ? 'eat' : groupChat ? 'chat' : seated ? 'sit' : c.moving > 0 ? 'walk' : 'stand';
       c.model.update(pose, t, dt);
     }
     for (const e of s.employees) {
@@ -489,15 +514,22 @@ export class World {
       if (this.burned) m.group.rotation.set((hash01(b.id, 8) - 0.5) * 2.6, hash01(b.id, 9) * 6.28, 1.2 + hash01(b.id, 10) * 0.6);
       else if (m.group.rotation.z !== 0) m.group.rotation.set(0, 0, 0);
       const near = this.tmpV.distanceTo(camPos) < 2.2;
+      // 食べている客の丼は、食べた分だけ中身を減らして見せる（5段階）
+      let eaten = 0;
+      if (b.state === 'served' && b.loc.at === 'seat') {
+        const seatId = b.loc.seatId;
+        const eater = s.customers.find((x) => x.seatId === seatId && x.state === 'eating');
+        if (eater) eaten = eatenStep(eatProgress(eater.eatLeft, eater.eatTotal));
+      }
       const key = this.burned
         ? `burned|${near ? 'h' : 'l'}`
-        : `${b.state}|${b.contents ? `${b.contents.steps.length}|${b.contents.buta}|${b.contents.noodleG}|${Object.values(b.contents.toppings).join(',')}|${b.contents.tare}|${Math.round(b.contents.heat / 10)}` : 'x'}|${near ? 'h' : 'l'}`;
+        : `${b.state}|${b.contents ? `${b.contents.steps.length}|${b.contents.buta}|${b.contents.noodleG}|${Object.values(b.contents.toppings).join(',')}|${b.contents.tare}|${Math.round(b.contents.heat / 10)}` : 'x'}|${near ? 'h' : 'l'}|${eaten}`;
       const mm = m as BowlModel & { _key?: string };
       if (mm._key !== key) {
         mm._key = key;
         m.setDetail(near ? 'high' : 'low');
         if (this.burned) m.setContents(null, { dirty: true });
-        else m.setContents(b.state === 'dirty' ? null : b.contents, { dirty: b.state === 'dirty' });
+        else m.setContents(b.state === 'dirty' ? null : b.contents && eaten > 0 ? eatenContents(b.contents, eaten) : b.contents, { dirty: b.state === 'dirty' });
       }
     }
     for (const [id, m] of this.bowls) {
@@ -684,9 +716,10 @@ export class World {
       const c = this.chars.get(cu.id);
       if (!c || this.burned) continue;
       const head = c.model.group.position.clone();
-      const seated = cu.state === 'seated' || cu.state === 'eating' || cu.state === 'complaint';
+      const seated = cu.state === 'seated' || cu.state === 'eating' || cu.state === 'complaint' || cu.state === 'afterMeal';
       head.y += seated ? 1.45 : 1.95;
-      if (cu.say && cu.sayUntil > s.t) show(`say:${cu.id}`, cu.say, head, `bubble ${cu.state === 'complaint' ? 'angry' : cu.sayStyle === 'whisper' ? 'whisper' : ''}`);
+      // 団体の会話は通常の食事のコメントと吹き出しを分ける
+      if (cu.say && cu.sayUntil > s.t) show(`say:${cu.id}`, cu.say, head, `bubble ${cu.state === 'complaint' ? 'angry' : cu.sayStyle === 'whisper' ? 'whisper' : cu.talk ? 'talk' : ''}`);
       else if (cu.state === 'seated') {
         const seat = s.seats.find((x) => x.id === cu.seatId);
         const ratio = cu.patience / 150;

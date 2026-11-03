@@ -787,8 +787,10 @@ export class App {
     if (!t) return false;
     const pts = targetPoints(s, t);
     // 厨房側の位置を優先（席はカウンター越し）
-    const p = pts[pts.length - 1];
-    if (!p) return false;
+    const p0 = pts[pts.length - 1];
+    if (!p0) return false;
+    // 店の前の喫煙客は、店側から少し離れて向き合う
+    const p = t.kind === 'customer' ? { x: p0.x + 0.2, z: Math.min(-0.3, p0.z + 0.9) } : p0;
     // 照準を対象の箱の中心に合わせる（席はカウンターの天板）
     const b = interactableBoxes(s).find((x) => x.id === targetId);
     const c = b

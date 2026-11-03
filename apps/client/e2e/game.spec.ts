@@ -552,6 +552,58 @@ test('従業員: アルバイトとして採用し、曜日ごとのシフトを
   await expect(card.getByRole('button', { name: '社員にする' })).toHaveCount(0);
 });
 
+test('店の前に「禁煙」の張り紙があり、店の外でタバコを吸う客に声をかけられる', async ({ page }) => {
+  await startNewGame(page);
+  type W = { __jiro: { world: { scene: { getObjectByName(n: string): unknown } }; host: { state: Record<string, any>; tick(dt: number): void }; debugFace(id: string): boolean } };
+  expect(await page.evaluate(() => !!(window as unknown as W).__jiro.world.scene.getObjectByName('no-smoking-sign'))).toBe(true);
+  await page.getByRole('button', { name: /開店する/ }).click();
+  // お客さんが来るまで進め、その人を店の前で吸っている客にする（食事のあとの喫煙の場面を作る）
+  const id = await page.evaluate(() => {
+    const app = (window as unknown as W).__jiro;
+    for (let i = 0; i < 600 && app.host.state.customers.length === 0; i++) app.host.tick(0.1);
+    const s = app.host.state;
+    const c = s.customers[0];
+    s.queue = s.queue.filter((x: string) => x !== c.id);
+    c.state = 'smoking';
+    c.path = [];
+    c.pos = { x: -0.6, z: -1.6 };
+    c.traits.manners = 1;
+    c.traits.complaintPropensity = 0;
+    c.smoke = { until: -1, troubleId: 'tr-e2e', annoyed: [], warned: false, ignored: 0, nextCheck: 0 };
+    app.host.tick(0.1);
+    return c.id as string;
+  });
+  // 店の前を少し離れて見る（張り紙・タバコ・煙の見た目の確認用の画面写真）
+  if (SHOTS) {
+    await page.evaluate(() => {
+      const app = (window as unknown as { __jiro: { localPos: { x: number; z: number }; controls: { yaw: number; pitch: number }; host: { move(x: number, z: number, yaw: number): void } } }).__jiro;
+      app.localPos = { x: 1.4, z: -3.6 };
+      app.controls.yaw = Math.atan2(-0.6 - 1.4, -1.0 + 3.6);
+      app.controls.pitch = 0.05;
+      app.host.move(1.4, -3.6, app.controls.yaw);
+    });
+    await page.waitForTimeout(1500);
+    await shot(page, '43-shopfront');
+  }
+  expect(await page.evaluate((cid) => (window as unknown as W).__jiro.debugFace(cid), id)).toBe(true);
+  const warn = page.locator('.act[aria-label="禁煙をお伝えする"]');
+  await expect(warn).toBeVisible();
+  await expect(page.locator('.hud-detail')).toContainText('禁煙');
+  await page.waitForTimeout(500);
+  await shot(page, '42-smoker');
+  // 長押しの操作（声をかける 1.5 秒）: 押している間にゲーム内時間を進める
+  const box = (await warn.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await expect(page.locator('.work-bar')).toBeVisible();
+  await page.evaluate(() => {
+    const app = (window as unknown as W).__jiro;
+    for (let i = 0; i < 25; i++) app.host.tick(0.1);
+  });
+  await page.mouse.up();
+  await expect.poll(async () => page.evaluate((cid) => (window as unknown as W).__jiro.host.state.customers.find((x: { id: string }) => x.id === cid)?.state ?? 'left', id)).not.toBe('smoking');
+});
+
 test('SNSでバズると、上部に「バズ中」と残り時間が出る', async ({ page }) => {
   await startNewGame(page, '/?debug=1');
   await page.getByRole('button', { name: /開店する/ }).click();

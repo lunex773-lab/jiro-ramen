@@ -6,9 +6,10 @@ import * as THREE from 'three';
 import { cached, clamp, makeRng, pickOf, rr, xformMatrix, type Disposable, type Rng, type XForm } from './common';
 import { canvasTexture, JP_FONT } from './textures';
 import { createHeldItem, type HeldKind } from './props';
+import type { EatMotion } from '../eat-motion';
 
-/** down = 床に倒れて動かない（爆発事故のあと） */
-export type CharacterPose = 'stand' | 'walk' | 'sit' | 'eat' | 'work' | 'carry' | 'down';
+/** down = 床に倒れて動かない（爆発事故のあと）、chat = 座って話している（団体の食後・居座り） */
+export type CharacterPose = 'stand' | 'walk' | 'sit' | 'eat' | 'work' | 'carry' | 'down' | 'chat';
 export type { HeldKind };
 
 export interface CharacterModel extends Disposable {
@@ -19,6 +20,8 @@ export interface CharacterModel extends Disposable {
   setHeld(kind: HeldKind | null): void;
   /** 頭上の名札（null で消す） */
   setLabel(text: string | null): void;
+  /** 食事の動き（eat の姿勢で使う。null なら単純な繰り返し） */
+  setEat(m: EatMotion | null): void;
   /** 手に持つ物を自前で付けたいとき用の取り付け点（胸の前, 高さ約1.0m） */
   heldAnchor: THREE.Object3D;
 }
@@ -589,6 +592,7 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
   let first = true;
 
   const seatHipsY = 0.62 + 0.075 * s + J.hipDown + 0.005;
+  let eatM: EatMotion | null = null;
 
   function computePose(pose: CharacterPose, t: number, speed: number): void {
     target.rot.fill(0);
@@ -599,7 +603,7 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
     const walking = pose === 'walk' || pose === 'carry';
     const amp = walking ? clamp(speed, 0, 1) : 0;
     // 脚
-    if (pose === 'sit' || pose === 'eat') {
+    if (pose === 'sit' || pose === 'eat' || pose === 'chat') {
       target.hipsY = seatHipsY;
       target.hipsZ = -0.06 * s;
       setRot(target, B.thighL, -1.5, 0, -0.05);
@@ -617,9 +621,17 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
     // 上半身
     let spineX = breathe * 0.4;
     let headX = 0;
-    if (pose === 'eat') {
+    if (pose === 'eat' && eatM) {
+      // 丼に顔を近づける・麺を持ち上げる・すする・スープ・具（eat-motion.ts）
+      spineX = eatM.lean;
+      headX = eatM.head;
+    } else if (pose === 'eat') {
       spineX = 0.32;
       headX = 0.32 + Math.max(0, Math.sin(t * 2.2 + opts.seed)) * 0.12;
+    } else if (pose === 'chat') {
+      // 背を起こし、隣の人の方を向いて話す
+      spineX = 0.02;
+      headX = 0.02 + Math.sin(t * 0.9 + opts.seed) * 0.05;
     } else if (pose === 'sit') {
       spineX = 0.08;
       headX = 0.05 + Math.sin(t * 0.4 + opts.seed) * 0.08;
@@ -630,10 +642,31 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       spineX = 0.05;
     }
     setRot(target, B.spine, spineX, amp > 0 ? Math.sin(ph) * 0.06 * amp : 0, 0);
-    setRot(target, B.head, headX, Math.sin(t * 0.5 + opts.seed * 3) * (pose === 'stand' ? 0.25 : 0.05), 0);
+    const headYaw = pose === 'chat' ? Math.sin(t * 0.35 + opts.seed * 5) * 0.7 : Math.sin(t * 0.5 + opts.seed * 3) * (pose === 'stand' ? 0.25 : 0.05);
+    setRot(target, B.head, headX, headYaw, 0);
     // 腕
     const holding = heldKind === 'bowl' || heldKind === 'clean' || heldKind === 'dirty';
-    if (pose === 'eat') {
+    if (pose === 'eat' && eatM) {
+      // 右手（箸）の高さと、左手で丼を持ち上げる量。食べ終わったら箸を置いて手を膝へ
+      const r = eatM.handR;
+      const bl = eatM.bowlLift;
+      setRot(target, B.armL, -0.95 - bl * 0.55, 0, -0.3 + bl * 0.15);
+      setRot(target, B.foreL, -0.75 - bl * 0.6, 0, 0);
+      if (eatM.phase === 'done') {
+        setRot(target, B.armR, -0.55, 0, 0.18);
+        setRot(target, B.foreR, -0.95, 0, 0);
+      } else {
+        setRot(target, B.armR, -0.7 - r * 0.55, 0, 0.25);
+        setRot(target, B.foreR, -1.1 - r * 0.75, 0, 0);
+      }
+    } else if (pose === 'chat') {
+      // 身ぶりを交えて話す
+      const g = Math.max(0, Math.sin(t * 1.3 + opts.seed * 2));
+      setRot(target, B.armL, -0.55, 0, -0.18);
+      setRot(target, B.foreL, -0.95, 0, 0);
+      setRot(target, B.armR, -0.55 - g * 0.35, 0, 0.18 + g * 0.2);
+      setRot(target, B.foreR, -0.95 - g * 0.4, 0, 0);
+    } else if (pose === 'eat') {
       // 左手は丼に添え、右手は箸を口元へ
       const lift = Math.max(0, Math.sin(t * 2.2 + opts.seed));
       setRot(target, B.armL, -0.95, 0, -0.3);
@@ -675,6 +708,13 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       setRot(target, B.foreL, -0.15, 0, 0);
       headX = Math.max(headX, 0.3);
       setRot(target, B.head, headX, 0, 0);
+    } else if (heldKind === 'cigarette') {
+      // ときどき口元へ運んで吸う
+      const puff = Math.max(0, Math.sin(t * 0.8 + opts.seed)) ** 3;
+      setRot(target, B.armR, -0.35 - puff * 0.55, 0, 0.12 + puff * 0.1);
+      setRot(target, B.foreR, -1.0 - puff * 1.0, 0, 0);
+      setRot(target, B.armL, 0.05, 0, 0.06);
+      setRot(target, B.foreL, -0.1, 0, 0);
     } else if (heldKind === 'lostItem') {
       setRot(target, B.armR, -0.3, 0, 0.12);
       setRot(target, B.foreR, -1.1, 0, 0);
@@ -702,7 +742,7 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       setRot(target, B.shinR, 0.6, 0, 0);
       setRot(target, B.head, 0, 0.5, 0.3);
     }
-    chopsticks.visible = pose === 'eat';
+    chopsticks.visible = pose === 'eat' && (eatM?.chopsticks ?? true);
   }
 
   function apply(k: number): void {
@@ -753,6 +793,9 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
         handR.add(obj);
       }
       heldObj = obj;
+    },
+    setEat(m) {
+      eatM = m;
     },
     setLabel(text) {
       if (text === labelText) return;

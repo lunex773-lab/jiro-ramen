@@ -191,6 +191,43 @@ function clockTexture(): THREE.CanvasTexture {
   );
 }
 
+/** 「禁煙」の張り紙（店の前。第2版 9-1） */
+function noSmokingTexture(): THREE.CanvasTexture {
+  return cached('tex:nosmoking', () =>
+    canvasTexture(256, 340, (c, w, h) => {
+      c.fillStyle = '#fbfbf6';
+      c.fillRect(0, 0, w, h);
+      c.strokeStyle = '#d02020';
+      c.lineWidth = 10;
+      c.strokeRect(8, 8, w - 16, h - 16);
+      // 禁煙のマーク（タバコに赤い丸と斜線）
+      const cx = w / 2;
+      const cy = 118;
+      c.fillStyle = '#222';
+      c.fillRect(cx - 62, cy - 9, 104, 18);
+      c.fillStyle = '#d99a4e';
+      c.fillRect(cx + 42, cy - 9, 22, 18);
+      c.strokeStyle = '#d02020';
+      c.lineWidth = 16;
+      c.beginPath();
+      c.arc(cx, cy, 78, 0, Math.PI * 2);
+      c.stroke();
+      c.beginPath();
+      c.moveTo(cx - 55, cy - 55);
+      c.lineTo(cx + 55, cy + 55);
+      c.stroke();
+      c.fillStyle = '#d02020';
+      c.font = `900 64px ${JP_FONT}`;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText('禁煙', cx, 252);
+      c.fillStyle = '#333';
+      c.font = `bold 22px ${JP_FONT}`;
+      c.fillText('店の前での喫煙はご遠慮ください', cx, 306);
+    }),
+  );
+}
+
 function shopTextMat(key: string, tex: THREE.Texture, emissive = 0): THREE.MeshStandardMaterial {
   return cached('shopmat:' + key, () =>
     new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, emissive: emissive > 0 ? '#ffffff' : '#000000', emissiveMap: emissive > 0 ? tex : null, emissiveIntensity: emissive }),
@@ -472,6 +509,13 @@ export function createShopShell(stage: StageDef, shopName: string): ShopShell {
   sign.position.set(W / 2, signY0 + signH / 2, -WALL_T - 0.245);
   sign.rotation.y = Math.PI;
   group.add(sign);
+  // 「禁煙」の張り紙（入口の左の壁・目の高さ。店の前の喫煙客の場所から見える）
+  const noSmoking = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.45), shopTextMat('nosmoking', noSmokingTexture(), 0.15));
+  noSmoking.name = 'no-smoking-sign';
+  noSmoking.position.set((door.x0 - WALL_T) / 2, 1.45, -WALL_T - 0.012);
+  noSmoking.rotation.y = Math.PI;
+  group.add(noSmoking);
+  owned.push(noSmoking.geometry);
   owned.push(signTex, signMat, sign.geometry);
   const redraw = (name: string) => {
     const ctx = signCanvas.getContext('2d');
