@@ -394,6 +394,10 @@ export type CustomerState =
   | 'seated'
   | 'eating'
   | 'complaint'
+  /** 食べ終わって席にいる（団体の連れを待つ・居座り）。席は空かない */
+  | 'afterMeal'
+  /** 退店後に店の前でタバコを吸っている */
+  | 'smoking'
   | 'leaving'
   | 'left'
   | 'abandoned';
@@ -461,6 +465,65 @@ export interface Customer {
   sayStyle?: 'whisper' | null;
   /** 食事の合計時間（秒。食事の途中のセリフに使う） */
   eatTotal?: number;
+  // 以下は第2版 Phase 3（sim/manners.ts）。古いセーブにはないので任意の項目
+  /** 団体（1〜4人。1人なら付けない）。leader の客が団体全体の状態を持つ */
+  group?: CustomerGroup | null;
+  /** 食べ方の汚い客 */
+  messy?: MessyState | null;
+  /** 店外の喫煙 */
+  smoke?: SmokeState | null;
+  /** 迷惑を受けた出来事（トラブルの ID。同じトラブルで二度不満を数えない） */
+  botheredBy?: Id[];
+  /** 吹き出しの種類（第2版: 団体の会話・イベント） */
+  talk?: boolean;
+}
+
+/** 団体客 */
+export interface CustomerGroup {
+  id: Id;
+  size: number;
+  leader: boolean;
+  /** 全員がそろって席を待ち始めた時刻（隣り合った席を待つ上限に使う） */
+  readySince?: number;
+  /** 居座り（leader だけが持つ）。until を過ぎると自分から帰る */
+  linger?: { until: number; startT: number; tried: LingerResponse[]; asked: number } | null;
+  /** 次に会話する時刻（leader だけ） */
+  chatAt?: number;
+  /** 会話の続き（同じ会話を順に話す） */
+  chatLine?: number;
+  chatId?: number;
+}
+
+export type LingerResponse = 'polite' | 'explain' | 'request';
+
+/** 食べ方の汚い客の状態 */
+export interface MessyState {
+  /** 次に汚す時刻（食事の経過秒） */
+  next: number;
+  /** 汚した回数 */
+  count: number;
+  /** 注意されて食べ方を改めた */
+  calmed: boolean;
+  /** 注意された回数（同じ人に何度も注意しない） */
+  warned: number;
+  /** このトラブルの ID（迷惑を受けた客の記録に使う） */
+  troubleId: Id;
+  /** 初めて周りに迷惑をかけた時刻（対応までの時間） */
+  firstBotherT: number | null;
+  /** 迷惑を受けた客と、下がった満足度（よい対応で一部を戻す） */
+  victims: { id: Id; comfort: number; cleanliness: number }[];
+}
+
+/** 店外の喫煙 */
+export interface SmokeState {
+  until: number;
+  troubleId: Id;
+  /** 嫌な思いをした客 */
+  annoyed: { id: Id; comfort: number }[];
+  warned: boolean;
+  /** 無視された回数 */
+  ignored: number;
+  nextCheck: number;
 }
 
 /** クレームの原因 */
@@ -595,6 +658,9 @@ export interface DayStats {
   breakdowns: number;
   remakes: number;
   wasteItems: Record<string, number>;
+  /** 店内外のトラブル（食べ方・居座り・喫煙・店員の口論など）と、そのうち対応したもの（第2版 10。古いセーブにはない） */
+  troubles?: number;
+  troublesHandled?: number;
 }
 
 export interface DayReport extends DayStats {

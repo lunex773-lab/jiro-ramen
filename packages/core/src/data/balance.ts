@@ -225,6 +225,101 @@ export const BALANCE = {
   },
 
   /**
+   * 第2版 Phase 3: 団体客・食べ方の汚い客・居座り・店外の喫煙・トラブル（docs/SALES_IMPROVEMENT_IMPLEMENTATION_PLAN.md「第2版 Phase 3」）。
+   * 値はすべて初期のバランス案。抽選はイベント専用の乱数。チュートリアル中は食べ方・居座り・喫煙は起きない
+   */
+  guests: {
+    group: {
+      /** 1〜4人の来店の割合（1回の来店あたり） */
+      sizeWeights: [0.62, 0.24, 0.09, 0.05] as readonly number[],
+      /** 隣り合った席がそろうのを待つ上限（秒）。過ぎたら人数分の空き席に離れて座る（オーナー回答） */
+      adjacentWait: 40,
+      /** 団体の会話の間隔（秒） */
+      chatFrom: 10,
+      chatTo: 20,
+      /** 会話の吹き出しの秒数（1行あたり） */
+      chatSay: 4,
+      /** 食後に居座る確率（2人以上の団体、1回の来店で1回だけ抽選） */
+      lingerChance: 0.12,
+      /** 居座る時間（秒）。過ぎると自分から帰る */
+      lingerFrom: 70,
+      lingerTo: 150,
+      /** 居座りを「トラブル」として数えるまでの時間（秒）。待っている客がいるときだけ */
+      lingerTroubleAfter: 15,
+    },
+    /** 退店を促す: 受け入れてもらえる確率の元の値（接客の上手さ・客のマナーで変わる） */
+    ask: {
+      polite: 0.5,
+      /** 混雑の説明は、実際に待っている客がいるときだけよく効く */
+      explain: 0.75,
+      explainNotBusy: 0.25,
+      request: 0.85,
+      /** 「お願い」で帰ってもらったとき、気分を害する確率の元（1 − マナー をかける） */
+      offendRequest: 0.6,
+      /** 断られたとき、居座りが延びる秒数 */
+      refusedExtend: 20,
+    },
+    /** 食べ方の汚い客 */
+    messy: {
+      /** 出現率（1人あたり） */
+      chance: 0.04,
+      /** 食事中、この秒数ごとに汚すかを抽選 */
+      every: 6,
+      chancePerCheck: 0.6,
+      /** 汚したときの席の汚れ */
+      counterDirt: 0.14,
+      /** 床にこぼす割合 */
+      floorShare: 0.25,
+      /** 隣の客に飛ぶ割合 */
+      splashShare: 0.45,
+      /** 隣（1つ隣・2つ隣）の客が迷惑に感じる確率の倍率（距離で計算。全員が不快になるわけではない） */
+      nearFactor: 1,
+      farFactor: 0.3,
+      /** 迷惑に感じる確率 = bother × 距離の倍率 ×（0.4 + 清潔さへのこだわり） */
+      bother: 0.6,
+      /** 迷惑を受けた客の満足度の低下（1つのトラブルで1回だけ） */
+      comfortLoss: 0.3,
+      cleanlinessLoss: 0.2,
+      /** 隣の客の席に飛ぶ汚れ */
+      neighborDirt: 0.1,
+      /** よい対応で戻る割合（早いとき・遅いとき）と、早いとみなす秒数 */
+      reliefQuick: 0.6,
+      reliefSlow: 0.3,
+      quickWithin: 30,
+      /** 注意したときの反応: 改める = stopBase + stopManners × マナー、怒る = annoyed × クレームの言いやすさ、残りは聞き流す */
+      stopBase: 0.3,
+      stopManners: 0.55,
+      annoyed: 0.45,
+      /** 改めたあとは汚す確率がこの倍率になる */
+      calmedMult: 0.15,
+      /** 食べ終わったときに残す汚れ（席・床） */
+      leaveDirt: 0.2,
+    },
+    /** 店外の喫煙（食べ終わって店を出た客） */
+    smoke: {
+      chance: 0.06,
+      /** 吸っている時間（秒） */
+      from: 40,
+      to: 80,
+      /** 煙を嫌がる範囲（m）と、確かめる間隔（秒） */
+      radius: 3.2,
+      every: 2,
+      /** 嫌がる確率 =（0.35 + 清潔さへのこだわり × 0.65）。1人1回だけ */
+      comfortLoss: 0.22,
+      /** 声をかけたときの反応: 無視 = ignore ×（1 − マナー）× (0.5 + クレームの言いやすさ)、不満 = displeased × クレームの言いやすさ、謝って立ち去る = apologize、残りはすぐやめる */
+      ignore: 0.6,
+      displeased: 0.45,
+      apologize: 0.45,
+      /** よい対応で戻る割合と、早いとみなす秒数 */
+      reliefQuick: 0.5,
+      reliefSlow: 0.25,
+      quickWithin: 20,
+    },
+    /** 店員の口論を見た周りの客（2つ隣まで）の居心地の低下（1つのトラブルで1回だけ） */
+    witness: { seats: 2, comfortLoss: 0.15 },
+  },
+
+  /**
    * 営業中のイベント（docs/SALES_IMPROVEMENT_IMPLEMENTATION_PLAN.md）。確率・時間はすべて初期のバランス案で、実測した値ではない。
    * 抽選はイベント専用の乱数で行う。チュートリアル中はどのイベントも起きない。
    */

@@ -323,7 +323,9 @@ export class Hud {
     // 操作ボタンは押せるものだけ出す。押せるものがないときは、何か持っているか設備を見ているときだけ、理由を照準の下に小さく出す
     // （空いた席を見ただけで「下げる丼がありません」などが出ると邪魔なため）
     // クレームの対応（最大5つ）は先に出す
-    const enabled = this.verbs.filter((v) => v.enabled).sort((a, b) => Number(b.verb.startsWith('complaint_')) - Number(a.verb.startsWith('complaint_')));
+    // お客さんへの対応（クレーム・居座り・食べ方・喫煙）は先に出す
+    const urgent = (v: string) => Number(/^(complaint_|linger_|manner_|smoke_)/.test(v));
+    const enabled = this.verbs.filter((v) => v.enabled).sort((a, b) => urgent(b.verb) - urgent(a.verb));
     const shown = enabled.slice(0, 5);
     const first = this.verbs[0];
     const explain = me.hand.kind !== 'none' || t?.kind === 'equipment';
@@ -612,12 +614,27 @@ export class Hud {
       } else if (statusTxt) {
         content = h('div', null, h('div', { class: 'detail-title' }, `${def?.name ?? ''}${statusTxt}`), h('div', { class: 'slot' }, '経営メニュー → 設備 から修理を依頼できます'));
       }
+    } else if (t?.kind === 'customer') {
+      key += `${t.c.state}:${t.c.smoke?.warned}:${t.c.smoke?.ignored}`;
+      content = h(
+        'div',
+        null,
+        h('div', { class: 'detail-title' }, '店の前の喫煙'),
+        h('div', { class: 'slot bad' }, '禁煙の張り紙の前でタバコを吸っています。並んでいるお客さんが嫌がります'),
+        t.c.smoke?.ignored ? h('div', { class: 'slot' }, `聞き流されました（${t.c.smoke.ignored}回）。もう一度声をかけられます`) : null,
+      );
     } else if (t?.kind === 'seat' && (t.seat.customerId || t.seat.dirt > 0.05)) {
       // 空いていてきれいな席は何も出さない
       const c = s.customers.find((x) => x.id === t.seat.customerId);
       const o = s.orders.find((x) => x.seatId === t.seat.id && x.customerId === t.seat.customerId);
-      key += `${c?.state}:${o?.status}:${o?.callRevealed}:${Math.floor(t.seat.dirt * 10)}:${c ? Math.floor(c.patience / 10) : ''}:${c?.complaint?.id ?? ''}:${c?.complaint?.tried.length ?? 0}`;
+      key += `${c?.state}:${o?.status}:${o?.callRevealed}:${Math.floor(t.seat.dirt * 10)}:${c ? Math.floor(c.patience / 10) : ''}:${c?.complaint?.id ?? ''}:${c?.complaint?.tried.length ?? 0}:${c?.messy?.count ?? ''}:${c?.messy?.calmed ?? ''}:${c?.botheredBy?.length ?? 0}`;
       const cp = c && c.state === 'complaint' ? c.complaint : null;
+      // 団体・居座り・食べ方（第2版 Phase 3）
+      const lead = c?.group ? s.customers.find((x) => x.group?.id === c.group!.id && x.group.leader) : null;
+      const lg = lead?.group?.linger;
+      const lingering = !!c && c.state === 'afterMeal' && !!lg && s.t < lg.until;
+      const waiting = s.queue.length + s.insideQueue.length;
+      const bothered = !!c && !c.messy && (c.botheredBy?.length ?? 0) > 0 && (c.state === 'eating' || c.state === 'seated');
       content = h(
         'div',
         null,
@@ -626,6 +643,11 @@ export class Hud {
         o ? h('div', { class: 'slot' }, o.callRevealed ? `コール: ${callToShort(o.call)}` : 'コール: まだ聞いていません') : null,
         c && c.state === 'complaint' ? h('div', { class: 'slot bad' }, cp ? `クレーム（${COMPLAINT_CAUSE_LABEL[cp.cause]}）: ${cp.text}` : `クレーム: ${c.complaintReason}`) : null,
         cp?.cause === 'unreasonable' ? h('div', { class: 'slot' }, '無理な要求は ✋断る か 💬説明 でもかまいません') : null,
+        c?.group && c.group.size > 1 ? h('div', { class: 'slot' }, `${c.group.size}人連れ`) : null,
+        c && c.state === 'afterMeal' && !lingering ? h('div', { class: 'slot' }, '食べ終わって連れを待っている') : null,
+        lingering ? h('div', { class: `slot ${waiting > 0 ? 'bad' : 'warn'}` }, `食べ終わっても話し込んでいる${waiting > 0 ? `（${waiting}人が席を待っています）` : ''}`) : null,
+        c?.messy && c.messy.count > 0 ? h('div', { class: `slot ${c.messy.calmed ? '' : 'bad'}` }, c.messy.calmed ? '食べ方を改めてくれた' : `食べ方が汚い（${c.messy.count}回こぼした）。☝️注意・🧻周りを拭く・🚪退店を促す`) : null,
+        bothered ? h('div', { class: 'slot warn' }, '隣の客の食べ方を嫌がっている（💺別の席へ移ってもらえます）') : null,
         t.seat.dirt > 0.05 ? h('div', { class: 'slot warn' }, `カウンターの汚れ ${Math.round(t.seat.dirt * 100)}%`) : null,
       );
     }

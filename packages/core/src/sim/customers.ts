@@ -28,6 +28,7 @@ import { canComplain, startComplaint } from './complaints';
 import { addDaily, dailyCount, eventDemandFactor, ensureEvents, eventsAllowed, evRand, noteDraw, noteFire, takeForced } from './events';
 import { hasRolled, markRolled, onCustomerArrive, onVisitEnd } from './visitors';
 import { COMPLAINT_TEXT, UNREASONABLE_TEXT } from '../data/events';
+import { drawGroupSize, findGroupSeats, groupMembers, holdAfterMeal, leaveAfterMeal, meanGroupSize, messyLeaveDirt, rollMessy } from './manners';
 
 // ───────────────────────── 生成 ─────────────────────────
 
@@ -219,11 +220,14 @@ export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
   if (s.phase !== 'open') return;
   // 練習の日（営業0日目）は、チュートリアルが決まったお客さんだけを呼ぶ
   if (s.tutorial?.kind === 'basics') return;
-  s.arrivalAcc += arrivalRate(s) * dt;
+  // 1回の来店は1〜4人。来店の回数を平均の人数で割り、1日の客数を今と同じくらいに保つ（オーナー回答）
+  s.arrivalAcc += (arrivalRate(s) * dt) / meanGroupSize();
   while (s.arrivalAcc >= 1) {
     s.arrivalAcc -= 1 + randRange(s, -0.3, 0.3);
+    // 来店の人数（帰ってしまった客も人数で数える）
+    const planned = s.tutorial ? 1 : drawGroupSize(s);
     if (activeCustomers(s) >= BALANCE.customers.maxCustomers) {
-      s.today.balked += 1;
+      s.today.balked += planned;
       continue;
     }
     // 常連の来店
@@ -241,7 +245,7 @@ export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
     const L = s.queue.length;
     const join = clamp01(1 - L * BALANCE.customers.balkPerQueue * (1.3 - c.traits.patience) + (s.reputation - 3) * 0.08 + (regular ? 0.3 : 0));
     if (rand(s) > join) {
-      s.today.balked += 1;
+      s.today.balked += regular ? 1 : planned;
       continue;
     }
     s.customers.push(c);
@@ -250,12 +254,32 @@ export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
     emit(ctx, { type: 'arrive', targetId: c.id });
     // SNS を見て来た客・覆面調査員・珍しい客。カップルなら一緒に来た彼氏がすぐ後ろに並ぶ
     const partner = onCustomerArrive(s, c, ctx);
+    const members: Customer[] = [c];
     if (partner) {
       s.customers.push(partner);
       s.queue.push(partner.id);
       s.today.customers += 1;
       emit(ctx, { type: 'arrive', targetId: partner.id });
+      members.push(partner);
+    } else if (!regular && !c.special && !s.tutorial) {
+      // 団体（2〜4人）: 一緒に並び、それぞれ食券を買う
+      const size = Math.min(planned, BALANCE.customers.maxCustomers - activeCustomers(s) + 1);
+      for (let i = 1; i < size; i++) {
+        const m = makeCustomer(s, null);
+        m.pos = { x: c.pos.x + 0.45 * i, z: c.pos.z + (i % 2 === 0 ? 0 : 0.3) };
+        if (c.fromBuzz) m.fromBuzz = true;
+        s.customers.push(m);
+        s.queue.push(m.id);
+        s.today.customers += 1;
+        emit(ctx, { type: 'arrive', targetId: m.id });
+        members.push(m);
+      }
     }
+    if (members.length > 1) {
+      const gid = newId(s, 'g');
+      members.forEach((m, i) => (m.group = { id: gid, size: members.length, leader: i === 0 }));
+    }
+    for (const m of members) if (!m.special) rollMessy(s, m);
   }
 }
 
@@ -361,6 +385,7 @@ export function sayFor(c: Customer, s: GameState, text: string, sec = 3): void {
   c.say = text;
   c.sayUntil = s.t + sec;
   c.sayStyle = null;
+  if (c.talk) c.talk = false;
 }
 
 export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
@@ -407,7 +432,9 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
         c.queueWait += dt;
         c.patience -= dt * 0.55;
         const front = s.queue[0] === c.id;
-        const roomInside = s.insideQueue.length < st.waitSpots.length;
+        // 団体は、連れが店内で待っていれば待ち場所がいっぱいでも一緒に入る（全員そろわないと座れないため）
+        const mateInside = !!c.group && s.insideQueue.some((id) => s.customers.find((x) => x.id === id)?.group?.id === c.group!.id);
+        const roomInside = s.insideQueue.length < st.waitSpots.length || mateInside;
         if (s.phase === 'closing' && front) {
           // 閉店後は店外の客は帰る（店の評価には影響しない）
           leaveQueue(s, c, ctx, true);
@@ -417,6 +444,7 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
           sayFor(c, s, '…並びすぎ。帰ろう');
           c.sat.speed = 0.1;
           leaveQueue(s, c, ctx, false);
+          leaveWaitingGroup(s, c, ctx);
           break;
         }
         if (front && roomInside && !ticketBusy && c.path.length === 0) {
@@ -494,13 +522,16 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
           removeFromInsideQueue(s, c.id);
           finalizeVisit(s, c, ctx, true);
           startLeaving(s, c, ctx, 'abandoned');
+          leaveWaitingGroup(s, c, ctx);
           break;
         }
         const firstDiner = s.insideQueue.find((id) => {
           const x = s.customers.find((y) => y.id === id);
           return x && !x.forLostItem;
         });
-        if (firstDiner === c.id) {
+        if (firstDiner === c.id && c.group && groupMembers(s, c).length > 1) {
+          seatGroup(s, c);
+        } else if (firstDiner === c.id) {
           const seat = freeSeat(s, c);
           if (seat) {
             removeFromInsideQueue(s, c.id);
@@ -570,8 +601,9 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
         if (c.eatLeft <= 0) {
           const seat = s.seats.find((x) => x.id === c.seatId);
           if (seat) finishEating(s, c, seat, ctx);
-          finalizeVisit(s, c, ctx, false);
-          startLeaving(s, c, ctx, 'left');
+          // 団体はまだ食べている連れを席で待ち、全員で帰る（居座ることもある。manners.ts）
+          if (holdAfterMeal(s, c)) break;
+          leaveAfterMeal(s, c, ctx);
         }
         break;
       }
@@ -611,6 +643,46 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
   // 退店済みの客を一定時間後に削除
   s.customers = s.customers.filter((c) => !(c.state === 'left' || c.state === 'abandoned') || c.stateTime < 1);
   s.orders = s.orders.filter((o) => o.status === 'waiting' || s.customers.some((c) => c.orderId === o.id));
+}
+
+/** 団体の席: 全員が店内で待ち始めたら、隣り合った席を優先して一緒に座る（そろわなければ少し待って離れて座る） */
+function seatGroup(s: GameState, c: Customer): void {
+  const members = groupMembers(s, c);
+  // 連れがまだ食券を買っている・並んでいる
+  if (!members.every((m) => m.state === 'waitingSeat')) return;
+  const g = c.group!;
+  if (g.readySince === undefined) for (const m of members) m.group!.readySince = s.t;
+  const n = stageOf(s).seats.length;
+  const free = s.seats.filter((seat) => seat.installed && !seat.customerId && !seat.bowlId && seat.index < n);
+  const seats = findGroupSeats(s, free, members.length, s.t - (c.group!.readySince ?? s.t));
+  if (!seats) return;
+  // 並んでいる順に、左の席から
+  const order = [...members].sort((a, b) => s.insideQueue.indexOf(a.id) - s.insideQueue.indexOf(b.id));
+  order.forEach((m, i) => {
+    const seat = seats[i]!;
+    removeFromInsideQueue(s, m.id);
+    seat.customerId = m.id;
+    m.seatId = seat.id;
+    m.state = 'toSeat';
+    m.stateTime = 0;
+    setTarget(m, findPath(s, m.pos, seatPos(s, seat), 'customer')?.points ?? [seatPos(s, seat)]);
+  });
+}
+
+/** 団体の誰かが待ちきれずに帰ったら、まだ席に着いていない連れも一緒に帰る */
+function leaveWaitingGroup(s: GameState, c: Customer, ctx: SimCtx): void {
+  if (!c.group) return;
+  for (const m of groupMembers(s, c)) {
+    if (m.id === c.id) continue;
+    if (m.state === 'queue' || m.state === 'arriving') {
+      leaveQueue(s, m, ctx, false);
+    } else if (m.state === 'waitingSeat' || m.state === 'ticket') {
+      s.today.lost += 1;
+      removeFromInsideQueue(s, m.id);
+      finalizeVisit(s, m, ctx, true);
+      startLeaving(s, m, ctx, 'abandoned');
+    }
+  }
 }
 
 function removeFromInsideQueue(s: GameState, id: string): void {
@@ -781,9 +853,11 @@ function finishEating(s: GameState, c: Customer, seat: Seat, ctx: SimCtx): void 
     b.state = 'dirty';
     if (b.contents) b.contents = null;
   }
-  if (tidy) seat.dirt = 0;
+  if (tidy && !c.messy) seat.dirt = 0;
   else seat.dirt = clamp01(seat.dirt + BALANCE.cleaning.counterDirtPerCustomer);
-  if (tidy) emit(ctx, { type: 'tidy', targetId: seat.id });
+  if (tidy && !c.messy) emit(ctx, { type: 'tidy', targetId: seat.id });
+  // 食べ方の汚い客は多めに汚して帰る
+  messyLeaveDirt(s, c, seat);
   // 床の汚れ・こぼし
   const p = seatPos(s, seat);
   if (rand(s) < BALANCE.cleaning.floorDirtChance) addDirt(s, { x: p.x + randRange(s, -0.3, 0.3), z: p.z - randRange(s, 0.2, 0.6) }, 'grime', 'dining');

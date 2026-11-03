@@ -59,6 +59,9 @@ export const TASK_KINDS: Record<string, { label: string; base: number; roles: Em
   toppings: { label: 'トッピング', base: 82, roles: ['cook'] },
   askCall: { label: 'コール確認', base: 80, roles: ['server', 'cook'] },
   lostReturn: { label: '忘れ物の返却', base: 79, roles: ['server', 'cleaner', 'cook'] },
+  manner: { label: '食べ方の注意', base: 74, roles: ['server', 'cook'] },
+  linger: { label: '居座りへの声かけ', base: 64, roles: ['server', 'cook'] },
+  smoke: { label: '店外の喫煙への声かけ', base: 46, roles: ['server', 'cleaner'] },
   noodlesIn: { label: '麺を入れる', base: 76, roles: ['cook'] },
   tare: { label: 'タレ', base: 72, roles: ['cook'] },
   soup: { label: 'スープ', base: 71, roles: ['cook'] },
@@ -226,6 +229,27 @@ export function morningRollCall(s: GameState, ctx: SimCtx): void {
   rollCall(s, ctx);
 }
 
+/**
+ * 従業員の道のり。店内は経路探索、店の外（歩道）へは入口を通る（店の前の喫煙客に声をかけるときなど）。
+ * 店の外にいるときは入口から店内へ戻る
+ */
+function staffRoute(s: GameState, from: Vec2, to: Vec2): { points: Vec2[]; cost: number } | null {
+  const st = stageOf(s);
+  const doorX = (st.door.x0 + st.door.x1) / 2;
+  const inner = { x: doorX, z: 0.35 };
+  const outer = { x: doorX, z: -0.5 };
+  if (from.z >= 0 && to.z >= 0) return findPath(s, from, to, 'staff');
+  if (from.z >= 0 && to.z < 0) {
+    const r = findPath(s, from, inner, 'staff');
+    if (!r) return null;
+    return { points: [...r.points, outer, to], cost: r.cost + dist(inner, outer) + dist(outer, to) };
+  }
+  if (from.z < 0 && to.z < 0) return { points: [to], cost: dist(from, to) };
+  const r = findPath(s, inner, to, 'staff');
+  if (!r) return null;
+  return { points: [outer, inner, ...r.points], cost: dist(from, outer) + dist(outer, inner) + r.cost };
+}
+
 function releaseTask(e: Employee): void {
   e.ai.taskId = null;
   e.ai.steps = [];
@@ -313,6 +337,20 @@ export function buildTasks(s: GameState): Task[] {
     for (const seat of s.seats) {
       const cust = s.customers.find((c) => c.id === seat.customerId);
       if (cust && cust.state === 'complaint') add('complaint', `complaint:${seat.id}`, [step(seat.id, complaintVerbFor(cust))]);
+      // 食べ方の汚い客: 何度か汚したら注意する（一度だけ）
+      if (cust && cust.messy && cust.messy.count >= 2 && !cust.messy.calmed && cust.messy.warned === 0 && cust.state === 'eating') add('manner', `manner:${cust.id}`, [step(seat.id, 'manner_warn')]);
+      // 居座り: 待っている客がいて、しばらく経ったら退店を促す（混雑の説明から）
+      if (cust && cust.group?.leader) {
+        const lg = cust.group.linger;
+        if (lg && s.t < lg.until && s.t - lg.startT >= BALANCE.guests.group.lingerTroubleAfter && s.queue.length + s.insideQueue.length > 0) {
+          const resp = (['explain', 'polite', 'request'] as const).find((r) => !lg.tried.includes(r));
+          if (resp) add('linger', `linger:${cust.group.id}`, [step(seat.id, `linger_${resp}`)]);
+        }
+      }
+    }
+    // 店の前の喫煙: 声をかける（店の外へ出る）
+    for (const c of s.customers) {
+      if (c.state === 'smoking' && c.smoke && !c.smoke.warned && c.path.length === 0 && c.smoke.until > 0) add('smoke', `smoke:${c.id}`, [step(c.id, 'smoke_warn')]);
     }
     // ── 仕込み ──
     for (const r of Object.values(PREP_RECIPES)) {
@@ -392,7 +430,7 @@ function canTake(s: GameState, e: Employee, t: Task): boolean {
   if (override !== undefined && override <= -100) return false;
   if (kind.roles.includes(e.profile.role)) {
     // 調理担当の接客系は、接客担当がいないときだけ
-    if (e.profile.role === 'cook' && (t.kind === 'serve' || t.kind === 'askCall' || t.kind === 'complaint')) {
+    if (e.profile.role === 'cook' && (t.kind === 'serve' || t.kind === 'askCall' || t.kind === 'complaint' || t.kind === 'manner' || t.kind === 'linger')) {
       const servers = s.employees.some((x) => x.presentToday && x.profile.role === 'server');
       if (servers && t.kind !== 'serve') return false;
     }
@@ -525,7 +563,7 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
           let best: Vec2[] | null = null;
           let bestCost = Infinity;
           for (const p of pts) {
-            const r = findPath(s, e.pos, p, 'staff');
+            const r = staffRoute(s, e.pos, p);
             if (r && r.cost < bestCost) {
               bestCost = r.cost;
               best = r.points;
@@ -584,6 +622,17 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
       continue;
     }
     if (e.ai.taskId && e.ai.steps.length === 0) finishTask(e);
+    // 店の外（喫煙客への声かけのあと）にいるときは、まず店内へ戻る
+    if (e.pos.z < 0) {
+      if (e.ai.path.length === 0) {
+        const st = stageOf(s);
+        e.ai.path = staffRoute(s, e.pos, { x: st.staffSpawn.x, z: st.staffSpawn.z })?.points ?? [];
+      }
+      e.ai.state = 'moving';
+      e.ai.note = '店内へ戻る';
+      moveAlong(e, dt, walkSpeed(s, e));
+      continue;
+    }
     // 新しい仕事を選ぶ
     e.ai.cooldown -= dt;
     if (e.ai.cooldown > 0) continue;

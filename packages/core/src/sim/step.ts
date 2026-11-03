@@ -19,6 +19,7 @@ import { updateTutorial } from './tutorial';
 import { accidentHalted } from './events';
 import { stepHalted, updateAccident } from './accident';
 import { updateVisitors } from './visitors';
+import { updateManners } from './manners';
 
 /** 1ステップの最大時間（大きな dt は分割する） */
 const MAX_DT = 0.25;
@@ -61,6 +62,8 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
     spawnLostItemOwners(s, ctx);
   }
   updateCustomers(s, dt, ctx);
+  // 団体の食後・会話、食べ方の汚い客、店外の喫煙
+  updateManners(s, dt, ctx);
   updateVisitors(s, ctx);
   housekeeping(s, dt, ctx);
   updateAccident(s, dt, ctx);

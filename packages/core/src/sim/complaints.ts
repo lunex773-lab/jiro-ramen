@@ -14,6 +14,7 @@ import { cash, recordPL } from './economy';
 import { ensureEvents, evRand } from './events';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { argueChance, noteComplaintHandled, noteTemper } from './staff';
+import { noteTrouble, witnessStaffTrouble } from './manners';
 
 const C = BALANCE.events.complaint;
 
@@ -112,6 +113,7 @@ export function respondToComplaint(s: GameState, ctx: SimCtx, seat: Seat, a: Act
       c.sat.service *= 0.7;
       a.say = { text: pick(ensureEvents(s), STAFF_TALKBACK.rude), until: s.t + T.sayFor };
       noteTemper(s, a, 'rude');
+      noteTrouble(s);
     } else {
       argue(s, ctx, c, seat, a, resp);
       return;
@@ -227,6 +229,8 @@ function argue(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, e: Employee, 
   const ev = ensureEvents(s);
   e.say = { text: pick(ev, STAFF_TALKBACK.staff), until: s.t + BALANCE.staff.temper.sayFor };
   noteComplaintHandled(s, e, false);
+  // 周りの客も口論を見ている（2つ隣まで。1つのトラブルで1回だけ）
+  witnessStaffTrouble(s, seat, newId(s, 'tr'));
   c.sat.service = 0;
   c.traits.reviewPropensity = 0;
   addReview(s, c, 1, [STAFF_TALKBACK.review], !!c.regularId);
@@ -247,6 +251,7 @@ function abandon(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, e: Employee
   e.ai.note = 'クレーム対応を放棄した';
   c.sat.service *= 0.7;
   noteTemper(s, e, 'abandon');
+  noteTrouble(s);
   notify(s, ctx, `abandon:${e.id}`, 'warn', `${e.profile.name}さんがクレーム対応を途中で放棄しました（${seat.index + 1}番席）`);
   emit(ctx, { type: 'staffAbandon', actorId: e.id, targetId: seat.id });
 }

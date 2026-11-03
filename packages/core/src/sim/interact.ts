@@ -10,6 +10,8 @@ import { PREP_RECIPES, type PrepRecipe } from '../data/prep';
 import { accessPoint, equipmentCenter, seatKitchenPoint, seatPos } from '../geometry';
 import type {
   Bowl,
+  Customer,
+  LingerResponse,
   ComplaintResponse,
   DayPhase,
   DirtSpot,
@@ -42,6 +44,8 @@ import { addLot, addTrash, consume, discardWaste, stockOf } from './inventory';
 import { emit, notify, type SimCtx } from './notices';
 import { leaveFromInsideQueue, onServed } from './customers';
 import { planComplaintResponse, respondToComplaint } from './complaints';
+import { askToLeave, lingerBlocked, mannerBlocked, respondManner, smokeBlocked, warnSmoker } from './manners';
+import { LINGER_RESPONSE_LABEL, MANNER_RESPONSE_LABEL } from '../data/events';
 import { accidentHalted } from './events';
 
 export type Actor = Player | Employee;
@@ -50,7 +54,9 @@ export type Target =
   | { kind: 'equipment'; id: Id; e: Equipment }
   | { kind: 'seat'; id: Id; seat: Seat }
   | { kind: 'dirt'; id: Id; dirt: DirtSpot }
-  | { kind: 'lost'; id: Id; lost: LostItem };
+  | { kind: 'lost'; id: Id; lost: LostItem }
+  /** 店の前でタバコを吸っている客（第2版 9） */
+  | { kind: 'customer'; id: Id; c: Customer };
 
 export type Args = Record<string, string | number | boolean> | null;
 
@@ -67,6 +73,8 @@ export function resolveTarget(s: GameState, id: Id): Target | null {
   if (dirt) return { kind: 'dirt', id, dirt };
   const lost = s.lostItems.find((x) => x.id === id);
   if (lost) return { kind: 'lost', id, lost };
+  const c = s.customers.find((x) => x.id === id && x.state === 'smoking');
+  if (c) return { kind: 'customer', id, c };
   return null;
 }
 
@@ -83,6 +91,8 @@ export function targetPoints(s: GameState, t: Target): Vec2[] {
       const seat = s.seats.find((x) => x.id === t.lost.seatId);
       return seat ? [seatPos(s, seat), seatKitchenPoint(s, seat)] : [];
     }
+    case 'customer':
+      return [t.c.pos];
   }
 }
 
@@ -914,6 +924,26 @@ const VERBS: VerbDef[] = [
   complaintVerb('refund'),
   complaintVerb('explain'),
   complaintVerb('refuse'),
+  // 第2版 Phase 3: 居座り・食べ方の汚い客・店外の喫煙への対応
+  lingerVerb('polite'),
+  lingerVerb('explain'),
+  lingerVerb('request'),
+  mannerVerb('warn', 1.5),
+  mannerVerb('wipe', BALANCE.cleaning.wipeTime),
+  mannerVerb('move', 2),
+  mannerVerb('leave', 2),
+  {
+    id: 'smoke_warn',
+    match: (t) => t.kind === 'customer',
+    phases: ['open', 'closing'],
+    skill: 'service',
+    plan: (_s, _a, t) => {
+      const label = MANNER_RESPONSE_LABEL.smoke;
+      const why = smokeBlocked((t as { c: Customer }).c);
+      return why ? no(label, why) : ok(label, 1.5, 1);
+    },
+    applyUnit: (s, a, t, _args, ctx) => warnSmoker(s, ctx, (t as { c: Customer }).c, a),
+  },
 
   // ── 床の汚れ ──
   {
@@ -950,6 +980,40 @@ function complaintVerb(resp: ComplaintResponse): VerbDef {
       return p.reason === null ? ok(p.label, p.time, 1) : no(p.label, p.reason);
     },
     applyUnit: (s, a, t, _args, ctx) => respondToComplaint(s, ctx, seatOf(t), a, resp),
+  };
+}
+
+/** 退店を促す動詞（linger_polite / linger_explain / linger_request） */
+function lingerVerb(resp: LingerResponse): VerbDef {
+  return {
+    id: `linger_${resp}`,
+    match: (t) => t.kind === 'seat',
+    phases: ['open', 'closing'],
+    skill: 'service',
+    plan: (s, _a, t) => {
+      const label = LINGER_RESPONSE_LABEL[resp];
+      const why = lingerBlocked(s, seatOf(t), resp);
+      return why ? no(label, why) : ok(label, 2, 1);
+    },
+    applyUnit: (s, a, t, _args, ctx) => askToLeave(s, ctx, seatOf(t), a, resp),
+  };
+}
+
+/** 食べ方の汚い客への対応の動詞（manner_warn / manner_wipe / manner_move / manner_leave） */
+function mannerVerb(kind: 'warn' | 'wipe' | 'move' | 'leave', time: number): VerbDef {
+  return {
+    id: `manner_${kind}`,
+    match: (t) => t.kind === 'seat',
+    phases: ['open', 'closing'],
+    skill: kind === 'wipe' ? 'clean' : 'service',
+    plan: (s, a, t) => {
+      const label = MANNER_RESPONSE_LABEL[kind];
+      const why = mannerBlocked(s, seatOf(t), kind);
+      if (why) return no(label, why);
+      if (kind === 'wipe' && !(handIsEmpty(a.hand) || a.hand.kind === 'dirty')) return no(label, '手がふさがっています');
+      return ok(label, time, 1);
+    },
+    applyUnit: (s, a, t, _args, ctx) => respondManner(s, ctx, seatOf(t), a, kind),
   };
 }
 

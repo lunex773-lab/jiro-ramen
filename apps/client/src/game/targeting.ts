@@ -45,6 +45,11 @@ export function interactableBoxes(s: GameState): Box[] {
   for (const d of s.dirt) {
     out.push({ id: d.id, min: [d.pos.x - 0.4, 0, d.pos.z - 0.4], max: [d.pos.x + 0.4, 0.08, d.pos.z + 0.4] });
   }
+  // 店の前でタバコを吸っている客（店の外。声をかけられる）
+  for (const c of s.customers) {
+    if (c.state !== 'smoking' || c.path.length > 0) continue;
+    out.push({ id: c.id, min: [c.pos.x - 0.3, 0, c.pos.z - 0.3], max: [c.pos.x + 0.3, 1.8, c.pos.z + 0.3] });
+  }
   return out;
 }
 
@@ -156,5 +161,7 @@ export function targetName(s: GameState, t: Target): string {
       return t.dirt.kind === 'spill' ? 'こぼれたスープ' : '床の汚れ';
     case 'lost':
       return `忘れ物（${t.lost.kind}）`;
+    case 'customer':
+      return '店の前でタバコを吸っている客（禁煙）';
   }
 }
