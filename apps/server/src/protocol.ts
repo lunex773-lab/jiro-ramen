@@ -50,7 +50,7 @@ const isRot = (v: unknown): boolean => v === 0 || v === 1 || v === 2 || v === 3;
 const isSmall = (v: unknown): boolean => isFiniteNum(v) && Math.abs(v) <= 2;
 const isVec = (v: unknown): boolean => isObj(v) && isSmall(v.x) && isSmall(v.z) && Object.keys(v).length === 2;
 const optVec = (v: unknown): boolean => v === undefined || isVec(v);
-const isRole = (v: unknown): boolean => v === 'cook' || v === 'server' || v === 'cleaner';
+const isRole = (v: unknown): boolean => v === 'cook' || v === 'server' || v === 'cleaner' || v === 'prep';
 /** シフト（null はその曜日を休みにする）。中身の範囲は core の shiftProblem でも確かめる */
 function isShift(v: unknown): boolean {
   if (v === null) return true;

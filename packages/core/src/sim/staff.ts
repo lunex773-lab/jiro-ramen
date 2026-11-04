@@ -186,7 +186,7 @@ export function staffLog(e: Employee, n = 8): StaffLogEntry[] {
 /** 担当の仕事の能力 */
 export function roleSkill(e: Employee): number {
   const sk = e.profile.skills;
-  return e.profile.role === 'cook' ? sk.cooking : e.profile.role === 'server' ? sk.service : sk.hygiene;
+  return e.profile.role === 'cook' || e.profile.role === 'prep' ? sk.cooking : e.profile.role === 'server' ? sk.service : sk.hygiene;
 }
 
 export interface PromotionCheck {

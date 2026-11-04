@@ -123,8 +123,8 @@ export function consume(s: GameState, itemId: string, qty: number): Consumed {
     minFresh = Math.min(minFresh, lotFreshness(s, l));
   }
   s.inventory = s.inventory.filter((l) => l.qty > 1e-6);
-  // 仕入れる食材の使用量を数える（売れ行きに合わせる自動発注のため）
-  if (INGREDIENTS[itemId]?.purchasable) {
+  // 使用量を数える（仕入れる食材は「売れ行きに合わせる」自動発注、仕込みで作る物は従業員の仕込みの目安に使う）
+  if (INGREDIENTS[itemId]) {
     const u = (s.today.usedItems ??= {});
     u[itemId] = (u[itemId] ?? 0) + qty;
   }
@@ -154,10 +154,11 @@ export function autoOrderTarget(s: GameState, itemId: string): number {
 
 /** 品切れのもとの食材（仕込みで作る物 → 仕入れる食材）。閉店後の原因の説明と「売れ行きに合わせる」自動発注で使う */
 export const STOCKOUT_SOURCE: Record<string, { raw: string[]; label: string }> = {
-  buta: { raw: ['pork_raw'], label: '豚' },
-  'menu:buta': { raw: ['pork_raw'], label: '豚（売り切れ）' },
+  // 豚の煮込み・背脂を炊くのには醤油も使う（醤油が足りないと豚肉があっても煮込めない）
+  buta: { raw: ['pork_raw', 'soy'], label: '豚' },
+  'menu:buta': { raw: ['pork_raw', 'soy'], label: '豚（売り切れ）' },
   yasai: { raw: ['moyashi', 'cabbage'], label: 'ヤサイ' },
-  abura: { raw: ['backfat_raw'], label: 'アブラ' },
+  abura: { raw: ['backfat_raw', 'soy'], label: 'アブラ' },
   garlic: { raw: ['garlic_raw'], label: 'ニンニク' },
   ichimi: { raw: ['ichimi'], label: '一味' },
   'menu:noodle': { raw: ['noodle'], label: '麺（売り切れ）' },

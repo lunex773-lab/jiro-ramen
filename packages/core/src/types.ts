@@ -131,7 +131,8 @@ export interface Player extends ActorBase {
   lastMoveAt: number;
 }
 
-export type EmployeeRole = 'cook' | 'server' | 'cleaner';
+/** 担当。prep（仕込み担当）はオーナーの判断で追加（拡張して杯数が増えたときに仕込みを専門にする） */
+export type EmployeeRole = 'cook' | 'server' | 'cleaner' | 'prep';
 
 export interface EmployeeSkills {
   speed: number;

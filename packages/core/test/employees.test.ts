@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, buildTasks, dailyWageOf, expectedPay, refreshCandidates, step } from '../src';
+import { applyAction, buildTasks, dailyWageOf, expectedPay, refreshCandidates, ROLE_LABEL, step, TASK_KINDS } from '../src';
 import { addBot, newGame, runDay } from './helpers';
 
 describe('従業員', () => {
@@ -87,5 +87,33 @@ describe('従業員', () => {
     for (let i = 0; i < 200; i++) step(s, 0.1, ctx);
     expect(s.seats[0]!.dirt).toBe(1);
     expect(buildTasks(s).some((t) => t.kind === 'wipe')).toBe(true);
+  });
+  it('仕込み担当は仕込み（と片付け）だけをして、麺上げ・盛り付け・提供はしない', () => {
+    const { s, ctx } = newGame(71);
+    addBot(s, 'cook');
+    const p = addBot(s, 'prep');
+    s.reputation = 4;
+    applyAction(s, 'p1', { type: 'openShop' }, ctx);
+    const kinds = new Set<string>();
+    const byLabel = new Map(Object.entries(TASK_KINDS).map(([k, v]) => [v.label, k]));
+    for (let i = 0; i < 5400 && s.phase === 'open'; i++) {
+      step(s, 0.1, ctx);
+      if (p.ai.taskId && p.ai.note) kinds.add(byLabel.get(p.ai.note) ?? p.ai.note);
+    }
+    expect(kinds.size).toBeGreaterThan(0);
+    for (const k of kinds) expect(['prep', 'prepUrgent', 'tidyHand', 'spill']).toContain(k);
+    expect(kinds.has('prep') || kinds.has('prepUrgent')).toBe(true);
+  });
+
+  it('採用の候補に仕込み担当が出る', () => {
+    const roles = new Set<string>();
+    for (let seed = 1; seed <= 12; seed++) {
+      const { s } = newGame(seed);
+      s.career.unlocked.push('hiring');
+      refreshCandidates(s);
+      for (const c of s.candidates) roles.add(c.profile.role);
+    }
+    expect(roles.has('prep')).toBe(true);
+    expect(ROLE_LABEL.prep).toBe('仕込み担当');
   });
 });

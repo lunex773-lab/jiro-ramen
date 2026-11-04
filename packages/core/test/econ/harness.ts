@@ -12,6 +12,7 @@ import {
   STAGES,
   step,
   type DayReport,
+  type EmployeeRole,
   type GameState,
   type SimCtx,
 } from '../../src';
@@ -151,13 +152,26 @@ export function runCase(policy: CasePolicy, days: number, seed = 777): { rows: D
 
 // ───────────────── 経営のしかた（設計書 §4.3 の10ケース） ─────────────────
 
-function hireCheapest(s: GameState, ctx: SimCtx, role?: 'cook' | 'server' | 'cleaner'): boolean {
+function hireCheapest(s: GameState, ctx: SimCtx, role?: EmployeeRole): boolean {
   if (!s.career.unlocked.includes('hiring')) return false;
   if (s.candidates.length === 0) refreshCandidates(s);
   const list = s.candidates.filter((c) => !role || c.profile.role === role).sort((a, b) => a.profile.wage - b.profile.wage);
   const c = list[0] ?? s.candidates[0];
   if (!c) return false;
   return applyAction(s, 'p1', { type: 'hire', candidateId: c.id }, ctx).ok;
+}
+
+/** 仕込み担当を雇う（候補に仕込み担当がいなければ調理担当を雇って担当を仕込みに変える） */
+function hirePrep(s: GameState, ctx: SimCtx): boolean {
+  if (!s.career.unlocked.includes('hiring')) return false;
+  if (s.candidates.length === 0) refreshCandidates(s);
+  const list = s.candidates.filter((c) => c.profile.role === 'prep' || c.profile.role === 'cook').sort((a, b) => a.profile.wage - b.profile.wage);
+  const c = list[0];
+  if (!c) return false;
+  if (!applyAction(s, 'p1', { type: 'hire', candidateId: c.id }, ctx).ok) return false;
+  const e = s.employees[s.employees.length - 1]!;
+  if (e.profile.role !== 'prep') applyAction(s, 'p1', { type: 'setRole', employeeId: e.id, role: 'prep' }, ctx);
+  return true;
 }
 
 function setAllPrices(s: GameState, ctx: SimCtx, mult: number): void {
@@ -327,6 +341,17 @@ export const CASES: CasePolicy[] = [
     morning: (s, ctx) => {
       if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
       else if (s.career.stage >= 1 && s.employees.length < 3) hireCheapest(s, ctx, 'server');
+    },
+    evening: (s, ctx) => growCarefully(s, ctx),
+  },
+  {
+    id: 'c18_growth_prep',
+    name: '18. 17の接客担当の代わりに、拡張後は仕込み担当を雇う（資金に余裕ができたら接客担当も）',
+    setup: salesMode,
+    morning: (s, ctx) => {
+      if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
+      else if (s.career.stage >= 1 && s.employees.length < 3) hirePrep(s, ctx);
+      else if (s.career.stage >= 1 && s.employees.length < 4 && s.money >= 400_000) hireCheapest(s, ctx, 'server');
     },
     evening: (s, ctx) => growCarefully(s, ctx),
   },

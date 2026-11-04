@@ -51,11 +51,12 @@ export const ROLE_LABEL: Record<EmployeeRole, string> = {
   cook: '調理担当',
   server: '接客担当',
   cleaner: '清掃・洗い場担当',
+  prep: '仕込み担当',
 };
 
 /** 仕事の種類と基本優先度（設計書 13.4 の初期優先順位に対応） */
 export const TASK_KINDS: Record<string, { label: string; base: number; roles: EmployeeRole[] }> = {
-  spill: { label: 'こぼれの清掃（安全）', base: 100, roles: ['cleaner', 'server', 'cook'] },
+  spill: { label: 'こぼれの清掃（安全）', base: 100, roles: ['cleaner', 'server', 'cook', 'prep'] },
   complaint: { label: 'クレーム対応', base: 96, roles: ['server', 'cook'] },
   noodlesUp: { label: '麺上げ', base: 92, roles: ['cook'] },
   discard: { label: 'ゆですぎ麺の処分', base: 90, roles: ['cook'] },
@@ -71,15 +72,15 @@ export const TASK_KINDS: Record<string, { label: string; base: number; roles: Em
   tare: { label: 'タレ', base: 72, roles: ['cook'] },
   soup: { label: 'スープ', base: 71, roles: ['cook'] },
   setBowls: { label: '丼を並べる', base: 68, roles: ['cook'] },
-  prepUrgent: { label: '食材補充（急ぎ）', base: 66, roles: ['cook'] },
+  prepUrgent: { label: '食材補充（急ぎ）', base: 66, roles: ['cook', 'prep'] },
   collect: { label: '食器回収', base: 58, roles: ['cleaner', 'server'] },
   wipe: { label: 'テーブル清掃', base: 52, roles: ['cleaner', 'server'] },
   wash: { label: '洗浄', base: 50, roles: ['cleaner'] },
-  prep: { label: '仕込み', base: 42, roles: ['cook'] },
+  prep: { label: '仕込み', base: 42, roles: ['cook', 'prep'] },
   trash: { label: 'ゴミ処理', base: 36, roles: ['cleaner'] },
   lost: { label: '忘れ物の保管', base: 34, roles: ['cleaner', 'server'] },
   mop: { label: '床の清掃', base: 30, roles: ['cleaner'] },
-  tidyHand: { label: '片付け', base: 20, roles: ['cook', 'server', 'cleaner'] },
+  tidyHand: { label: '片付け', base: 20, roles: ['cook', 'server', 'cleaner', 'prep'] },
 };
 
 /** その食材を仕込みで補充できる見込みがあるか（材料と設備がある、または工程中） */
@@ -93,6 +94,53 @@ function canReplenish(s: GameState, itemId: string): boolean {
     if (station && r.inputs.every((i) => stockOf(s, i.itemId) >= i.qty)) return true;
   }
   return itemId === 'buta' && stockOf(s, 'pork_block') > 0;
+}
+
+/** 豚のブロック1本を切った枚数 */
+const BUTA_PER_BLOCK = PREP_RECIPES.slice_pork?.outputs[0]?.qty ?? 18;
+
+/** 鍋・釜で工程中の、その物の出来上がりの量 */
+function inProcessOutput(s: GameState, itemId: string): number {
+  let n = 0;
+  for (const e of s.equipment) {
+    const pr = e.process ? PREP_RECIPES[e.process.recipeId] : undefined;
+    if (!pr) continue;
+    for (const o of pr.outputs) {
+      if (o.itemId === itemId) n += o.qty;
+      else if (itemId === 'buta' && o.itemId === 'pork_block') n += o.qty * BUTA_PER_BLOCK;
+    }
+  }
+  return n;
+}
+
+/** その物の、営業1秒あたりの使用量の見込み（最近の日の使用量の最大と、今日のここまでの速さの大きいほう。品切れがあった日は多めに見る） */
+export function prepUseRate(s: GameState, itemId: string): number {
+  const D = BALANCE.openDuration;
+  let best = 0;
+  let n = 0;
+  for (let i = s.history.length - 1; i >= 0 && n < BALANCE.prepPlan.days; i--) {
+    const r = s.history[i]!;
+    if (r.day === s.day) continue;
+    n += 1;
+    const short = (r.stockoutItems?.[itemId] ?? 0) + (r.stockoutItems?.[`menu:${itemId}`] ?? 0) >= 2;
+    best = Math.max(best, ((r.usedItems?.[itemId] ?? 0) / D) * (short ? BALANCE.prepPlan.stockoutBoost : 1));
+  }
+  if (s.phase === 'open' && s.openT > 60) best = Math.max(best, (s.today.usedItems?.[itemId] ?? 0) / s.openT);
+  return best;
+}
+
+/**
+ * 仕込みの目安: 決まった量（restockBelow）か、仕込みにかかる時間のあいだにピークの速さで使う見込みの量の多いほう。
+ * 営業の残りの時間で使い切れない量は仕込まない（閉店前に作りすぎて廃棄しないように）
+ */
+export function restockTarget(s: GameState, r: { id: string; time: number; restockBelow?: { itemId: string; qty: number } }): number {
+  if (!r.restockBelow) return 0;
+  const P = BALANCE.prepPlan;
+  const rate = prepUseRate(s, r.restockBelow.itemId);
+  const lead = r.time + P.leadMarginSec + (r.id === 'braise_pork' ? (PREP_RECIPES.slice_pork?.time ?? 0) : 0);
+  let want = rate * P.peakFactor * lead * P.safety;
+  if (s.phase === 'open') want = Math.min(want, rate * Math.max(0, BALANCE.openDuration - s.openT) * P.safety);
+  return Math.max(r.restockBelow.qty, want);
 }
 
 /** 1杯盛るのに最低限必要な量（これを下回ったら補充を最優先） */
@@ -115,6 +163,8 @@ function skill(s: GameState, mean: number): number {
 
 export function generateCandidate(s: GameState): Candidate {
   const role = pick(s, ['cook', 'cook', 'server', 'cleaner'] as EmployeeRole[]);
+  // 仕込み担当の候補（乱数の並びを変えないよう、イベント用の乱数で一部の調理担当を仕込み担当にする）
+  const finalRole: EmployeeRole = role === 'cook' && evRand(s) < BALANCE.staff.prepRoleShare ? 'prep' : role;
   const talent = randRange(s, 0.25, 0.8);
   const skills: EmployeeSkills = {
     speed: skill(s, talent),
@@ -134,7 +184,7 @@ export function generateCandidate(s: GameState): Candidate {
   const hireFee = Math.round((st.hireFeeMin + (st.hireFeeMax - st.hireFeeMin) * clamp01(sc + randRange(s, -0.2, 0.2))) / 1000) * 1000;
   const profile: EmployeeProfile = {
     name: `${pick(s, SURNAMES)} ${pick(s, GIVEN_NAMES)}`,
-    role,
+    role: finalRole,
     skills,
     wage,
     hireFee,
@@ -365,18 +415,18 @@ export function buildTasks(s: GameState): Task[] {
       }
       if (!r.restockBelow) continue;
       const item = r.restockBelow.itemId;
-      // 工程中の分も在庫とみなす
-      const inProcess = s.equipment
-        .filter((e) => e.process && PREP_RECIPES[e.process.recipeId]?.outputs.some((o) => o.itemId === item || (item === 'buta' && o.itemId === 'pork_block')))
-        .length;
+      const target = restockTarget(s, r);
       let have = stockOf(s, item);
-      if (r.id === 'braise_pork') have += stockOf(s, 'pork_block') * 18 + inProcess * 72;
-      else if (inProcess > 0) continue;
-      if (have >= r.restockBelow.qty) continue;
+      if (r.kind === 'process') {
+        // 工程中の分も在庫とみなす（豚は、煮込み中・煮込み済みのブロックを切ったあとの枚数で数える）
+        have += inProcessOutput(s, item);
+        if (r.id === 'braise_pork') have += stockOf(s, 'pork_block') * BUTA_PER_BLOCK;
+      }
+      if (have >= target) continue;
       const st = stations.find((e) => !e.process || r.kind === 'hold');
       if (!st) continue;
       // 切れる寸前ほど優先度を上げる（盛り付けに必要な量を切ったら調理より先に補充）
-      const ratio = have / r.restockBelow.qty;
+      const ratio = have / target;
       const minNeed = MIN_FOR_BOWL[item] ?? 0;
       if (stockOf(s, item) < minNeed && r.id !== 'braise_pork') add('prepUrgent', `prep:${r.id}`, [step(st.id, `prep:${r.id}`)], 30);
       else if (ratio < 0.4) add('prepUrgent', `prep:${r.id}`, [step(st.id, `prep:${r.id}`)], Math.round((0.4 - ratio) * 40));
