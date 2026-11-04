@@ -389,6 +389,7 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
     e.ai.steps = [];
     e.ai.path = [];
     e.ai.stuckTime = 0;
+    delete e.ai.failed;
     e.say = null;
     const sh = shiftFor(e, s.day);
     const a: Attendance = {

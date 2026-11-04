@@ -279,6 +279,8 @@ export interface Employee extends ActorBase {
     /** 次にタスクを選び直すまでの待ち */
     cooldown: number;
     note: string;
+    /** 失敗した仕事を再び選ぶまでの時刻（仕事キー → その日の sim時刻）。毎朝消す。古い状態にはない */
+    failed?: Record<string, number>;
   };
   /** 今、店で働いている（休憩中・退勤後・出勤前は false） */
   presentToday: boolean;

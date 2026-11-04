@@ -498,15 +498,25 @@ function tidyHandTask(s: GameState, e: Employee): Task | null {
 }
 
 /**
- * 失敗した仕事の再試行を遅らせる表（従業員ID|仕事キー → sim時刻）。
- * 一時的な判断材料なので状態（セーブ）には含めない。含めなくても結果の決定性は
- * 「同じ操作列なら同じ結果」の範囲で保たれる（サーバーとクライアントで AI を二重に動かさないため）。
+ * 失敗した仕事の再試行を遅らせる（仕事キー → その日の sim時刻）。従業員ごとに状態に持つ。
+ * 以前はモジュールの表（ゲームの状態の外）に持っていたため、
+ *   - s.t は毎朝 0 に戻るのに前日の時刻が残り、前日の終わりに失敗した仕事を翌日のほとんどの時間選ばなかった
+ *   - タイトルに戻って始めたゲームや、同じサーバーの別のルームにも前のゲームの記録が残った
+ * という不具合があった（統合進化設計書 v2.1 の経済の測定で発見）。毎朝の出勤確認で消す
  */
-const failCooldown = new Map<string, number>();
+function failedUntil(e: Employee, key: string): number | undefined {
+  return e.ai.failed?.[key];
+}
+
+function markFailed(s: GameState, e: Employee, key: string): void {
+  const f = (e.ai.failed ??= {});
+  // 期限の切れたものは捨てる（表が大きくならない）
+  for (const k of Object.keys(f)) if (f[k]! <= s.t) delete f[k];
+  f[key] = s.t + 3;
+}
 
 /** 従業員AIの更新 */
 export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
-  if (failCooldown.size > 500) failCooldown.clear();
   if (s.employees.length === 0) return;
   let tasks: Task[] | null = null;
   const busyTargets = playerBusyTargets(s);
@@ -595,7 +605,7 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
       if (!r.ok) {
         // 状況が変わった（誰かが先に処理した等）。仕事を手放し、同じ仕事はしばらく避ける
         e.ai.note = r.reason ?? '';
-        if (e.ai.taskId) failCooldown.set(`${e.id}|${e.ai.taskId}`, s.t + 3);
+        if (e.ai.taskId) markFailed(s, e, e.ai.taskId);
         releaseTask(e);
         e.ai.cooldown = 0.3;
         continue;
@@ -634,8 +644,8 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
       const firstVerb = t.steps[0]!.verb;
       if (e.hand.kind !== 'none' && !['dishes_drop', 'bowls_place', 'serve', 'mop', 'mop_return', 'lost_store', 'collect', 'noodles_up'].includes(firstVerb)) continue;
       // 最近失敗した仕事はしばらく選ばない
-      const failedUntil = failCooldown.get(`${e.id}|${t.key}`);
-      if (failedUntil !== undefined && failedUntil > s.t) continue;
+      const until = failedUntil(e, t.key);
+      if (until !== undefined && until > s.t) continue;
       const sc = taskScore(e, t);
       if (sc <= bestScore) continue;
       // 実際に実行できるか（行為と同じ判定）を確認してから選ぶ
