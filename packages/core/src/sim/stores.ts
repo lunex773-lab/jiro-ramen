@@ -239,7 +239,8 @@ export function runAbsentStores(s: GameState, ctx: SimCtx, day: number): void {
     if (entry.id === c.activeStoreId || !entry.snapshot) continue;
     if (entry.openedDay >= day) continue;
     if (storeReport(s, entry, day)) continue;
-    runManagerDay(s, entry, day, ctx);
+    const md = s.marketDemand?.[entry.id];
+    runManagerDay(s, entry, day, ctx, { demandMult: typeof md === 'number' && Number.isFinite(md) && md >= 0 ? md : 1 });
   }
 }
 

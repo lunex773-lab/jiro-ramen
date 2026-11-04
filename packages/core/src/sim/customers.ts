@@ -250,6 +250,14 @@ export function arrivalRate(s: GameState, opts: { events?: boolean } = {}): numb
   return c.baseRate * repF * timeCurve(x) * priceF * demand * regularF * ticketF * eventF * stageF * propF;
 }
 
+/** 共通市場の客の取り合いの倍率（プレイヤーがいる店。市場の外では 1） */
+export function marketDemandFactor(s: GameState): number {
+  const m = s.marketDemand;
+  if (!m || !s.company) return 1;
+  const v = m[s.company.activeStoreId];
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 1;
+}
+
 /** 1日（営業時間）の来店の見込み（人）。arrivalRate を営業時間で積分する */
 export function expectedDailyArrivals(s: GameState, opts: { events?: boolean } = {}): number {
   const D = BALANCE.openDuration;
@@ -291,7 +299,7 @@ export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
   // 練習の日（営業0日目）は、チュートリアルが決まったお客さんだけを呼ぶ
   if (s.tutorial?.kind === 'basics') return;
   // 1回の来店は1〜4人。来店の回数を平均の人数で割り、1日の客数を今と同じくらいに保つ（オーナー回答）
-  s.arrivalAcc += (arrivalRate(s) * dt) / meanGroupSize();
+  s.arrivalAcc += (arrivalRate(s) * marketDemandFactor(s) * dt) / meanGroupSize();
   while (s.arrivalAcc >= 1) {
     s.arrivalAcc -= 1 + randRange(s, -0.3, 0.3);
     // 来店の人数（帰ってしまった客も人数で数える）

@@ -45,4 +45,5 @@ export * from './sim/manager';
 export * from './data/market';
 export * from './market';
 export * from './save';
+export * from './verify';
 export * from './net';

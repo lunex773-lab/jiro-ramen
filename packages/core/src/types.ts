@@ -1101,6 +1101,11 @@ export interface GameState {
    * プレイヤーがいる店の中身は GameState の店の部分（設備・従業員・在庫・評判・日報など）にあり、ほかの店は stores[].snapshot にある
    */
   company: CompanyState;
+  /**
+   * 共通市場の客の取り合いの倍率（店の id → 倍率。1 = 競合なし）。サーバーが日の始めに渡す（その日の条件）。
+   * ひとりプレイ・共同経営では null（倍率なし）
+   */
+  marketDemand?: Record<string, number> | null;
 }
 
 // ───────────────────────── 会社と店舗（Phase 2） ─────────────────────────

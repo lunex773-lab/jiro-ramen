@@ -152,3 +152,8 @@ export function cookAndServe(s: GameState, ctx: SimCtx, o: Order, askCall: boole
   p.pos = seatKitchenPoint(s, seat);
   act(s, ctx, seat.id, 'serve');
 }
+
+/** JSON の写し（GameState・市場の状態は JSON にできる形） */
+export function clone<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v)) as T;
+}

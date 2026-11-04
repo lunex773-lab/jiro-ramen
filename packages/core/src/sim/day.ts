@@ -334,6 +334,14 @@ export function nextDay(s: GameState, ctx: SimCtx): { ok: boolean; reason?: stri
   // プレイヤーがいない店のその日（店長の営業）と、会社の日報（店舗の合計）
   runAbsentStores(s, ctx, s.day);
   recordCompanyDay(s, s.day);
+  return startNextDay(s, ctx);
+}
+
+/**
+ * 次の日の朝（日付を進め、届いた荷物・採用の候補・出勤の確認・朝のイベントのあと仕込みへ）。
+ * nextDay と、共通市場の自動営業（market.ts）の両方から使う（手動と自動で同じ朝の規則）。takeSnapshot: 爆発事故のリセット用の控えを作るか
+ */
+export function startNextDay(s: GameState, ctx: SimCtx, takeSnapshot = true): { ok: boolean; reason?: string } {
   s.day += 1;
   s.t = 0;
   s.openT = 0;
@@ -368,7 +376,8 @@ export function nextDay(s: GameState, ctx: SimCtx): { ok: boolean; reason?: stri
   }
   s.phase = 'prep';
   // 爆発事故のリセットに使う「仕込み開始時点」の控え（ここと新しいキャリアの1日目だけで作る）
-  takePrepSnapshot(s);
+  if (takeSnapshot) takePrepSnapshot(s);
+  else s.prepSnapshot = null;
   emit(ctx, { type: 'dayStart', value: s.day });
   return { ok: true };
 }
