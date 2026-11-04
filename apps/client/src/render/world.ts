@@ -12,6 +12,7 @@ import { signSlots } from './sign-slots';
 import { lookSeedOf } from './staff-look';
 
 import {
+  activeStore,
   CELL,
   BALANCE,
   EQUIPMENT,
@@ -20,6 +21,7 @@ import {
   seatPos,
   stageOf,
   STAGES,
+  storeDisplayName,
   type AccidentState,
   type Bowl,
   type Customer,
@@ -317,10 +319,12 @@ export class World {
 
   private syncShell(s: GameState): void {
     const st = s.career.stage;
+    // 看板は今いる店の名前（1店舗目は店名、支店は「〇〇 駅前店」など）
+    const name = s.company ? storeDisplayName(s, activeStore(s)) : s.shopName;
     if (this.shell && this.shellStage === st) {
-      if (this.shellName !== s.shopName) {
-        this.shell.setShopName(s.shopName);
-        this.shellName = s.shopName;
+      if (this.shellName !== name) {
+        this.shell.setShopName(name);
+        this.shellName = name;
       }
       return;
     }
@@ -331,9 +335,9 @@ export class World {
     for (const l of this.lights) this.scene.remove(l);
     this.lights = [];
     const stage = STAGES[st]!;
-    this.shell = createShopShell(stage, s.shopName);
+    this.shell = createShopShell(stage, name);
     this.shellStage = st;
-    this.shellName = s.shopName;
+    this.shellName = name;
     this.scene.add(this.shell.group);
     const spots = (this.shell as ShopShell & { lightSpots?: THREE.Vector3[] }).lightSpots ?? [];
     const maxLights = this.quality === 'low' ? 2 : 4;

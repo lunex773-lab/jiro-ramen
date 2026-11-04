@@ -51,6 +51,16 @@ import {
   staffLog,
   staffSummary,
   weekdayOf,
+  activeStore,
+  enterStoreProblem,
+  openStoreProblem,
+  PROPERTIES,
+  PROPERTY_CANDIDATES,
+  storeDisplayName,
+  storeProperty,
+  storeReport,
+  storeStatus,
+  totalDebt,
   type Action,
   type Employee,
   type EmployeeRole,
@@ -58,14 +68,23 @@ import {
   type ShiftDay,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
+
+/** 「会社」のタブを出すか: 店を2つ以上持っている、または出店の条件（12席以上・評判★4.0以上の店）を満たしている */
+function companyTabVisible(s: GameState): boolean {
+  if (!s.company || s.tutorial) return false;
+  if (s.company.stores.length > 1) return true;
+  const B = BALANCE.company;
+  return s.career.stage >= B.unlockStage && s.reputation >= B.unlockReputation;
+}
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
 import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
 
-export type ManageTab = 'dash' | 'stock' | 'menu' | 'equip' | 'staff' | 'layout' | 'career' | 'system';
+export type ManageTab = 'dash' | 'company' | 'stock' | 'menu' | 'equip' | 'staff' | 'layout' | 'career' | 'system';
 
 const TABS: [ManageTab, string][] = [
   ['dash', '経営'],
+  ['company', '会社'],
   ['stock', '在庫・発注'],
   ['menu', 'メニュー'],
   ['equip', '設備'],
@@ -213,6 +232,11 @@ export class ManageMenu {
     if (live && this.pressing) return;
     this.renderedVersion = s.version;
     const scroll = this.body.scrollTop;
+    // 「会社」は、2店舗目を出せるようになるか、店を2つ以上持ってから出す（1店舗のうちは今までどおり）
+    const showCompany = companyTabVisible(s);
+    const ct = this.tabButtons.get('company');
+    if (ct && ct.hidden === showCompany) ct.hidden = !showCompany;
+    if (this.tab === 'company' && !showCompany) this.tab = 'dash';
     for (const [id, b] of this.tabButtons) b.classList.toggle('on', id === this.tab);
     if (this.badge.hidden !== !ro) this.badge.hidden = !ro;
     this.el.classList.toggle('readonly', ro);
@@ -220,6 +244,7 @@ export class ManageMenu {
     try {
       content =
         this.tab === 'dash' ? this.dash(s)
+        : this.tab === 'company' ? this.company(s)
         : this.tab === 'stock' ? this.stock(s)
         : this.tab === 'menu' ? this.menu(s)
         : this.tab === 'equip' ? this.equip(s)
@@ -235,6 +260,186 @@ export class ManageMenu {
     replace(this.body, content);
     if (ro) lockControls(this.body);
     this.body.scrollTop = scroll;
+  }
+
+  // ───────────────── 会社（Phase 2: 店舗一覧・店舗別損益・会社の財務・出店・店長・方針） ─────────────────
+  private company(s: GameState): HTMLElement {
+    const c = s.company;
+    const row = (k: string, v: string, cls = '') => h('div', { class: `kv ${cls}` }, h('span', null, k), h('b', null, v));
+    const last = c.history[c.history.length - 1] ?? null;
+    const week = c.history.slice(-7);
+    const weekOp = week.reduce((a, x) => a + x.operatingProfit, 0);
+    const closed = s.phase === 'closed';
+    const fullStaff = s.employees.filter((e) => e.profile.employment === 'full');
+    const pct = (x: number) => `${Math.round(x * 100)}%`;
+    const finance = h(
+      'section',
+      { class: 'card' },
+      h('h4', null, `会社の財務 — ${s.day}日目`),
+      row('現金（会社）', yenStr(s.money)),
+      row('借入・未払金', yenStr(totalDebt(s)), totalDebt(s) > 0 ? 'warn' : ''),
+      row('店の数', `${c.stores.length}店`),
+      last ? row(`${last.day}日目の純売上（全店）`, yenStr(last.netSales)) : null,
+      last ? row(`${last.day}日目の営業利益（全店）`, yenStr(last.operatingProfit), last.operatingProfit < 0 ? 'bad' : 'good') : null,
+      last && last.interest > 0 ? row('利息（会社）', `−${yenStr(last.interest)}`) : null,
+      week.length > 0 ? row(`直近${week.length}日の営業利益（全店）`, yenStr(weekOp), weekOp < 0 ? 'bad' : 'good') : null,
+      h('p', { class: 'note' }, 'お金・借入・キャリアは会社のものです。プレイヤーがいない店は店長が営業し、1日ごとに計算します（細かい動きは見えません）。'),
+    );
+    const storeCards = c.stores.map((entry) => {
+      const st = storeStatus(s, entry);
+      const active = entry.id === c.activeStoreId;
+      const r = last ? storeReport(s, entry, last.day) : null;
+      const mgr = st.employees.find((e) => e.id === entry.managerId) ?? null;
+      const prop = storeProperty(entry);
+      const name = storeDisplayName(s, entry);
+      const status = active ? '🧑‍🍳 いまここ（あなたが営業）' : entry.snapshot && entry.snapshot.closedForConstruction > 0 ? '🛠 準備中' : mgr ? '👔 店長が営業' : '⛔ 店長がいないため休業';
+      const fulls = st.employees.filter((e) => e.profile.employment === 'full');
+      const pol = entry.policy;
+      const problem = active ? null : enterStoreProblem(s, entry.id);
+      return h(
+        'section',
+        { class: 'card store-card', 'data-store': entry.id },
+        h('h4', null, name),
+        row('状態', status),
+        row('立地', `${prop.area}（来客 ×${prop.demand.toFixed(2)}・家賃 ×${prop.rentMult.toFixed(1)}）`),
+        row('広さ', STAGES[st.stage]?.name ?? ''),
+        row('評判', `${stars(st.reputation)} ${st.reputation.toFixed(2)}`),
+        row('従業員', `${st.employees.length}人`),
+        r ? row(`${r.day}日目`, `純売上 ${yenStr(r.netSales ?? r.sales - r.refunds)}・営業利益 ${yenStr(r.operatingProfit)}・${r.served}杯${r.managed === 'manager' ? '（店長）' : r.managed === 'closed' ? '（休業）' : ''}`, r.operatingProfit < 0 ? 'bad' : '') : null,
+        h(
+          'div',
+          { class: 'kv' },
+          h('span', null, '店長'),
+          h(
+            'select',
+            {
+              'data-manager': entry.id,
+              onchange: (ev: Event) => {
+                const v = (ev.target as HTMLSelectElement).value;
+                void this.act({ type: 'assignManager', storeId: entry.id, employeeId: v === '' ? null : v }, v === '' ? '店長を外しました' : undefined);
+              },
+            },
+            h('option', { value: '', selected: !mgr }, active ? '（なし: あなたが営業）' : '（なし: 休業）'),
+            fulls.map((e) => h('option', { value: e.id, selected: e.id === entry.managerId }, `${e.profile.name}（${ROLE_LABEL[e.profile.role]}）`)),
+          ),
+        ),
+        fulls.length === 0 ? h('p', { class: 'note' }, '店長は社員から選びます（従業員のタブでアルバイトを社員にできます）') : null,
+        h('p', { class: 'note' }, '店長の営業の方針（プレイヤーがいない日に使う）'),
+        h(
+          'div',
+          { class: 'kv' },
+          h('span', null, '価格'),
+          h(
+            'select',
+            { 'data-policy-price': entry.id, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { priceMult: Number((ev.target as HTMLSelectElement).value) } }) },
+            [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3].map((m) => h('option', { value: String(m), selected: Math.abs(m - pol.priceMult) < 1e-6 }, m === 1 ? '定価' : `定価の${pct(m)}`)),
+          ),
+        ),
+        h(
+          'div',
+          { class: 'kv' },
+          h('span', null, '定期メンテ'),
+          h('input', { type: 'checkbox', checked: pol.maintenance, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { maintenance: (ev.target as HTMLInputElement).checked } }) }),
+        ),
+        h(
+          'div',
+          { class: 'kv' },
+          h('span', null, '1日の修理費の上限'),
+          h(
+            'select',
+            { onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { repairCap: Number((ev.target as HTMLSelectElement).value) } }) },
+            [5_000, 10_000, 30_000, 60_000, 100_000].map((v) => h('option', { value: String(v), selected: v === pol.repairCap }, yenStr(v))),
+          ),
+        ),
+        active
+          ? null
+          : h(
+              'button',
+              {
+                class: 'btn primary',
+                'data-enter': entry.id,
+                disabled: !!problem,
+                onclick: async () => {
+                  const cur = activeStore(s);
+                  const leave = cur.managerId ? '店長の営業になります' : '店長がいないので休業になります（家賃などはかかります）';
+                  if (await confirmDialog(this.root, '店に入る', `明日は${name}で営業します。${storeDisplayName(s, cur)}は${leave}。`, 'この店に入る')) await this.act({ type: 'enterStore', storeId: entry.id }, `${name}に入りました`);
+                },
+              },
+              'この店に入る（明日からここで営業）',
+            ),
+        problem && !active ? h('p', { class: 'note' }, problem) : null,
+      );
+    });
+    // 出店
+    const used = new Set(c.stores.map((x) => x.propertyId));
+    const candidates = PROPERTY_CANDIDATES.filter((id) => !used.has(id)).map((id) => PROPERTIES[id]!);
+    const B = BALANCE.company;
+    const openCard = h(
+      'section',
+      { class: 'card wide' },
+      h('h4', null, '出店（2店舗目以降）'),
+      h('p', { class: 'note' }, `条件: ${STAGES[B.unlockStage]?.seats.length ?? 12}席以上で評判★${B.unlockReputation.toFixed(1)}以上の店があること、店長にする社員（今の店から移ります）、初期費用＋運転資金 ${yenStr(B.minFundsAfterOpen)}。閉店後に出店できます。`),
+      candidates.length === 0
+        ? h('p', { class: 'note' }, '出店できる物件はありません')
+        : h(
+            'div',
+            { class: 'table' },
+            candidates.map((p) => {
+              const mgrSel = h('select', { 'data-open-mgr': p.id }, fullStaff.map((e) => h('option', { value: e.id }, `${e.profile.name}（${ROLE_LABEL[e.profile.role]}）`)));
+              const reason = fullStaff.length === 0 ? '店長にする社員がいません（従業員のタブでアルバイトを社員にできます）' : openStoreProblem(s, p.id, fullStaff[0]!.id);
+              const rent = Math.round((STAGES[p.stage]?.rent ?? 0) * p.rentMult);
+              return h(
+                'div',
+                { class: 'trow prop-row', 'data-property': p.id },
+                h('div', { class: 'tname' }, p.name, h('small', null, p.description)),
+                h('div', { class: 'tsub' }, `初期費用 ${yenStr(p.initialCost)}・家賃 ${yenStr(rent)}/日・来客 ×${p.demand.toFixed(2)}・準備 ${p.openingDays}日`),
+                fullStaff.length > 0 ? mgrSel : null,
+                h(
+                  'button',
+                  {
+                    class: 'btn',
+                    'data-open': p.id,
+                    disabled: !!reason || !closed,
+                    onclick: async () => {
+                      const mid = (mgrSel as HTMLSelectElement).value;
+                      const m = s.employees.find((e) => e.id === mid);
+                      if (!m) return;
+                      if (await confirmDialog(this.root, '出店', `${p.name}に出店します。初期費用 ${yenStr(p.initialCost)}。${m.profile.name}さんが店長として移ります。準備の${p.openingDays}日のあと、店長の営業で開きます。`, '出店する')) await this.act({ type: 'openStore', propertyId: p.id, managerId: mid }, '出店しました');
+                    },
+                  },
+                  '出店する',
+                ),
+                reason ? h('p', { class: 'note' }, reason) : null,
+              );
+            }),
+          ),
+    );
+    // 異動（今の店の従業員をほかの店へ）
+    const others = c.stores.filter((x) => x.id !== c.activeStoreId);
+    const moveCard =
+      others.length > 0 && s.employees.length > 0
+        ? h(
+            'section',
+            { class: 'card wide' },
+            h('h4', null, '異動（今の店の従業員をほかの店へ）'),
+            h('p', { class: 'note' }, '閉店後にできます。店長の営業では、従業員の担当と能力で出せる杯数が増えます。'),
+            h(
+              'div',
+              { class: 'table' },
+              s.employees.map((e) => {
+                const sel = h('select', null, others.map((x) => h('option', { value: x.id }, storeDisplayName(s, x))));
+                return h(
+                  'div',
+                  { class: 'trow' },
+                  h('div', { class: 'tname' }, e.profile.name, h('small', null, `${ROLE_LABEL[e.profile.role]}・${e.profile.employment === 'full' ? '社員' : 'アルバイト'}`)),
+                  sel,
+                  h('button', { class: 'mini', disabled: !closed, onclick: () => void this.act({ type: 'transferEmployee', employeeId: e.id, toStoreId: (sel as HTMLSelectElement).value }, '異動しました') }, '異動する'),
+                );
+              }),
+            ),
+          )
+        : null;
+    return h('div', { class: 'grid2' }, finance, ...storeCards, openCard, moveCard);
   }
 
   // ───────────────── 経営ダッシュボード ─────────────────
@@ -256,7 +461,7 @@ export class ManageMenu {
       h(
         'section',
         { class: 'card' },
-        h('h4', null, `${s.shopName} — ${s.day}日目`),
+        h('h4', null, `${storeDisplayName(s, activeStore(s))} — ${s.day}日目`),
         row('現在資金', yenStr(s.money), s.money < fc.total ? 'bad' : ''),
         row('評判', `${stars(s.reputation)} ${s.reputation.toFixed(2)}`),
         row('常連客', `${s.regulars.length}人`),

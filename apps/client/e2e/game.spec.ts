@@ -1130,3 +1130,80 @@ test('爆発事故: 設定には起こすボタンがない。開発用の欄（
   await shot(page, '33-after-reset');
   expect(errors).toEqual([]);
 });
+
+test('会社: 12席・評判★4.0以上の店になると「会社」の画面が出て、物件を選んで出店し、閉店後に支店へ入れる', async ({ page }) => {
+  await startNewGame(page);
+  type CJ = {
+    __jiro: {
+      host: {
+        state: Record<string, any>;
+        act(a: Record<string, unknown>): Promise<{ ok: boolean; reason?: string }>;
+      };
+    };
+  };
+  // 採用した人を社員にし、12席・評判★4.3・資金300万円・閉店後の状態にする
+  const hired = await page.evaluate(async () => {
+    const app = (window as unknown as CJ).__jiro;
+    const s = app.host.state;
+    s.career.unlocked.push('hiring');
+    s.candidates = [
+      {
+        id: 'cand-co',
+        profile: {
+          name: '佐藤 一郎', role: 'cook', skills: { speed: 0.7, cooking: 0.7, service: 0.6, hygiene: 0.6, movement: 0.7 },
+          wage: 9000, hireFee: 10000, experience: 0, employment: 'part', hourly: 2000, diligence: 0.9, patience: 0.9, look: 77,
+        },
+      },
+    ];
+    const r = await app.host.act({ type: 'hire', candidateId: 'cand-co' });
+    const e = s.employees[s.employees.length - 1];
+    e.profile.employment = 'full';
+    e.profile.wage = 9000;
+    s.career.stage = 1;
+    for (let i = s.seats.length; i < 12; i++) s.seats.push({ id: `seat${i}`, index: i, installed: false, offset: { x: 0, z: 0 }, dirt: 0, customerId: null, bowlId: null, lostItemId: null });
+    s.money = 3_000_000;
+    s.reputation = 4.3;
+    s.phase = 'closed';
+    s.version += 1;
+    return { ok: r.ok, id: e.id };
+  });
+  expect(hired.ok).toBe(true);
+  await page.locator('.chip.menu').click();
+  const tab = page.getByRole('button', { name: '会社', exact: true });
+  await expect(tab).toBeVisible();
+  await tab.click();
+  const body = page.locator('.manage-body');
+  await expect(body).toContainText('会社の財務');
+  await expect(body).toContainText('いまここ');
+  await expect(body).toContainText('出店（2店舗目以降）');
+  // 住宅街の店に、佐藤さんを店長にして出店する
+  const row = body.locator('.prop-row[data-property="residential"]');
+  await expect(row).toContainText('初期費用 ¥450,000');
+  await row.locator('[data-open="residential"]').click();
+  await page.locator('.modal').getByRole('button', { name: '出店する' }).click();
+  await expect(page.locator('.toast', { hasText: /^出店しました$/ })).toBeVisible();
+  const st = await page.evaluate(() => {
+    const s = (window as unknown as CJ).__jiro.host.state;
+    return { n: s.company.stores.length, money: s.money, branch: s.company.stores[1]?.id, mgr: s.company.stores[1]?.managerId };
+  });
+  expect(st.n).toBe(2);
+  expect(st.money).toBe(3_000_000 - 450_000);
+  expect(st.mgr).toBe(hired.id);
+  const branchCard = body.locator(`.store-card[data-store="${st.branch}"]`);
+  await expect(branchCard).toContainText('準備中');
+  await expect(branchCard).toContainText('佐藤 一郎');
+  await shot(page, '50-company');
+  // 支店に入る（閉店後。明日からその店で営業）
+  await branchCard.locator(`[data-enter="${st.branch}"]`).click();
+  await page.locator('.modal').getByRole('button', { name: 'この店に入る' }).click();
+  await expect(page.locator('.toast', { hasText: '住宅街店に入りました' }).first()).toBeVisible();
+  const after = await page.evaluate(() => {
+    const s = (window as unknown as CJ).__jiro.host.state;
+    return { active: s.company.activeStoreId, stage: s.career.stage, emps: s.employees.map((e: { id: string }) => e.id), homeSnap: !!s.company.stores[0].snapshot };
+  });
+  expect(after.active).toBe(st.branch);
+  expect(after.stage).toBe(0);
+  expect(after.emps).toEqual([hired.id]);
+  expect(after.homeSnap).toBe(true);
+  await expect(body.locator(`.store-card[data-store="${st.branch}"]`)).toContainText('いまここ');
+});
