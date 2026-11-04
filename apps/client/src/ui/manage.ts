@@ -957,7 +957,7 @@ export class ManageMenu {
         'section',
         { class: 'card wide' },
         h('h4', null, '設定・その他'),
-        h('div', { class: 'row wrap', 'data-guest-ok': '1' }, h('button', { class: 'btn', onclick: () => this.cb.onSettings() }, '設定（音・操作・画質）'), h('button', { class: 'btn', onclick: () => this.cb.onHelp() }, '遊び方'), h('button', { class: 'btn ghost', onclick: () => this.cb.onTitle() }, 'タイトルに戻る')),
+        h('div', { class: 'row wrap', 'data-guest-ok': '1' }, h('button', { class: 'btn', onclick: () => this.cb.onSettings() }, '設定（音・操作・画質）'), h('button', { class: 'btn', onclick: () => this.cb.onHelp() }, '遊び方'), h('button', { class: 'btn ghost', 'data-title': '1', onclick: () => this.cb.onTitle() }, 'タイトルに戻る')),
       ),
     );
   }

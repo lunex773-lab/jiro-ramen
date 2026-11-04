@@ -244,10 +244,8 @@ export function helpScreen(onClose: () => void, isTouch: boolean): HTMLElement {
   );
 }
 
-/** 店の中で開いた設定の画面だけの項目 */
+/** 店の中で開いた設定の画面だけの項目（タイトルへ戻るのは経営メニュー「セーブ・設定」のボタンだけ。オーナーの判断で1つにした） */
 export interface InGameSettings {
-  /** タイトル画面に戻る（確認は呼び出し側） */
-  onTitle: () => void;
   /** プレイヤー名の欄の注意書き（共同経営では次に参加したときから） */
   nameNote?: string;
 }
@@ -310,15 +308,6 @@ export function settingsScreen(st: Settings, onChange: (s: Settings) => void, on
       ),
       inGame?.nameNote ? h('p', { class: 'note' }, inGame.nameNote) : null,
     ),
-    inGame
-      ? h(
-          'section',
-          { class: 'card wide' },
-          h('h4', null, 'ゲームを終える'),
-          h('p', { class: 'note' }, 'タイトル画面に戻ります。保存していない進み具合があるときは、保存するかを確認します。'),
-          h('button', { class: 'btn', 'data-title': '1', onclick: inGame.onTitle }, 'タイトル画面に戻る'),
-        )
-      : null,
     h('button', { class: 'btn primary', onclick: onClose }, '閉じる'),
   );
 }

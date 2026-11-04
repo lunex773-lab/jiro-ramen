@@ -798,24 +798,31 @@ test.describe('設定画面とタイトルへの帰還（第2版 21）', () => {
     await expect(page.locator('.screen.settings [data-setting="playerName"]')).toHaveValue('ラーメン太郎');
   });
 
-  test('設定からタイトル画面に戻れる。キャンセルでゲームに戻り、確定すると保存するか聞いてからタイトルへ。保存したデータは壊れていない', async ({ page }) => {
+  test('タイトルへ戻るボタンは経営メニューの1つだけ。キャンセルでゲームに戻り、確定すると保存するか聞いてからタイトルへ。保存したデータは壊れていない', async ({ page }) => {
     await startNewGame(page);
     await page.getByRole('button', { name: /開店する/ }).click();
     await page.evaluate(() => {
       const a = (window as unknown as { __jiro: { host: { tick(dt: number): void } } }).__jiro;
       for (let i = 0; i < 50; i++) a.host.tick(0.1);
     });
+    // 設定の画面にはタイトルへ戻るボタンがない（オーナーの判断で経営メニューの1つだけにした）
     await openSettings(page);
-    const scr = page.locator('.screen.settings');
-    // キャンセル → 設定とゲームに戻る
-    await press(scr.locator('[data-title]'));
+    await expect(page.locator('.screen.settings')).toBeVisible();
+    await expect(page.locator('.screen.settings [data-title]')).toHaveCount(0);
+    await expect(page.locator('.screen.settings')).not.toContainText('タイトル');
+    await closeSettings(page);
+    const menu = page.locator('.manage');
+    await expect(menu.locator('[data-title]')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: /タイトル(画面)?に戻る/ })).toHaveCount(1);
+    // キャンセル → 経営メニューとゲームに戻る
+    await press(menu.locator('[data-title]'));
     await expect(page.locator('.modal')).toContainText('タイトル画面に戻りますか？');
     await press(page.locator('.modal').getByRole('button', { name: 'キャンセル' }));
     await expect(page.locator('.modal')).toHaveCount(0);
-    await expect(scr).toBeVisible();
+    await expect(menu).toBeVisible();
     expect(await page.evaluate(() => !!(window as unknown as SetApp).__jiro.host)).toBe(true);
     // 確定 → 保存していない進み具合があるので保存するか聞かれる → 保存して戻る
-    await press(scr.locator('[data-title]'));
+    await press(menu.locator('[data-title]'));
     await press(page.locator('.modal').getByRole('button', { name: 'タイトル画面に戻る' }));
     await expect(page.locator('.modal')).toContainText('保存しますか？');
     await shot(page, '48-title-save');
@@ -831,7 +838,7 @@ test.describe('設定画面とタイトルへの帰還（第2版 21）', () => {
     expect(phase.openT).toBeGreaterThan(1);
   });
 
-  test('共同経営のゲスト: ホストが終了するとお知らせが出てタイトルへ戻る。ゲストは設定からタイトルへ戻れる（退出を伝える）', async ({ page }) => {
+  test('共同経営のゲスト: ホストが終了するとお知らせが出てタイトルへ戻る。ゲストは経営メニューからタイトルへ戻れる（退出を伝える）', async ({ page }) => {
     const SERVER = 'https://mock.jiro.test';
     await startNewGame(page);
     const state = await page.evaluate(() => {
@@ -874,11 +881,12 @@ test.describe('設定画面とタイトルへの帰還（第2版 21）', () => {
       await page.getByRole('button', { name: '参加する' }).click();
       await expect(page.locator('.hud-cta')).toContainText('ホストが開店するのを待っています');
     };
-    // 1. ゲストが設定からタイトルへ戻る（退出をサーバーへ伝える。保存の確認は出ない）
+    // 1. ゲストが経営メニューからタイトルへ戻る（退出をサーバーへ伝える。保存の確認は出ない）
     await join();
     await openSettings(page);
     await expect(page.locator('.screen.settings')).toContainText('次に参加したときから');
-    await press(page.locator('.screen.settings [data-title]'));
+    await closeSettings(page);
+    await press(page.locator('.manage [data-title]'));
     await expect(page.locator('.modal')).toContainText('ホストとほかのゲストはそのまま続けられます');
     await press(page.locator('.modal').getByRole('button', { name: 'タイトル画面に戻る' }));
     await expect(page.getByText('ひとりで経営する')).toBeVisible();

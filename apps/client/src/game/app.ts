@@ -238,7 +238,7 @@ export class App {
     this.show(helpScreen(back, this.controls?.isTouch ?? matchMedia('(pointer: coarse)').matches));
   }
 
-  /** 設定の画面。店の中から開いたときは「タイトル画面に戻る」も出す（爆発事故はランダムで起きるもの。起こすボタンは開発用の欄 ?debug=1 だけ） */
+  /** 設定の画面（タイトルへ戻るのは経営メニュー「セーブ・設定」のボタンだけ。爆発事故はランダムで起きるもの。起こすボタンは開発用の欄 ?debug=1 だけ） */
   showSettings(back: () => void, inGame = false): void {
     const remote = this.host?.mode === 'remote';
     this.show(
@@ -256,7 +256,7 @@ export class App {
           }
         },
         back,
-        inGame ? { onTitle: () => void this.returnToTitle(), nameNote: remote ? '共同経営の間に変えた名前は、次に参加したときから使われます。' : undefined } : undefined,
+        inGame ? { nameNote: remote ? '共同経営の間に変えた名前は、次に参加したときから使われます。' : undefined } : undefined,
       ),
     );
   }
@@ -326,7 +326,7 @@ export class App {
         if (r.ok) this.startLocal(r.file.state, this.slot);
       },
       onSettings: () => this.showSettings(() => this.show(null), true),
-      onTitle: () => void this.backToTitle(),
+      onTitle: () => void this.returnToTitle(),
       onHelp: () => this.showHelp(() => this.show(null)),
     });
     const c = this.controls;
@@ -421,10 +421,6 @@ export class App {
     const cb = this.onLeaveGame;
     this.onLeaveGame = null;
     cb?.();
-  }
-
-  private async backToTitle(): Promise<void> {
-    await this.returnToTitle();
   }
 
   /** 最後に保存した時点の状態の版（ひとりプレイ。保存していない進み具合があるかを見る） */
