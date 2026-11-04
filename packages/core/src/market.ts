@@ -18,7 +18,7 @@ import type { GameState, Id, StoreEntry } from './types';
 import { hashString } from './util';
 import { lastCompanyDay, verifyCommit } from './verify';
 import { applyAction, type Action, type ActionResult } from './sim/actions';
-import { activeStore, recordCompanyDay, storeReport, withStore } from './sim/company';
+import { activeStore, companyPolicyOf, recordCompanyDay, storeReport, withStore } from './sim/company';
 import { withPlannedAds } from './sim/ads';
 import { expectedDailyArrivals } from './sim/customers';
 import { bankruptcyCheck, checkGoals, declareBankruptcy, loanAvailable, payArrears, startNextDay, takeLoan } from './sim/day';
@@ -654,6 +654,8 @@ function settleLoans(s: GameState, day: number): void {
 export interface AutoDayOptions {
   /** 期限を過ぎた未払金を払えないとき、緊急の融資を受けてよいか */
   allowLoan: boolean;
+  /** 閉店後（次の日の朝の前）の経営の判断（AI 企業の判断・方針による拡張）。ひとりプレイの「閉店後に決める」と同じ時点 */
+  evening?: (s: GameState) => void;
 }
 
 /**
@@ -698,6 +700,9 @@ export function autoPlayDay(s: GameState, day: number, demand: Record<string, nu
   }
   runAbsentStores(s, ctx, day);
   recordCompanyDay(s, day);
+  opts.evening?.(s);
+  s.day = day;
+  s.phase = 'closed';
   startNextDay(s, ctx, false);
   return { bankrupt: false, loan };
 }
@@ -707,7 +712,11 @@ function autoPlayDate(m: MarketState, day: number, group: MarketCompany[], perio
   for (const c of group) recordLedger(m, c, day, false);
   const demands = new Map(group.map((c) => [c.id, demandFor(m, c, day)]));
   for (const c of group) {
-    const r = autoPlayDay(c.state, day, demands.get(c.id)!, { allowLoan: true });
+    // 借入は、AI 企業はいつでも、プレイヤー企業は方針で許可したときだけ（仕様書 4.3: 重大な借入は許可されない限り自動でしない）
+    const pol = companyPolicyOf(c.state);
+    // 閉店後の判断: AI 企業の判断、プレイヤー企業は方針で許可していれば本店の拡張（AI 企業と同じ条件）
+    const evening = c.kind === 'ai' ? () => aiDecide(m, c, day) : pol.allowExpansion ? () => autoExpand(m, c, '自動経営の方針で') : undefined;
+    const r = autoPlayDay(c.state, day, demands.get(c.id)!, { allowLoan: c.kind === 'ai' || pol.allowLoan, evening });
     c.progress.stateVersion += 1;
     c.progress.processingVersion = B().autoSimVersion;
     if (r.loan) log(m, c.id, '支払いの期限を過ぎた未払金があり、緊急融資を受けました', day);
@@ -722,7 +731,6 @@ function autoPlayDate(m: MarketState, day: number, group: MarketCompany[], perio
     c.progress.totalAutoDays += 1;
     c.days.push(dayRecord(c.state, day, periodId, 'auto', null));
   }
-  for (const c of group) if (c.kind === 'ai' && c.status === 'active') aiDecide(m, c, day);
 }
 
 // ───────────────────────── 0時の同期（仕様書 3.4） ─────────────────────────
@@ -985,6 +993,9 @@ export function migrateMarket(raw: Record<string, unknown>, now: number): Market
  */
 export const MARKET_ACTIONS: ReadonlySet<Action['type']> = new Set<Action['type']>([
   'setStorePolicy',
+  'setCompanyPolicy',
+  'setRestDays',
+  'setShift',
   'assignManager',
   'transferEmployee',
   'openStore',
@@ -1107,20 +1118,7 @@ export function aiDecide(m: MarketState, c: MarketCompany, day: number): void {
     if (staffCount(c, entry, 'cook') === 0 && s.money > reserve && aiHire(c, entry, 'cook')) log(m, c.id, `${entry.name}に調理担当を雇いました`);
   }
   // 3) 拡張（本店。プレイヤーがいる店の扱いの本店を12席に）
-  const info = expansionInfo(s);
-  if (info.next && info.next.id === 1 && info.canExpand) {
-    const seats = (info.next.seats.length - STAGES[s.career.stage]!.seats.length) * SEAT_PRICE;
-    const fridge = EQUIPMENT.fridge?.price ?? 0;
-    if (s.money >= info.cost + info.next.minFundsAfter + seats + fridge + A.expandReserve && act(c, { type: 'expand' })) {
-      log(m, c.id, `資金がたまったので本店を12席に拡張しました（工事費 ¥${info.cost.toLocaleString('ja-JP')}）`);
-    }
-  }
-  if (s.career.stage >= 1 && home.snapshot === null) {
-    for (const seat of s.seats) if (!seat.installed && seat.index < STAGES[s.career.stage]!.seats.length && s.money > SEAT_PRICE + reserve) act(c, { type: 'buySeat', seatIndex: seat.index });
-    if (s.equipment.filter((e) => EQUIPMENT[e.type]?.role === 'fridge').length < 2 && s.money > (EQUIPMENT.fridge?.price ?? 0) + reserve && act(c, { type: 'buyEquipment', equipType: 'fridge', autoPlace: true })) {
-      log(m, c.id, '12席で冷蔵庫が足りないので2台目を買いました');
-    }
-  }
+  autoExpand(m, c, '資金がたまったので');
   // 4) 出店
   const order: Record<AiStrategy, string[]> = { budget: ['residential', 'roadside', 'station'], standard: ['roadside', 'residential', 'station'], premium: ['station', 'roadside', 'residential'] };
   if (s.company.stores.length < BALANCE.company.maxStores) {
@@ -1141,6 +1139,32 @@ export function aiDecide(m: MarketState, c: MarketCompany, day: number): void {
         log(m, c.id, `${areaName(pid)}に出店しました（${st.name}・初期費用 ¥${prop.initialCost.toLocaleString('ja-JP')}。${prop.description}）`);
       }
       break;
+    }
+  }
+}
+
+/**
+ * 本店の12席への拡張（工事費＋席＋冷蔵庫＋工事後の手元資金＋余裕がたまったら）と、拡張したあとの席・2台目の冷蔵庫。
+ * AI 企業の判断と、プレイヤー企業の自動経営の方針（拡張を許可したとき）で同じ条件を使う
+ */
+function autoExpand(m: MarketState, c: MarketCompany, why: string): void {
+  const s = c.state;
+  const A = BALANCE.market.ai;
+  const reserve = A.reserve;
+  const home = s.company.stores[0]!;
+  if (home.id !== s.company.activeStoreId) return;
+  const info = expansionInfo(s);
+  if (info.next && info.next.id === 1 && info.canExpand) {
+    const seats = (info.next.seats.length - STAGES[s.career.stage]!.seats.length) * SEAT_PRICE;
+    const fridge = EQUIPMENT.fridge?.price ?? 0;
+    if (s.money >= info.cost + info.next.minFundsAfter + seats + fridge + A.expandReserve && act(c, { type: 'expand' })) {
+      log(m, c.id, `${why}本店を12席に拡張しました（工事費 ¥${info.cost.toLocaleString('ja-JP')}）`);
+    }
+  }
+  if (s.career.stage >= 1) {
+    for (const seat of s.seats) if (!seat.installed && seat.index < STAGES[s.career.stage]!.seats.length && s.money > SEAT_PRICE + reserve) act(c, { type: 'buySeat', seatIndex: seat.index });
+    if (s.equipment.filter((e) => EQUIPMENT[e.type]?.role === 'fridge').length < 2 && s.money > (EQUIPMENT.fridge?.price ?? 0) + reserve && act(c, { type: 'buyEquipment', equipType: 'fridge', autoPlace: true })) {
+      log(m, c.id, '12席で冷蔵庫が足りないので2台目を買いました');
     }
   }
 }

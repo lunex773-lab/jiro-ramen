@@ -10,14 +10,15 @@ import { MENU } from '../data/menu';
 import { STAGES } from '../data/stages';
 import type { DayReport, Employee, GameState, StoreEntry } from '../types';
 import { clamp } from '../util';
-import { storeProperty, withStore } from './company';
+import { companyPolicyOf, storeProperty, withStore } from './company';
 import { expectedDailyArrivals, expectedTicket } from './customers';
 import { cash, emptyDayStats, finalProfit, netSales, operatingProfit } from './economy';
 import { upkeepTotal } from './equipment';
 import { addLot, consume, expireLots, fridgeCapacity, stockOf } from './inventory';
 import { makeCtx, type SimCtx } from './notices';
 import { payAds, withPlannedAds } from './ads';
-import { endOfDayWellbeing, expectedPay, fatigueSpeed, shiftFor } from './staff';
+import { attendanceChances, checkQuits, endOfDayWellbeing, expectedPay, fatigueSpeed, shiftFor } from './staff';
+import { tempHourly } from './employees';
 
 const M = () => BALANCE.company.model;
 
@@ -34,6 +35,31 @@ function avgSkill(e: Employee): number {
 export interface ManagerDayOptions {
   /** 来客の倍率（オンライン市場で、同じ地域の競合の店に客を取られる分。1 = 競合なし） */
   demandMult?: number;
+  /** 短期バイトの人数（人手が足りない日に方針で呼ぶ。runInStore が決める） */
+  temps?: number;
+}
+
+/** 遅刻したときに働けない時間の割合の見込み（遅刻の分数の平均 ÷ 1日の営業の分数） */
+const LATE_SHARE = () => (BALANCE.staff.attendance.lateMinFrom + BALANCE.staff.attendance.lateMinTo) / 2 / ((BALANCE.closeHour - BALANCE.openHour) * 60);
+
+/** その人が来て働く割合の見込み（当日欠勤・遅刻の確率から。細かいシミュレーションと同じ確率。乱数は使わない） */
+export function expectedAttendance(e: Employee): number {
+  const a = attendanceChances(e);
+  return (1 - a.absent) * (1 - a.late * LATE_SHARE());
+}
+
+/** 短期バイト1人分の人手（能力は新人並みの平均） */
+function tempLabor(): number {
+  const m = M();
+  const T = BALANCE.staff.temp;
+  return (m.rolePoints.cook ?? 10) * (skillFactor((T.skillFrom + T.skillTo) / 2) / skillFactor(0.65));
+}
+
+/** 赤字が3日続いているか（会社の日報） */
+export function inDeficit(s: GameState): boolean {
+  const h = s.company?.history ?? [];
+  if (h.length < 3) return false;
+  return h.slice(-3).every((r) => r.operatingProfit < 0);
 }
 
 export interface ManagerDayPlan {
@@ -51,18 +77,21 @@ export interface ManagerDayPlan {
  * 1日の処理能力（杯）。席の数・店長と従業員の担当と能力・冷蔵庫の容量の小さいほう。
  * lead は店を回す人（店長の社員、または店主）。null なら人手は0（休業）
  */
-export function storeCapacity(s: GameState, lead: { id: string | null; skill: number } | null): ManagerDayPlan['capacity'] {
+export function storeCapacity(s: GameState, lead: { id: string | null; skill: number } | null, temps = 0): ManagerDayPlan['capacity'] {
   const m = M();
   const seats = s.seats.filter((x) => x.installed && x.index < STAGES[s.career.stage]!.seats.length).length * m.seatTurns;
   let labor = 0;
   if (lead) {
     const leadEmp = lead.id ? s.employees.find((e) => e.id === lead.id) : undefined;
-    labor = ((m.leadPoints * skillFactor(lead.skill)) / skillFactor(0.65)) * (leadEmp ? fatigueSpeed(leadEmp) : 1);
+    labor = ((m.leadPoints * skillFactor(lead.skill)) / skillFactor(0.65)) * (leadEmp ? fatigueSpeed(leadEmp) * expectedAttendance(leadEmp) : 1);
     // その日に勤務の予定がある人だけ（休みの曜日・シフトのない日は来ない）。疲れていると遅い（細かいシミュレーションと同じ倍率）
     const others = s.employees.filter((e) => e.id !== lead.id && shiftFor(e, s.day) !== null);
     let extra = 0;
-    for (const e of others) extra += (m.rolePoints[e.profile.role] ?? 10) * (skillFactor(avgSkill(e)) / skillFactor(0.65)) * fatigueSpeed(e);
-    labor += extra / (1 + m.extraDiminish * Math.max(0, others.length - 1));
+    // 当日欠勤・遅刻は見込み（確率）で減らす。短期バイトは新人並みの人手
+    for (const e of others) extra += (m.rolePoints[e.profile.role] ?? 10) * (skillFactor(avgSkill(e)) / skillFactor(0.65)) * fatigueSpeed(e) * expectedAttendance(e);
+    for (let i = 0; i < temps; i++) extra += tempLabor();
+    const n = others.length + temps;
+    labor += extra / (1 + m.extraDiminish * Math.max(0, n - 1));
   }
   const fridge = fridgeCapacity(s) * m.bowlsPerFridgeKg;
   return { seats, labor, fridge, total: Math.max(0, Math.min(seats, labor, fridge)) };
@@ -88,7 +117,7 @@ function applyPolicyPrices(s: GameState, entry: StoreEntry): void {
 export function planManagerDay(s: GameState, entry: StoreEntry, opts: ManagerDayOptions = {}): ManagerDayPlan {
   const lead = storeLead(s, entry);
   const closedReason = s.closedForConstruction > 0 ? '工事・準備のため休業' : !lead ? '店長がいないため休業' : null;
-  const capacity = storeCapacity(s, lead);
+  const capacity = storeCapacity(s, lead, opts.temps ?? 0);
   const ticket = expectedTicket(s) * M().ticketFactor;
   if (closedReason) return { open: false, closedReason, arrivals: 0, capacity, served: 0, ticket };
   const arrivals = expectedDailyArrivals(s, { events: false }) * (opts.demandMult ?? 1);
@@ -96,15 +125,15 @@ export function planManagerDay(s: GameState, entry: StoreEntry, opts: ManagerDay
   return { open: true, closedReason: null, arrivals, capacity, served, ticket };
 }
 
-/** 朝の仕入れ: 見込みの杯数の分の在庫をそろえる（払えた分だけ）。払った額を返す */
-function restock(s: GameState, bowls: number, key: (k: string) => string): number {
+/** 朝の仕入れ: 見込みの杯数の分の在庫をそろえる（払えた分だけ。安全基準は店の方針）。払った額を返す */
+function restock(s: GameState, bowls: number, key: (k: string) => string, safety = 1): number {
   const use = M().usePerBowl;
   let paid = 0;
   for (const [itemId, per] of Object.entries(use)) {
     const def = INGREDIENTS[itemId];
     if (!def || !def.purchasable || def.packQty <= 0) continue;
     if (def.unlock && !s.career.unlocked.includes(def.unlock)) continue;
-    const want = per * bowls * (1 + M().wasteShare) * M().stockSafety;
+    const want = per * bowls * (1 + M().wasteShare) * M().stockSafety * safety;
     const have = stockOf(s, itemId);
     if (have >= want) continue;
     const packs = Math.ceil((want - have) / def.packQty);
@@ -152,13 +181,25 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
   for (const d of s.deliveries) addLot(s, d.itemId, d.qty, d.unitCost);
   s.deliveries = [];
   expireLots(s, ctx);
+  // 赤字が続いているとき（方針「赤字のときは経費を減らす」）は、広告と短期バイトを止める
+  const austerity = companyPolicyOf(s).deficit === 'cutCosts' && inDeficit(s);
   // その日の広告費（営業する日だけ。払えなければ出さない）。来客の見込みに入る
-  if (s.closedForConstruction <= 0 && storeLead(s, entry)) payAds(s, entry, day);
-  const plan = planManagerDay(s, entry, opts);
+  if (!austerity && s.closedForConstruction <= 0 && storeLead(s, entry)) payAds(s, entry, day);
+  let plan = planManagerDay(s, entry, opts);
+  // 人手が足りない日（方針で許可していれば）は短期バイトを1人呼ぶ（時給は通常の1.5倍・その日だけ）
+  let temps = 0;
+  if (plan.open && !austerity && entry.policy.tempWhenShort && s.career.unlocked.includes('hiring')) {
+    const want = plan.arrivals * M().joinShare;
+    const c = plan.capacity;
+    if (c.labor < Math.min(c.seats, c.fridge, want)) {
+      temps = 1;
+      plan = planManagerDay(s, entry, { ...opts, temps });
+    }
+  }
   let served = 0;
   if (plan.open) {
     s.closedForConstruction = 0;
-    restock(s, plan.served, key);
+    restock(s, plan.served, key, entry.policy.safetyStock ?? 1);
     served = Math.min(plan.served, stockLimit(s));
     // 食材を使う（原価）。使う量の一部は廃棄（ゆですぎ・こぼし）
     for (const [itemId, per] of Object.entries(m.usePerBowl)) {
@@ -185,7 +226,7 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
     const repairs = served * m.repairPerBowl * (entry.policy.maintenance ? 1 : m.repairNoMaintenanceMult);
     t.repairs = Math.round(Math.min(entry.policy.repairCap, repairs));
     t.utilities = Math.round(BALANCE.utilitiesBase + m.utilitiesPerBowl * served);
-    t.wages = s.employees.reduce((a, e) => a + expectedPay(e, day), 0);
+    t.wages = s.employees.reduce((a, e) => a + expectedPay(e, day), 0) + temps * Math.round(tempHourly() * BALANCE.staff.employment.fullShiftHours);
   } else {
     if (s.closedForConstruction > 0) s.closedForConstruction -= 1;
     t.utilities = BALANCE.utilitiesBase;
@@ -254,8 +295,14 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
  */
 export function runManagerDay(s: GameState, entry: StoreEntry, day: number, _ctx: SimCtx, opts: ManagerDayOptions = {}): DayReport {
   const quiet = makeCtx();
+  const absent = entry.id !== s.company.activeStoreId;
   return withStore(s, entry, () => {
     s.today = emptyDayStats();
+    // プレイヤーがいない店の朝: 不満がたまった人は辞めることがある（プレイヤーがいる店は朝の出勤確認で）
+    if (absent) {
+      checkQuits(s, null);
+      if (entry.managerId && !s.employees.some((e) => e.id === entry.managerId)) entry.managerId = null;
+    }
     return runInStore(s, entry, day, quiet, opts);
   });
 }

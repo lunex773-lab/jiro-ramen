@@ -4,7 +4,7 @@
 // プレイヤーがいない店の中身は stores[].snapshot にしまい、店を切り替えるときに GameState の店の部分と入れ替える。
 
 import { PROPERTIES } from '../data/properties';
-import type { CompanyDayReport, CompanyState, DayReport, GameState, StoreEntry, StoreKey, StorePolicy, StoreSnapshot } from '../types';
+import type { CompanyDayReport, CompanyPolicy, CompanyState, DayReport, GameState, StoreEntry, StoreKey, StorePolicy, StoreSnapshot } from '../types';
 import { emptyDayStats, netSales } from './economy';
 
 /** 店ごとの項目の一覧（types.ts の StoreKey とそろえる。抜けがあると型エラーになる） */
@@ -42,6 +42,23 @@ export const STORE_KEYS = Object.keys(STORE_KEY_SET) as StoreKey[];
 export const FIRST_STORE_ID = 'store1';
 
 export const DEFAULT_POLICY: StorePolicy = { priceMult: 1, orderMode: 'sales', repairCap: 30_000, maintenance: true };
+
+/** 会社全体の自動経営の方針の初期値（保守的: 借入・拡張はしない。赤字が続いたら広告と短期バイトを止める） */
+export const DEFAULT_COMPANY_POLICY: CompanyPolicy = { allowLoan: false, allowExpansion: false, deficit: 'cutCosts' };
+
+/** 会社全体の方針（古いデータは初期値） */
+export function companyPolicyOf(s: GameState): CompanyPolicy {
+  return { ...DEFAULT_COMPANY_POLICY, ...(s.company?.policy ?? {}) };
+}
+
+/** 会社全体の方針を変える */
+export function setCompanyPolicy(s: GameState, p: Partial<CompanyPolicy>): { ok: boolean; reason?: string } {
+  const next = { ...companyPolicyOf(s), ...p };
+  if (typeof next.allowLoan !== 'boolean' || typeof next.allowExpansion !== 'boolean') return { ok: false, reason: '方針の値が不正です' };
+  if (next.deficit !== 'none' && next.deficit !== 'cutCosts') return { ok: false, reason: '赤字のときの対応が不正です' };
+  s.company.policy = { allowLoan: next.allowLoan, allowExpansion: next.allowExpansion, deficit: next.deficit };
+  return { ok: true };
+}
 
 /** 新しいキャリア（または古いセーブ）の会社: 今の店が1店舗目で、プレイヤーはそこにいる */
 export function newCompany(s: Pick<GameState, 'shopName' | 'day'>): CompanyState {

@@ -143,6 +143,17 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   await screen.locator(`[data-price="${storeId}"]`).selectOption('0.9');
   await expect.poll(() => mock.market!.companies[0]!.state.company.stores[0]!.policy.priceMult).toBe(0.9);
   expect(mock.acts.map((a) => a.type)).toContain('setStorePolicy');
+  // 自動経営の方針（会社全体）: 借入の許可は、変更前と後を見せて確かめてから変える
+  await expect(screen.locator('.market-auto')).toContainText('自動経営の方針');
+  await screen.locator('[data-pol-loan]').selectOption('true');
+  const modal = page.locator('.modal');
+  await expect(modal).toContainText('変更前: 許可しない');
+  await expect(modal).toContainText('変更後: 許可する');
+  await modal.getByRole('button', { name: '変更する' }).click();
+  await expect.poll(() => mock.market!.companies[0]!.state.company.policy?.allowLoan ?? false).toBe(true);
+  // 店ごとの方針: 人手が足りない日の短期バイト
+  await screen.locator(`[data-temp-policy="${storeId}"]`).selectOption('1');
+  await expect.poll(() => mock.market!.companies[0]!.state.company.stores[0]!.policy.tempWhenShort ?? false).toBe(true);
 
   // 端末で1日目を営業する（その日の条件 = 同じ地域の会社との客の取り合いの倍率をもらう）
   await screen.locator('[data-market-play]').click();

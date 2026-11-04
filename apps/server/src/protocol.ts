@@ -14,7 +14,7 @@ export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
   'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
-  'accidentReset', 'openStore', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy',
+  'accidentReset', 'openStore', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setCompanyPolicy',
 ] as const satisfies readonly ActionType[];
 
 /**
@@ -71,14 +71,31 @@ function isArgs(v: unknown): boolean {
 }
 
 /** 店の方針（知っているキーだけ。値の範囲は core の setStorePolicy で確かめる） */
+function isCompanyPolicy(v: unknown): boolean {
+  if (!isObj(v)) return false;
+  const keys = Object.keys(v);
+  if (keys.length === 0 || keys.length > 3) return false;
+  for (const k of keys) {
+    const x = v[k];
+    if (k === 'allowLoan' || k === 'allowExpansion') {
+      if (typeof x !== 'boolean') return false;
+    } else if (k === 'deficit') {
+      if (x !== 'none' && x !== 'cutCosts') return false;
+    } else return false;
+  }
+  return true;
+}
+
 function isPolicy(v: unknown): boolean {
   if (!isObj(v)) return false;
   const keys = Object.keys(v);
-  if (keys.length === 0 || keys.length > 5) return false;
+  if (keys.length === 0 || keys.length > 7) return false;
   for (const k of keys) {
     const x = v[k];
-    if (k === 'priceMult' || k === 'repairCap' || k === 'adBudget') {
+    if (k === 'priceMult' || k === 'repairCap' || k === 'adBudget' || k === 'safetyStock') {
       if (!isNum(x)) return false;
+    } else if (k === 'tempWhenShort') {
+      if (typeof x !== 'boolean') return false;
     } else if (k === 'orderMode') {
       if (x !== 'manual' && x !== 'sales') return false;
     } else if (k === 'maintenance') {
@@ -134,6 +151,7 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   assignManager: { storeId: isId, employeeId: (v: unknown) => v === null || isId(v) },
   transferEmployee: { employeeId: isId, toStoreId: isId, asManager: optBool },
   setStorePolicy: { storeId: isId, policy: isPolicy },
+  setCompanyPolicy: { policy: isCompanyPolicy },
 };
 
 /** 操作要求の形を検証する。正しければ余計なキーを除いた Action を返す */

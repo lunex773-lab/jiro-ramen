@@ -6,6 +6,9 @@
 
 import {
   adBudgetOf,
+  companyPolicyOf,
+  tempHourly,
+  type CompanyPolicy,
   adFactor,
   AI_STRATEGY_LABEL,
   BALANCE,
@@ -403,7 +406,59 @@ export class MarketScreen {
       row('終わったあとの企業', st.entry === 'fresh' ? '新規の企業だけ（次の市場は新しい会社で）' : '育てた企業で次の市場に参加できる'),
       h('p', { class: 'note' }, '営業していない間の経営（値段・人・出店）は、この画面で決められます。拡張の工事は、営業の画面で閉店後に決めます。'),
     );
-    return h('div', { class: 'market-mine-col' }, finance, rules, ...stores, this.growth(s, v), this.hiring(s));
+    return h('div', { class: 'market-mine-col' }, finance, rules, this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
+  }
+
+  /**
+   * 自動経営の方針（会社全体。仕様書 4.3・8.2）。変える前と後を見せ、重大な判断（借入・拡張の許可）は確認してから変える。
+   * 自動営業（0時に遅れを補う日）と、プレイヤーがいない店に使う
+   */
+  private autoPolicy(s: GameState): HTMLElement {
+    const pol = companyPolicyOf(s);
+    const yesNo = (v: boolean) => (v ? '許可する' : '許可しない');
+    const deficitText = (v: CompanyPolicy['deficit']) => (v === 'cutCosts' ? '3日続けて赤字なら広告と短期バイトを止める' : '何もしない');
+    const change = async (label: string, before: string, after: string, patch: Partial<CompanyPolicy>, major: string | null) => {
+      if (before === after) return;
+      if (major && !(await confirmDialog(this.root, `${label}を変える`, `変更前: ${before}\n変更後: ${after}\n\n${major}`, '変更する', true))) {
+        this.render();
+        return;
+      }
+      await this.act({ type: 'setCompanyPolicy', policy: patch }, `${label}: ${before} → ${after}`);
+    };
+    const sel = (attr: string, value: string, opts: [string, string][], onChange: (v: string) => void) =>
+      h('select', { [attr]: '', onchange: (ev: Event) => onChange((ev.target as HTMLSelectElement).value) }, opts.map(([v, t]) => h('option', { value: v, selected: v === value }, t)));
+    return h(
+      'section',
+      { class: 'card market-auto' },
+      h('h4', null, '自動経営の方針（会社全体）'),
+      h('p', { class: 'note' }, '0時に、いちばん進んだ会社の日付まで自動営業するときと、あなたがいない店で使います。店ごとの方針（値段・広告・短期バイト・在庫・修理）は店の欄で決めます。'),
+      h(
+        'div',
+        { class: 'kv' },
+        h('span', null, '借入'),
+        sel('data-pol-loan', String(pol.allowLoan), [['false', '許可しない'], ['true', '許可する']], (v) =>
+          void change('借入', yesNo(pol.allowLoan), yesNo(v === 'true'), { allowLoan: v === 'true' }, v === 'true' ? '期限を過ぎた未払金を払えない日に、自動で緊急の融資を受けます（返済と利息がかかります）。' : '許可しないと、自動営業で未払金を払えない日に破産することがあります。'),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'kv' },
+        h('span', null, '本店の拡張'),
+        sel('data-pol-expand', String(pol.allowExpansion), [['false', '許可しない'], ['true', '許可する']], (v) =>
+          void change('本店の拡張', yesNo(pol.allowExpansion), yesNo(v === 'true'), { allowExpansion: v === 'true' }, v === 'true' ? '資金に余裕があるとき（工事費・席・冷蔵庫・工事後の手元資金・余裕の資金がたまったとき）、自動営業の日に本店を12席に拡張します。工事の日は休業します。' : null),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'kv' },
+        h('span', null, '赤字のとき'),
+        sel('data-pol-deficit', pol.deficit, [['cutCosts', '広告と短期バイトを止める'], ['none', '何もしない']], (v) =>
+          void change('赤字のとき', deficitText(pol.deficit), deficitText(v as CompanyPolicy['deficit']), { deficit: v as CompanyPolicy['deficit'] }, null),
+        ),
+      ),
+      h('div', { class: 'kv' }, h('span', null, '営業時間'), h('b', null, 'いつも通常の営業時間')),
+      h('div', { class: 'kv' }, h('span', null, '株式発行・企業買収'), h('b', null, 'まだありません（しない）')),
+    );
   }
 
   private storeCard(s: GameState, entry: StoreEntry, day: number): HTMLElement {
@@ -428,6 +483,27 @@ export class MarketScreen {
           'select',
           { 'data-price': entry.id, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { priceMult: Number((ev.target as HTMLSelectElement).value) } }) },
           [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3].map((m) => h('option', { value: String(m), selected: Math.abs(m - entry.policy.priceMult) < 1e-6 }, m === 1 ? '定価' : `定価の${Math.round(m * 100)}%`)),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'kv' },
+        h('span', null, '人手が足りない日'),
+        h(
+          'select',
+          { 'data-temp-policy': entry.id, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { tempWhenShort: (ev.target as HTMLSelectElement).value === '1' } }, '短期バイトの方針を変えました') },
+          h('option', { value: '0', selected: !entry.policy.tempWhenShort }, '短期バイトを呼ばない'),
+          h('option', { value: '1', selected: !!entry.policy.tempWhenShort }, `短期バイトを1人呼ぶ（時給${yenStr(tempHourly())}）`),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'kv' },
+        h('span', null, '在庫の安全基準'),
+        h(
+          'select',
+          { 'data-safety': entry.id, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { safetyStock: Number((ev.target as HTMLSelectElement).value) } }, '在庫の安全基準を変えました') },
+          [0.9, 1, 1.2, 1.5].map((v) => h('option', { value: String(v), selected: Math.abs(v - (entry.policy.safetyStock ?? 1)) < 1e-6 }, v === 1 ? 'ふつう' : v < 1 ? '少なめ（廃棄が減る・品切れしやすい）' : `多め（×${v}・品切れしにくい・廃棄が増える）`)),
         ),
       ),
       h(

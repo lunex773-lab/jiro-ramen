@@ -362,6 +362,27 @@ export class ManageMenu {
         h(
           'div',
           { class: 'kv' },
+          h('span', null, '人手が足りない日'),
+          h(
+            'select',
+            { 'data-policy-temp': entry.id, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { tempWhenShort: (ev.target as HTMLSelectElement).value === '1' } }) },
+            h('option', { value: '0', selected: !pol.tempWhenShort }, '短期バイトを呼ばない'),
+            h('option', { value: '1', selected: !!pol.tempWhenShort }, '短期バイトを1人呼ぶ'),
+          ),
+        ),
+        h(
+          'div',
+          { class: 'kv' },
+          h('span', null, '在庫の安全基準'),
+          h(
+            'select',
+            { onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { safetyStock: Number((ev.target as HTMLSelectElement).value) } }) },
+            [0.9, 1, 1.2, 1.5].map((v) => h('option', { value: String(v), selected: Math.abs(v - (pol.safetyStock ?? 1)) < 1e-6 }, v === 1 ? 'ふつう' : v < 1 ? '少なめ' : `多め（×${v}）`)),
+          ),
+        ),
+        h(
+          'div',
+          { class: 'kv' },
           h('span', null, '1日の修理費の上限'),
           h(
             'select',

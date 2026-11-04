@@ -6,7 +6,7 @@ import { BOWL_PACK, EQUIPMENT, SEAT_PRICE } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
 import { MENU } from '../data/menu';
 import { moveWithCollision, stageOf } from '../geometry';
-import type { EmployeeRole, EventKind, GameState, Id, Rot, ShiftDay, StorePolicy, Vec2 } from '../types';
+import type { CompanyPolicy, EmployeeRole, EventKind, GameState, Id, Rot, ShiftDay, StorePolicy, Vec2 } from '../types';
 import { dist, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipment';
@@ -22,6 +22,7 @@ import { accidentFainted, resetAccident } from './accident';
 import { forceEvent } from './visitors';
 import { promote, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
 import { answerRequest } from './media';
+import { setCompanyPolicy } from './company';
 import { assignManager, enterStore, openStore, setStorePolicy, transferEmployee } from './stores';
 
 export type Action =
@@ -47,6 +48,8 @@ export type Action =
   | { type: 'setPriority'; employeeId: Id; kind: string; value: number }
   /** アルバイトの曜日ごとのシフト（weekday: 月=0 … 日=6、shift: null でその曜日は休み） */
   | { type: 'setShift'; employeeId: Id; weekday: number; shift: ShiftDay | null }
+  /** 会社全体の自動経営の方針（借入・拡張の許可、赤字のときの対応） */
+  | { type: 'setCompanyPolicy'; policy: Partial<CompanyPolicy> }
   /** 短期バイトを呼ぶ（開店前。その日だけ来る） */
   | { type: 'hireTemp'; role: EmployeeRole }
   /** 社員の休みの曜日（月=0 … 日=6。空なら毎日出勤） */
@@ -270,6 +273,8 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return setPriority(s, a.employeeId, a.kind, a.value) ? { ok: true } : fail('変更できません');
     case 'setShift':
       return setShift(s, ctx, a.employeeId, a.weekday, a.shift);
+    case 'setCompanyPolicy':
+      return setCompanyPolicy(s, a.policy && typeof a.policy === 'object' ? a.policy : {});
     case 'hireTemp':
       return hireTemp(s, ctx, a.role);
     case 'setRestDays':

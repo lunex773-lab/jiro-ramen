@@ -1172,6 +1172,23 @@ export interface StorePolicy {
   maintenance: boolean;
   /** 1日の広告費（円。開店のときに払う。古いデータにはない → 0） */
   adBudget?: number;
+  /** 人手が足りない日（自動営業・店長の営業）に短期バイトを1人呼ぶか（仕様書 4.3。古いデータにはない → 呼ばない） */
+  tempWhenShort?: boolean;
+  /** 食材の在庫の安全基準（見込みの杯数に対する仕入れの余裕の倍率。古いデータにはない → 1） */
+  safetyStock?: number;
+}
+
+/**
+ * 会社全体の自動経営の方針（共通市場の仕様書 4.3・4.5。店ごとの方針は StorePolicy）。
+ * 初期値は保守的（重大な借入・拡張は、許可しない限り自動ではしない）。株式発行・企業買収はまだないので常に禁止
+ */
+export interface CompanyPolicy {
+  /** 期限を過ぎた未払金を払えない日に、緊急の融資を受けてよいか（許可しないと、払えない日に破産することがある） */
+  allowLoan: boolean;
+  /** 資金に余裕があるとき、本店の拡張（工事）をしてよいか */
+  allowExpansion: boolean;
+  /** 赤字のときの対応: 'none' = 何もしない、'cutCosts' = 3日続けて赤字なら広告と短期バイトを止める */
+  deficit: 'none' | 'cutCosts';
 }
 
 export interface StoreEntry {
@@ -1223,4 +1240,6 @@ export interface CompanyState {
   stores: StoreEntry[];
   /** 会社の日報（直近60日） */
   history: CompanyDayReport[];
+  /** 会社全体の自動経営の方針（古いデータにはない → 初期値） */
+  policy?: CompanyPolicy;
 }
