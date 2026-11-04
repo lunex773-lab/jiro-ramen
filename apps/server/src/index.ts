@@ -4,7 +4,7 @@
 import { createAnonymous, gameVersion, profile } from './api/account';
 import { deleteSave, downloadSave, uploadSave } from './api/saves';
 import { connectRoom, createSession, joinSession, leaveSession } from './api/session';
-import { actMarketApi, createMarketApi, joinMarketApi, listMarketsApi, viewMarketApi } from './api/market';
+import { actMarketApi, commitDayApi, createMarketApi, joinMarketApi, listMarketsApi, startDayApi, viewMarketApi } from './api/market';
 import { requirePlayer } from './auth';
 import type { Env } from './env';
 import { allowedOrigins, corsHeaders, errorResponse, HttpError, withCors } from './http';
@@ -50,6 +50,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const saveSlot = /^\/api\/v1\/save\/([^/]+)$/.exec(path);
   const marketView = /^\/api\/v1\/market\/([^/]+)$/.exec(path);
   const marketAct = /^\/api\/v1\/market\/([^/]+)\/act$/.exec(path);
+  const marketDay = /^\/api\/v1\/market\/([^/]+)\/day\/(start|commit)$/.exec(path);
   const known =
     path === '/api/v1/profile' ||
     path === '/api/v1/save' ||
@@ -59,7 +60,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     path === '/api/v1/markets' ||
     saveSlot !== null ||
     marketView !== null ||
-    marketAct !== null;
+    marketAct !== null ||
+    marketDay !== null;
   if (!known) throw new HttpError(404, 'not_found', 'API が見つかりません');
 
   // ここから先は認証が必要
@@ -88,7 +90,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     limit(HTTP_LIMITS.session, player.id);
     return leaveSession(req, env, ctx, player);
   }
-  // オンライン市場（Phase 3+4）
+  // 共通市場（docs/MARKET_RANKING_PLAN.md）
   if (path === '/api/v1/markets' && m === 'GET') return listMarketsApi(env, player);
   if (marketView && marketView[1] === 'create' && m === 'POST') {
     limit(HTTP_LIMITS.session, player.id);
@@ -102,6 +104,11 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (marketAct && m === 'POST') {
     limit(HTTP_LIMITS.market, player.id);
     return actMarketApi(req, env, player, decodeURIComponent(marketAct[1]!));
+  }
+  if (marketDay && m === 'POST') {
+    limit(HTTP_LIMITS.market, player.id);
+    const id = decodeURIComponent(marketDay[1]!);
+    return marketDay[2] === 'start' ? startDayApi(req, env, player, id) : commitDayApi(req, env, ctx, player, id);
   }
   throw new HttpError(405, 'method_not_allowed', 'このメソッドは使えません');
 }

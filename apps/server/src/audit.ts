@@ -24,7 +24,13 @@ export type AuditKind =
   | 'action_exception'
   | 'checkpoint_corrupt'
   | 'market_create'
-  | 'market_join';
+  | 'market_join'
+  /** 端末から届いた1日を受け取らなかった（前日の状態から説明できない）。detail に理由 */
+  | 'market_day_rejected'
+  /** 受け取ったが上限を超えた・食い違いがあった（順位から外す）。detail に理由 */
+  | 'market_day_flagged'
+  /** 0時から30分を過ぎて届いた日（無効） */
+  | 'market_day_expired';
 
 export interface AuditEntry {
   kind: AuditKind;

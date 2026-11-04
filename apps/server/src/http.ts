@@ -80,6 +80,19 @@ export function withCors(res: Response, cors: Record<string, string>): Response 
 
 /** 本文を最大 limit バイトまで読み、JSON として解釈する。超えたら 413 */
 export async function readJson(req: Request, limit: number): Promise<unknown> {
+  const text = await readJsonText(req, limit);
+  try {
+    return safeJsonParse(text);
+  } catch {
+    throw new HttpError(400, 'bad_json', 'JSON として読めません');
+  }
+}
+
+/**
+ * JSON の本文を、解釈せずに文字列のまま読む（大きな本文を Durable Object へそのまま渡すとき。Worker の CPU を使わない）。
+ * Content-Type・大きさ・UTF-8 の確認は readJson と同じ
+ */
+export async function readJsonText(req: Request, limit: number): Promise<string> {
   const ct = req.headers.get('Content-Type') ?? '';
   if (!/^application\/json\b/i.test(ct)) throw new HttpError(415, 'unsupported_media_type', 'Content-Type: application/json で送信してください');
   const cl = req.headers.get('Content-Length');
@@ -104,15 +117,9 @@ export async function readJson(req: Request, limit: number): Promise<unknown> {
     buf.set(c, off);
     off += c.byteLength;
   }
-  let text: string;
   try {
-    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(buf);
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(buf);
   } catch {
     throw new HttpError(400, 'bad_request', 'UTF-8 として読めません');
-  }
-  try {
-    return safeJsonParse(text);
-  } catch {
-    throw new HttpError(400, 'bad_json', 'JSON として読めません');
   }
 }

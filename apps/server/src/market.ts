@@ -1,41 +1,50 @@
-// オンライン市場の Durable Object（統合進化設計書 v2.1 Phase 3+4）。1つの市場 = 1つの MarketRoom。
-// 市場の経済の状態（企業・店舗・お金・市場シェア・AI の意思決定）はここだけが確定する。
+// 共通市場（コミュニティ）の Durable Object（docs/MARKET_RANKING_PLAN.md）。1つの市場 = 1つの MarketRoom。
+// 市場の経済の状態（企業・店舗・お金・同期の状態機械）はここだけが確定する（サーバー権威）。
 //
-// 時計: 市場の日は開始の時刻から dayMs ごとに1日進む（サーバーの時計。オーナーの判断: 市場の1日＝実時間9分の営業日の周期）。
-// 毎フレーム動かさず、アクセスのとき（と数時間おきのアラーム）に、今の時刻までの日をまとめて計算する（時間差の追いつき）。
-// 計算は同期処理で、途中で別の要求が割り込まない（Durable Object は1つずつ処理する）ので、同じ日を二度計算しない。
-// だれもアクセスしない期間が DORMANT_MS を超えた市場は、その先の時間を数えない（費用の上限。次に開いたときから再開する）。
+// 時間: プレイヤーは端末で1日ずつ営業し、日の始め（day/start）に条件をもらい、日の終わり（day/commit）に状態を送る。
+// JST の0時に期間を締め、いちばん進んだ企業の日付まで、遅れた企業を自動営業でそろえる（core の runSync）。
+// 0時のアラームで同期を始め、続きがあればアラームで続け、全社がそろったら期間ごとの集計を D1 に書いてから期間を終える。
+// 要求が来たときにも同期が残っていれば先に進める（アラームが遅れても、時計はサーバーの時刻だけで決まる）。
+// Durable Object は要求を1つずつ処理するので、同じ日を二度計算しない（D1 への書き込みを待つ間も、同期の状態で操作を断る）。
 //
-// 状態は JSON を固定長の断片に分けて SQLite ストレージに保存する（1値の上限を超えないように。checkpoint.ts と同じ形）。
-// 操作は cid（クライアントが付ける操作の ID）で二重適用しない（結果を覚えて同じ答えを返す）。
+// 保存: 市場の共通部分（企業の状態を除く）と、企業ごとの状態を、それぞれ固定長の断片に分けて SQLite に保存する。
+// 変わった部分だけを書く（日の確定では、その企業と共通部分だけ）。読み込むときはチェックサムで確かめる。
 
 import { DurableObject } from 'cloudflare:workers';
 import {
-  advanceMarketTo,
-  BALANCE,
   checksum,
+  commitDay,
   createMarket,
+  finishSync,
   joinMarket,
+  jstDateKey,
   marketAction,
   marketView,
+  migrateMarket,
   MARKET_SCHEMA,
+  nextJstMidnight,
+  nextSyncAt,
+  periodSummary,
   playerCompany,
+  runSync,
+  startDay,
+  syncPending,
   type Action,
   type ActionResult,
+  type CommunitySettings,
+  type GameState,
+  type MarketCompany,
   type MarketState,
   type MarketView,
 } from '@jiro/core';
 import type { Env } from './env';
 import { RidCache } from './checkpoint';
+import { ensureSchema } from './schema';
 import { isObj, log, safeJsonParse } from './util';
 
-/** だれもアクセスしないとき、時間を数え続ける長さ（これを超えた分は数えない） */
-export const DORMANT_MS = 7 * 86_400_000;
-/** 追いつきのアラームの間隔 */
-export const ALARM_EVERY_MS = 6 * 3_600_000;
-/** 1回の要求で追いつく日数の上限（長く止まっていた市場は、何回かに分けて追いつく） */
-const MAX_DAYS_PER_REQUEST = 1500;
 const CHUNK_CHARS = 64 * 1024;
+/** 同期の集計を D1 に書けなかったときに、やり直すまでの時間 */
+const RETRY_MS = 60_000;
 
 export interface MarketMeta {
   marketId: string;
@@ -43,20 +52,17 @@ export interface MarketMeta {
   name: string;
   ownerId: string;
   createdAt: number;
-  /** 市場の1日目が始まった時刻（眠っていた分だけ後ろへずらす） */
-  startedAt: number;
-  dayMs: number;
-  /** 最後にプレイヤーがアクセスした時刻 */
-  lastAccessAt: number;
 }
 
+/** 画面に出す時計（サーバーの時刻。端末の時計は使わない） */
 export interface MarketClock {
-  /** 営業が済んだ最後の日 */
-  day: number;
-  dayMs: number;
-  /** 次の日の営業が済む時刻 */
-  nextDayAt: number;
   serverNow: number;
+  /** 次の JST の0時 */
+  nextMidnight: number;
+  /** 次に同期を始める時刻（同期することがなければ null） */
+  nextSyncAt: number | null;
+  /** 0時を過ぎて同期が済んでいない（新しい日は始められない） */
+  syncPending: boolean;
 }
 
 /** Worker から渡される本人の情報（Durable Object は Worker からしか呼べないので信用してよい） */
@@ -66,12 +72,21 @@ function json(v: unknown, status = 200): Response {
   return new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
 }
 
+/** 企業の状態を除いた市場（共通部分として保存する形） */
+type MarketShell = Omit<MarketState, 'companies'> & { companies: Omit<MarketCompany, 'state'>[] };
+
 export class MarketRoom extends DurableObject<Env> {
   private sql: SqlStorage;
   meta: MarketMeta | null = null;
   market: MarketState | null = null;
   private corrupt = false;
   private cids = new Map<string, RidCache>();
+  /** 状態が変わった企業（保存するもの。共通部分は毎回保存する） */
+  private dirtyCompanies = new Set<string>();
+  /** 同期を進めている最中（D1 への書き込みを待つ間に、二重に進めない） */
+  private syncBusy = false;
+  /** テスト用: サーバーの時刻のずれ（ミリ秒） */
+  skewMs = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -81,32 +96,78 @@ export class MarketRoom extends DurableObject<Env> {
     });
   }
 
+  now(): number {
+    return Date.now() + this.skewMs;
+  }
+
   // ───────────────────────── 保存 ─────────────────────────
 
   private load(): void {
     this.sql.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
-    this.sql.exec('CREATE TABLE IF NOT EXISTS market_chunks (idx INTEGER PRIMARY KEY, data TEXT NOT NULL)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS chunks (key TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (key, idx))');
+    this.corrupt = false;
+    this.market = null;
     const m = this.kvGet('meta');
     this.meta = m ? (JSON.parse(m) as MarketMeta) : null;
-    const h = this.kvGet('market');
-    if (!h) return;
-    const hdr = JSON.parse(h) as { n: number; sum: string; length: number };
-    const rows = this.sql.exec<{ idx: number; data: string }>('SELECT idx, data FROM market_chunks ORDER BY idx').toArray();
+    if (!this.meta) return;
+    // 古い形（市場をまるごと1つの断片の列に保存していた）
+    if (this.kvGet('market') !== null) {
+      this.loadLegacy();
+      return;
+    }
+    const shellText = this.readBlob('shell');
+    if (shellText === null) return;
+    const shell = safeJsonParse(shellText);
+    if (!isObj(shell) || shell.schema !== MARKET_SCHEMA || !Array.isArray(shell.companies)) {
+      this.fail('market_bad_format');
+      return;
+    }
+    const companies: MarketCompany[] = [];
+    for (const c of shell.companies as Omit<MarketCompany, 'state'>[]) {
+      const st = this.readBlob(`company:${c.id}`);
+      const state = st === null ? null : safeJsonParse(st);
+      if (!isObj(state)) {
+        this.fail('market_company_corrupt');
+        return;
+      }
+      companies.push({ ...c, state: state as unknown as GameState });
+    }
+    this.market = { ...(shell as unknown as MarketShell), companies } as MarketState;
+    const cids = this.readBlob('cids');
+    const raw = cids === null ? {} : safeJsonParse(cids);
+    this.cids = new Map(Object.entries(isObj(raw) ? raw : {}).map(([k, v]) => [k, RidCache.from(v, 100)]));
+  }
+
+  /** 古い形の市場（schema 1）を読み、新しい形にして保存し直す（データは消さない） */
+  private loadLegacy(): void {
+    const h = JSON.parse(this.kvGet('market')!) as { n: number; sum: string; length: number };
+    const rows = this.sql.exec<{ idx: number; data: string }>("SELECT idx, data FROM market_chunks ORDER BY idx").toArray();
     const text = rows.map((r) => r.data).join('');
-    if (rows.length !== hdr.n || text.length !== hdr.length || checksum(text) !== hdr.sum) {
-      this.corrupt = true;
-      log('error', 'market_corrupt', { marketId: this.meta?.marketId });
+    if (rows.length !== h.n || text.length !== h.length || checksum(text) !== h.sum) {
+      this.fail('market_corrupt');
       return;
     }
     const raw = safeJsonParse(text);
-    if (!isObj(raw) || !isObj(raw.market) || (raw.market as { schema?: unknown }).schema !== MARKET_SCHEMA) {
-      this.corrupt = true;
-      log('error', 'market_bad_format', { marketId: this.meta?.marketId });
+    const m = isObj(raw) && isObj(raw.market) ? migrateMarket(raw.market as Record<string, unknown>, this.now()) : null;
+    if (!m) {
+      this.fail('market_bad_format');
       return;
     }
-    this.market = raw.market as unknown as MarketState;
-    const cids = isObj(raw.cids) ? raw.cids : {};
-    this.cids = new Map(Object.entries(cids).map(([k, v]) => [k, RidCache.from(v, 100)]));
+    this.market = m;
+    this.cids = new Map(Object.entries(isObj(raw) && isObj(raw.cids) ? raw.cids : {}).map(([k, v]) => [k, RidCache.from(v, 100)]));
+    this.markAll();
+    this.save();
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM kv WHERE k = 'market'");
+      this.sql.exec('DROP TABLE IF EXISTS market_chunks');
+    });
+    log('info', 'market_migrated', { marketId: this.meta?.marketId });
+  }
+
+  private fail(kind: string): void {
+    this.corrupt = true;
+    this.market = null;
+    log('error', kind, { marketId: this.meta?.marketId });
   }
 
   private kvGet(k: string): string | null {
@@ -118,58 +179,153 @@ export class MarketRoom extends DurableObject<Env> {
     this.sql.exec('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v', k, v);
   }
 
-  private save(): void {
-    if (!this.market || !this.meta) return;
-    const text = JSON.stringify({ market: this.market, cids: Object.fromEntries([...this.cids.entries()].map(([k, c]) => [k, c.entries()])) });
-    const chunks: string[] = [];
-    for (let i = 0; i < text.length; i += CHUNK_CHARS) chunks.push(text.slice(i, i + CHUNK_CHARS));
-    this.ctx.storage.transactionSync(() => {
-      this.sql.exec('DELETE FROM market_chunks');
-      chunks.forEach((c, i) => this.sql.exec('INSERT INTO market_chunks (idx, data) VALUES (?, ?)', i, c));
-      this.kvPut('market', JSON.stringify({ n: chunks.length, sum: checksum(text), length: text.length, savedAt: Date.now() }));
-      this.kvPut('meta', JSON.stringify(this.meta));
-    });
+  /** 断片に分けた値を読む（チェックサムが合わなければ null） */
+  private readBlob(key: string): string | null {
+    const h = this.kvGet(`blob:${key}`);
+    if (!h) return null;
+    const hdr = JSON.parse(h) as { n: number; sum: string; length: number };
+    const rows = this.sql.exec<{ data: string }>('SELECT data FROM chunks WHERE key = ? ORDER BY idx', key).toArray();
+    const text = rows.map((r) => r.data).join('');
+    if (rows.length !== hdr.n || text.length !== hdr.length || checksum(text) !== hdr.sum) return null;
+    return text;
   }
 
-  // ───────────────────────── 時計 ─────────────────────────
+  private writeBlob(key: string, text: string): void {
+    const chunks: string[] = [];
+    for (let i = 0; i < text.length; i += CHUNK_CHARS) chunks.push(text.slice(i, i + CHUNK_CHARS));
+    this.sql.exec('DELETE FROM chunks WHERE key = ?', key);
+    chunks.forEach((c, i) => this.sql.exec('INSERT INTO chunks (key, idx, data) VALUES (?, ?, ?)', key, i, c));
+    this.kvPut(`blob:${key}`, JSON.stringify({ n: chunks.length, sum: checksum(text), length: text.length }));
+  }
 
-  /** 今の時刻で、営業が済んでいるはずの最後の日 */
-  private targetDone(now: number): number {
-    const m = this.meta!;
-    return Math.max(0, Math.floor((now - m.startedAt) / m.dayMs));
+  private markAll(): void {
+    for (const c of this.market?.companies ?? []) this.dirtyCompanies.add(c.id);
+  }
+
+  /** 変わった部分を1つのトランザクションで保存する */
+  private save(): void {
+    if (!this.market || !this.meta) return;
+    const m = this.market;
+    const shell: MarketShell = { ...m, companies: m.companies.map(({ state: _s, ...rest }) => rest) };
+    const shellText = JSON.stringify(shell);
+    const companies = [...this.dirtyCompanies].map((id) => m.companies.find((c) => c.id === id)).filter((c): c is MarketCompany => !!c);
+    this.ctx.storage.transactionSync(() => {
+      for (const c of companies) this.writeBlob(`company:${c.id}`, JSON.stringify(c.state));
+      // 共通部分は毎回書く（企業の進行・同期の状態が入っている。小さい）
+      this.writeBlob('shell', shellText);
+      this.writeBlob('cids', JSON.stringify(Object.fromEntries([...this.cids.entries()].map(([k, c]) => [k, c.entries()]))));
+      this.kvPut('meta', JSON.stringify(this.meta));
+    });
+    this.dirtyCompanies.clear();
+  }
+
+  // ───────────────────────── 同期（0時） ─────────────────────────
+
+  private async ensureAlarm(now: number): Promise<void> {
+    if (!this.market) return;
+    const at = nextSyncAt(this.market, now);
+    if (at === null) return;
+    const cur = await this.ctx.storage.getAlarm();
+    if (cur === null || cur > at) await this.ctx.storage.setAlarm(at);
   }
 
   /**
-   * 今の時刻まで市場を進める。access なら最後のアクセスの時刻を更新する（眠っていた分の時間は数えない）。進めた日数を返す
+   * 同期を進められるだけ進める（core の runSync）。集計を D1 に書いてから期間を終える。
+   * 何度呼んでも同じ結果。D1 に書けなければ ranking のまま残し、少しあとにやり直す
    */
-  catchUp(now: number, access: boolean): number {
-    if (!this.meta || !this.market) return 0;
-    const gap = now - this.meta.lastAccessAt;
-    if (access && gap > DORMANT_MS) this.meta.startedAt += gap - DORMANT_MS;
-    const limitNow = access ? now : Math.min(now, this.meta.lastAccessAt + DORMANT_MS);
-    const target = this.targetDone(limitNow) + 1;
-    const n = advanceMarketTo(this.market, target, MAX_DAYS_PER_REQUEST);
-    if (access) this.meta.lastAccessAt = now;
-    if (n > 0 || access) this.save();
-    return n;
+  async advanceSync(now: number): Promise<void> {
+    if (!this.market || this.corrupt || this.syncBusy) return;
+    this.syncBusy = true;
+    try {
+      for (let guard = 0; guard < 50; guard++) {
+        const m = this.market;
+        const step = runSync(m, now);
+        if (step.status === 'idle') break;
+        if (step.status === 'waiting') {
+          this.save();
+          await this.ctx.storage.setAlarm(step.until);
+          return;
+        }
+        // 自動営業した企業の状態は変わっている
+        this.markAll();
+        if (step.status === 'more') {
+          this.save();
+          continue;
+        }
+        // ranking: 期間ごとの集計を D1 へ（同じ行を同じ値で書き直すので、二重に書いても同じ）
+        this.save();
+        try {
+          await this.writePeriod(step.periodId, now);
+        } catch (e) {
+          log('error', 'market_period_write_failed', { marketId: this.meta?.marketId, period: step.periodId, error: String(e) });
+          await this.ctx.storage.setAlarm(now + RETRY_MS);
+          return;
+        }
+        finishSync(m, now);
+        this.markAll();
+        this.save();
+      }
+      await this.ensureAlarm(now);
+    } finally {
+      this.syncBusy = false;
+    }
   }
 
-  clock(now: number): MarketClock {
-    const m = this.meta!;
-    const day = this.market ? this.market.day - 1 : 0;
-    return { day, dayMs: m.dayMs, nextDayAt: m.startedAt + (day + 1) * m.dayMs, serverNow: now };
-  }
-
-  private scheduleAlarm(now: number): void {
-    void this.ctx.storage.setAlarm(now + ALARM_EVERY_MS);
+  private async writePeriod(periodId: string, now: number): Promise<void> {
+    const m = this.market!;
+    const db = this.env.DB;
+    await ensureSchema(db);
+    const rows = periodSummary(m, periodId);
+    const run = m.sync!;
+    const stmts = rows.map((r) =>
+      db
+        .prepare(
+          `INSERT OR REPLACE INTO company_periods (market_id, company_id, period, entry, kind, player_id, name, days, manual_days, auto_days, flagged_days,
+            net_sales, operating_profit, final_profit, served, customers, satisfaction_sum, satisfaction_count, market_net_sales, money_end, debt_end, stores, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          m.id,
+          r.companyId,
+          periodId,
+          m.settings.entry,
+          r.kind,
+          r.ownerId,
+          r.name,
+          r.days,
+          r.manualDays,
+          r.autoDays,
+          r.flaggedDays,
+          Math.round(r.netSales),
+          Math.round(r.operatingProfit),
+          Math.round(r.finalProfit),
+          r.served,
+          r.customers,
+          r.satisfactionSum,
+          r.satisfactionCount,
+          Math.round(r.marketNetSales),
+          Math.round(r.moneyEnd),
+          Math.round(r.debtEnd),
+          r.stores,
+          now,
+        ),
+    );
+    stmts.push(
+      db
+        .prepare('INSERT OR REPLACE INTO sync_runs (market_id, period, target_date, auto_days, expired_days, started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(m.id, periodId, run.targetDate, run.autoDays, run.expiredDays, run.startedAt, now),
+    );
+    // プレイヤーの企業の状態（破産など）
+    for (const c of m.companies) {
+      if (c.kind !== 'player' || !c.ownerId) continue;
+      stmts.push(db.prepare('UPDATE market_companies SET status = ?, name = ?, updated_at = ? WHERE market_id = ? AND company_id = ? AND status != ?').bind(c.status, c.name, now, m.id, c.id, c.status));
+    }
+    await db.batch(stmts);
   }
 
   override async alarm(): Promise<void> {
-    if (!this.meta || !this.market || this.corrupt) return;
-    const now = Date.now();
-    this.catchUp(now, false);
-    // 眠った市場はアラームを止める（次のアクセスで再開する）
-    if (now - this.meta.lastAccessAt <= DORMANT_MS) this.scheduleAlarm(now);
+    if (!this.market || this.corrupt) return;
+    await this.advanceSync(this.now());
   }
 
   // ───────────────────────── HTTP（Worker からの内部呼び出し） ─────────────────────────
@@ -181,71 +337,93 @@ export class MarketRoom extends DurableObject<Env> {
     if (!this.meta || !this.market) return json({ error: 'market_not_found', message: '市場が見つかりません' }, 404);
     const playerId = req.headers.get(MARKET_IDENTITY.playerId);
     if (!playerId) return json({ error: 'unauthorized', message: '本人の情報がありません' }, 401);
-    const now = Date.now();
+    const now = this.now();
+    // 0時を過ぎて同期が残っていれば、先に進める（アラームが遅れても同じ結果）
+    if (syncPending(this.market, now)) await this.advanceSync(now);
+    const m = this.market;
     if (url.pathname === '/internal/join' && req.method === 'POST') {
       const body = (await req.json()) as { companyName?: unknown };
-      this.catchUp(now, true);
-      const r = joinMarket(this.market, playerId, typeof body.companyName === 'string' ? body.companyName : '');
+      const r = joinMarket(m, playerId, typeof body.companyName === 'string' ? body.companyName : '');
       if (!r.ok) return json({ error: 'join_refused', message: r.reason ?? '参加できません' }, 409);
+      this.markAll();
       this.save();
-      return json({ ok: true, companyId: r.company!.id });
+      return json({ ok: true, companyId: r.company!.id, companyName: r.company!.name });
     }
     if (url.pathname === '/internal/view' && req.method === 'GET') {
-      this.catchUp(now, true);
-      void this.scheduleAlarmIfNone(now);
       return json(this.viewFor(playerId, now));
     }
     if (url.pathname === '/internal/act' && req.method === 'POST') {
       const body = (await req.json()) as { cid?: unknown; action?: unknown };
       if (typeof body.cid !== 'string' || !isObj(body.action)) return json({ error: 'bad_request', message: '操作の形式が不正です' }, 400);
-      this.catchUp(now, true);
       const cache = this.cids.get(playerId) ?? new RidCache(100);
       const prev = cache.get(body.cid);
       if (prev) return json({ ...prev, duplicate: true });
-      const r: ActionResult = marketAction(this.market, playerId, body.action as unknown as Action);
+      const r: ActionResult = marketAction(m, playerId, body.action as unknown as Action, now);
       cache.set(body.cid, r);
       this.cids.set(playerId, cache);
+      const c = playerCompany(m, playerId);
+      if (c) this.dirtyCompanies.add(c.id);
       this.save();
       return json(r);
     }
+    if (url.pathname === '/internal/day/start' && req.method === 'POST') {
+      const body = (await req.json()) as { token?: unknown; baseVersion?: unknown };
+      if (typeof body.token !== 'string' || typeof body.baseVersion !== 'number') return json({ error: 'bad_request', message: '形式が不正です' }, 400);
+      const r = startDay(m, playerId, now, body.token, body.baseVersion);
+      if (!r.ok) return json({ error: r.code, message: r.reason }, 409);
+      const c = playerCompany(m, playerId);
+      if (c) this.dirtyCompanies.add(c.id);
+      this.save();
+      await this.ensureAlarm(now);
+      return json({ ok: true, ticket: r.ticket, clock: this.clock(now) });
+    }
+    if (url.pathname === '/internal/day/commit' && req.method === 'POST') {
+      const body = safeJsonParse(await req.text());
+      if (!isObj(body) || typeof body.token !== 'string' || !isObj(body.state)) return json({ error: 'bad_request', message: '形式が不正です' }, 400);
+      const c = playerCompany(m, playerId);
+      const r = commitDay(m, playerId, now, body.token, body.state as unknown as GameState);
+      if (c) this.dirtyCompanies.add(c.id);
+      this.save();
+      // 0時の締めを待っていたなら、この日が届いたので先へ進める
+      if (m.sync && m.sync.status !== 'done') await this.advanceSync(now);
+      return json({ ...r, companyId: c?.id ?? null, clock: this.clock(now) });
+    }
     return json({ error: 'not_found', message: '見つかりません' }, 404);
-  }
-
-  private async scheduleAlarmIfNone(now: number): Promise<void> {
-    const a = await this.ctx.storage.getAlarm();
-    if (a === null) this.scheduleAlarm(now);
   }
 
   private init(body: unknown): Response {
     if (this.meta) return json({ ok: true, existing: true });
     if (!isObj(body) || typeof body.marketId !== 'string' || typeof body.code !== 'string' || typeof body.ownerId !== 'string') return json({ error: 'bad_request' }, 400);
-    const now = Date.now();
-    const startedAt = typeof body.startedAt === 'number' ? body.startedAt : now;
-    const dayMs = typeof body.dayMs === 'number' && body.dayMs >= 1000 ? body.dayMs : BALANCE.market.dayRealSec * 1000;
+    const now = this.now();
     this.meta = {
       marketId: body.marketId,
       code: body.code,
       name: typeof body.name === 'string' ? body.name.slice(0, 30) : '市場',
       ownerId: body.ownerId,
       createdAt: now,
-      startedAt,
-      dayMs,
-      lastAccessAt: now,
     };
     const seed = typeof body.seed === 'number' ? body.seed >>> 0 : (crypto.getRandomValues(new Uint32Array(1))[0]! >>> 0);
     this.market = createMarket({
       id: body.marketId,
       name: this.meta.name,
       seed,
+      now,
+      settings: isObj(body.settings) ? (body.settings as Partial<CommunitySettings>) : {},
       creator: { ownerId: body.ownerId, companyName: typeof body.companyName === 'string' ? body.companyName : '' },
     });
-    this.catchUp(now, true);
-    this.scheduleAlarm(now);
-    return json({ ok: true });
+    this.markAll();
+    this.save();
+    const me = playerCompany(this.market, body.ownerId);
+    return json({ ok: true, companyId: me?.id ?? null, settings: this.market.settings });
   }
 
-  viewFor(playerId: string, now: number): MarketView & { clock: MarketClock; code: string; isOwner: boolean; joined: boolean } {
+  clock(now: number): MarketClock {
     const m = this.market!;
-    return { ...marketView(m, playerId), clock: this.clock(now), code: this.meta!.code, isOwner: this.meta!.ownerId === playerId, joined: !!playerCompany(m, playerId) };
+    return { serverNow: now, nextMidnight: nextJstMidnight(now), nextSyncAt: nextSyncAt(m, now), syncPending: syncPending(m, now) };
+  }
+
+  viewFor(playerId: string, now: number): MarketView & { clock: MarketClock; code: string; isOwner: boolean; joined: boolean; today: string } {
+    const m = this.market!;
+    return { ...marketView(m, playerId), clock: this.clock(now), code: this.meta!.code, isOwner: this.meta!.ownerId === playerId, joined: !!playerCompany(m, playerId), today: jstDateKey(now) };
   }
 }
