@@ -2,6 +2,7 @@
 
 export * from './types';
 export * from './util';
+export * from './jst';
 export * from './geometry';
 export * from './nav';
 export * from './state';
