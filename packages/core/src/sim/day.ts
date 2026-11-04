@@ -8,7 +8,7 @@ import { STAGES } from '../data/stages';
 import type { DayReport, GameState } from '../types';
 import { clamp, newId } from '../util';
 import { closeLostItems } from './customers';
-import { cash, emptyDayStats, operatingProfit, recordPL, totalDebt } from './economy';
+import { cash, emptyDayStats, finalProfit, foldIntoLastReport, netSales, operatingProfit, recordPL, totalDebt } from './economy';
 import { finishRepair, resaleValue, runMaintenance, upkeepTotal, useEquipment } from './equipment';
 import { dropHand } from './interact';
 import { morningRollCall, refreshCandidates, wagesDue } from './employees';
@@ -181,6 +181,8 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
     wasteItems: { ...s.today.wasteItems },
     day: s.day,
     operatingProfit: op,
+    netSales: netSales(s.today),
+    finalProfit: finalProfit(s.today),
     cashStart: s.cashAtDayStart,
     cashEnd: s.money,
     reputation: Math.round(s.reputation * 100) / 100,
@@ -303,6 +305,8 @@ export function nextDay(s: GameState, ctx: SimCtx): { ok: boolean; reason?: stri
       return { ok: false, reason: `期限を過ぎた未払金 ¥${again.overdue.toLocaleString('ja-JP')} があります。設備の売却・融資・解雇で支払ってください` };
     }
   }
+  // 閉店のあとに動いたお金（夜の自動発注・閉店後の採用や設備など）をその日の日報に足す
+  foldIntoLastReport(s);
   s.day += 1;
   s.t = 0;
   s.openT = 0;

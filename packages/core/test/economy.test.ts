@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, BALANCE, cash, EQUIPMENT, fixedCosts, operatingProfit, STAGES, settleDay, nextDay } from '../src';
-import { addBot, moneyFromTxns, newGame, runDay } from './helpers';
+import { applyAction, BALANCE, cash, EQUIPMENT, fixedCosts, operatingProfit, reportFinalProfit, STAGES, settleDay, nextDay } from '../src';
+import { addBot, addSoloBot, moneyFromTxns, newGame, runDay } from './helpers';
 
 describe('経済', () => {
   it('同じキーの現金取引は一度しか適用されない（二重計上防止）', () => {
@@ -118,5 +118,47 @@ describe('入力の検証', () => {
     expect(applyAction(s, 'p1', { type: 'setAutoOrder', itemId: '__proto__', qty: 1 }, ctx).ok).toBe(false);
     expect(applyAction(s, 'p1', { type: 'setAutoOrder', itemId: 'moyashi', qty: 4000 }, ctx).ok).toBe(true);
     expect(applyAction(s, 'p1', { type: 'setPrice', menuId: 'toString', price: 1000 }, ctx).ok).toBe(false);
+  });
+});
+
+describe('日報の会計（統合進化設計書 v2.1 §4.2）', () => {
+  it('夜の自動発注や閉店後の買い物もその日の日報に入り、期末の現金が翌日の期首の現金と一致する。日報の増減の合計が実際の資金の増減', () => {
+    const { s, ctx } = newGame(31);
+    addSoloBot(s);
+    const start = s.money;
+    for (let d = 1; d <= 4; d++) {
+      applyAction(s, 'p1', { type: 'openShop' }, ctx);
+      runDay(s, ctx);
+      // 閉店後に丼を買う（設備投資）
+      if (d === 2) expect(applyAction(s, 'p1', { type: 'buyBowls' }, ctx).ok).toBe(true);
+      expect(nextDay(s, ctx).ok).toBe(true);
+    }
+    const reps = s.history;
+    for (let i = 1; i < reps.length; i++) expect(reps[i]!.cashStart).toBe(reps[i - 1]!.cashEnd);
+    // 夜の自動発注が仕入れとして入っている
+    expect(reps.slice(0, 3).some((r) => r.purchases > 0)).toBe(true);
+    expect(reps[1]!.capex).toBeGreaterThan(0);
+    const sumDelta = reps.reduce((a, r) => a + (r.cashEnd - r.cashStart), 0);
+    expect(sumDelta).toBe(reps[reps.length - 1]!.cashEnd - start);
+    // 現金の増減 = 純売上 − 現金で払った費用 − 仕入れ − 投資（融資・未払金なし）
+    for (const r of reps.slice(0, 3)) {
+      const paid = r.wages + r.rent + r.upkeep + r.utilities + r.repairs + r.hiring + r.interest;
+      expect(r.cashEnd - r.cashStart).toBe(r.sales - r.refunds - paid - r.purchases - r.capex);
+    }
+  });
+
+  it('営業利益に利息を含めず、最終利益 = 営業利益 − 利息。古い日報（最終利益がない）は営業利益をそのまま最終利益とみなす', () => {
+    const { s, ctx } = newGame(32);
+    addSoloBot(s);
+    s.reputation = 3;
+    expect(applyAction(s, 'p1', { type: 'takeLoan' }, ctx).ok).toBe(true);
+    applyAction(s, 'p1', { type: 'openShop' }, ctx);
+    runDay(s, ctx);
+    const r = s.history[s.history.length - 1]!;
+    expect(r.interest).toBeGreaterThan(0);
+    expect(r.operatingProfit).toBe(r.sales - r.refunds - r.cogs - r.waste - r.wages - r.rent - r.upkeep - r.utilities - r.repairs - r.hiring);
+    expect(r.finalProfit).toBe(r.operatingProfit - r.interest);
+    expect(r.netSales).toBe(r.sales - r.refunds);
+    expect(reportFinalProfit({ operatingProfit: -1234 })).toBe(-1234);
   });
 });

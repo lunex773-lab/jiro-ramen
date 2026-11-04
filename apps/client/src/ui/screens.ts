@@ -9,6 +9,7 @@ import {
   type DayReport,
   type GameState,
   type SlotInfo,
+  reportFinalProfit,
 } from '@jiro/core';
 import type { Settings } from '../game/settings';
 import { confirmDialog, h, promptDialog, stars, yenStr } from './dom';
@@ -146,6 +147,7 @@ export function resultScreen(s: GameState, r: DayReport, isHost: boolean, cb: Re
         h('h4', null, '損益'),
         row('売上', yenStr(r.sales)),
         r.refunds ? row('返金', `−${yenStr(r.refunds)}`) : null,
+        r.refunds ? row('純売上', yenStr(r.sales - r.refunds)) : null,
         row('食材原価', `−${yenStr(r.cogs)}`),
         row('廃棄', `−${yenStr(r.waste)}`, r.waste > 0 ? 'warn' : ''),
         row('人件費', `−${yenStr(r.wages)}`),
@@ -153,9 +155,11 @@ export function resultScreen(s: GameState, r: DayReport, isHost: boolean, cb: Re
         row('維持費・光熱費', `−${yenStr(r.upkeep + r.utilities)}`),
         r.repairs ? row('修理費', `−${yenStr(r.repairs)}`) : null,
         r.hiring ? row('採用・解雇', `−${yenStr(r.hiring)}`) : null,
-        r.interest ? row('利息', `−${yenStr(r.interest)}`) : null,
         row('営業利益', yenStr(r.operatingProfit), r.operatingProfit < 0 ? 'bad' : 'good'),
+        r.interest ? row('利息（融資）', `−${yenStr(r.interest)}`) : null,
+        r.interest ? row('最終利益', yenStr(reportFinalProfit(r)), reportFinalProfit(r) < 0 ? 'bad' : 'good') : null,
         row('資金', `${yenStr(r.cashStart)} → ${yenStr(r.cashEnd)}`),
+        h('p', { class: 'note' }, '資金の増減は利益と同じではありません（仕入れは買ったとき、原価は使ったときに数えます。夜の自動発注は翌日へ進むときにこの日に足します）。'),
       ),
       h(
         'section',

@@ -18,9 +18,49 @@ export function emptyDayStats(): DayStats {
   };
 }
 
-/** 営業利益 = 売上 − 返金 − 原価 − 廃棄 − 人件費 − 家賃 − 維持費 − 光熱費 − 修理費 − 採用費 − 利息 */
+/** 純売上 = 売上 − 返金（統合進化設計書 v2.1 §4.2） */
+export function netSales(d: DayStats): number {
+  return d.sales - d.refunds;
+}
+
+/**
+ * 営業利益 = 純売上 − 原価 − 廃棄 − 人件費 − 家賃 − 維持費 − 光熱費 − 修理費 − 採用費（設計書 v2.1 §4.2）。
+ * 利息は営業外なので含めない（以前は含めていた。古い日報の operatingProfit は利息を引いた値）
+ */
 export function operatingProfit(d: DayStats): number {
-  return d.sales - d.refunds - d.cogs - d.waste - d.wages - d.rent - d.upkeep - d.utilities - d.repairs - d.hiring - d.interest;
+  return netSales(d) - d.cogs - d.waste - d.wages - d.rent - d.upkeep - d.utilities - d.repairs - d.hiring;
+}
+
+/** 最終利益 = 営業利益 − 利息 */
+export function finalProfit(d: DayStats): number {
+  return operatingProfit(d) - d.interest;
+}
+
+/**
+ * 日報の最終利益（古い日報は operatingProfit が利息込みの値だったので、それをそのまま最終利益とみなす）
+ */
+export function reportFinalProfit(r: { finalProfit?: number; operatingProfit: number }): number {
+  return r.finalProfit ?? r.operatingProfit;
+}
+
+/** 損益と現金の項目（閉店後の支払いを日報に足すときに使う） */
+const STAT_MONEY: readonly (keyof DayStats)[] = ['sales', 'refunds', 'cogs', 'waste', 'wages', 'rent', 'upkeep', 'utilities', 'repairs', 'hiring', 'interest', 'purchases', 'capex'];
+
+/**
+ * 閉店の精算のあとに動いたお金（夜の自動発注・閉店後の採用・設備・拡張・椅子・仕入れなど）を、その日の日報に足す。
+ * 翌日へ進む直前に呼ぶ（日報の期末の現金 = 翌日の期首の現金になる）
+ */
+export function foldIntoLastReport(s: GameState): void {
+  const r = s.history[s.history.length - 1];
+  if (!r || r.day !== s.day) return;
+  for (const k of STAT_MONEY) {
+    const delta = (s.today[k] as number) - (r[k] as number);
+    if (delta !== 0) (r as unknown as Record<string, number>)[k] = (r[k] as number) + delta;
+  }
+  r.operatingProfit = operatingProfit(r);
+  r.finalProfit = finalProfit(r);
+  r.netSales = netSales(r);
+  r.cashEnd = s.money;
 }
 
 const TXN_KEEP_DAYS = 2;

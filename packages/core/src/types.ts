@@ -704,7 +704,12 @@ export interface DayStats {
 
 export interface DayReport extends DayStats {
   day: number;
+  /** 営業利益（利息を含めない。この版より前の日報は利息を引いた値） */
   operatingProfit: number;
+  /** 純売上（売上 − 返金）。古い日報にはない */
+  netSales?: number;
+  /** 最終利益（営業利益 − 利息）。古い日報にはない → operatingProfit が最終利益 */
+  finalProfit?: number;
   cashStart: number;
   cashEnd: number;
   reputation: number;
