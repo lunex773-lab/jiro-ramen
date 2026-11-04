@@ -22,7 +22,9 @@ export type AuditKind =
   | 'ws_room_full'
   | 'action_rejected'
   | 'action_exception'
-  | 'checkpoint_corrupt';
+  | 'checkpoint_corrupt'
+  | 'market_create'
+  | 'market_join';
 
 export interface AuditEntry {
   kind: AuditKind;

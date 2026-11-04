@@ -1,10 +1,13 @@
 // Worker / Durable Object に渡されるバインディングと環境変数（wrangler.jsonc と対応させる）。
 
 import type { GameRoom } from './room';
+import type { MarketRoom } from './market';
 
 export interface Env {
   /** 共同経営ルーム（1ルーム = 1 Durable Object） */
   ROOMS: DurableObjectNamespace<GameRoom>;
+  /** オンライン市場（1市場 = 1 Durable Object。市場の経済の状態はここだけが確定する） */
+  MARKETS: DurableObjectNamespace<MarketRoom>;
   /** プロフィール・セーブ（本体も）・ルーム記録と保存の控え・監査記録（R2 は使わない） */
   DB: D1Database;
   GAME_VERSION: string;

@@ -313,7 +313,7 @@ export function advanceMarketDay(m: MarketState): void {
 }
 
 /** 市場の日 target まで進める（target の前日まで営業が済む）。進めた日数を返す */
-export function advanceMarketTo(m: MarketState, target: number, maxDays = B().maxCatchUpDays): number {
+export function advanceMarketTo(m: MarketState, target: number, maxDays: number = B().maxCatchUpDays): number {
   let n = 0;
   while (m.day < target && n < maxDays) {
     advanceMarketDay(m);
@@ -531,4 +531,72 @@ export function marketStandings(m: MarketState): MarketCompanyLine[] {
   const last = m.history[m.history.length - 1];
   const lines = last ? last.companies : m.companies.map((c) => ({ id: c.id, name: c.name, kind: c.kind, netSales: 0, operatingProfit: 0, money: c.state.money, stores: c.state.company.stores.length, share: 0, bankrupt: c.bankruptDay !== null }));
   return [...lines].sort((a, b) => Number(a.bankrupt) - Number(b.bankrupt) || b.share - a.share || b.money - a.money);
+}
+
+/** 市場の画面に出す、ほかの企業の様子（お金の細かい中身は出さない） */
+export interface MarketCompanyView {
+  id: Id;
+  name: string;
+  kind: 'player' | 'ai';
+  strategy: string | null;
+  homeArea: string;
+  stores: { name: string; area: string; seats: number; reputation: number }[];
+  share: number;
+  /** 直近の日の純売上・営業利益 */
+  netSales: number;
+  operatingProfit: number;
+  bankrupt: boolean;
+  mine: boolean;
+}
+
+/** プレイヤー1人に見せる市場（自分の企業だけ中身ごと） */
+export interface MarketView {
+  id: string;
+  name: string;
+  /** 営業が済んだ最後の日（0 ならまだ1日も営業していない） */
+  day: number;
+  companies: MarketCompanyView[];
+  decisions: MarketDecision[];
+  history: MarketDayReport[];
+  /** 自分の企業（参加していなければ null） */
+  mine: { companyId: Id; state: GameState } | null;
+  /** 出店先の地域ごとの空いている物件の数 */
+  freeSlots: Record<string, number>;
+}
+
+export function marketView(m: MarketState, ownerId: string | null): MarketView {
+  const last = m.history[m.history.length - 1];
+  const me = ownerId ? playerCompany(m, ownerId) : null;
+  const companies = m.companies.map((c): MarketCompanyView => {
+    const line = last?.companies.find((x) => x.id === c.id);
+    return {
+      id: c.id,
+      name: c.name,
+      kind: c.kind,
+      strategy: c.strategy,
+      homeArea: areaName(c.homeArea),
+      stores: c.state.company.stores.map((entry) => {
+        const st = storeStatus(c.state, entry);
+        return { name: entry.name, area: areaName(storeArea(c, entry)), seats: STAGES[st.stage]?.seats.length ?? 8, reputation: Math.round(st.reputation * 100) / 100 };
+      }),
+      share: marketShare(m, c.id),
+      netSales: line?.netSales ?? 0,
+      operatingProfit: line?.operatingProfit ?? 0,
+      bankrupt: c.bankruptDay !== null,
+      mine: c === me,
+    };
+  });
+  companies.sort((a, b) => Number(a.bankrupt) - Number(b.bankrupt) || b.share - a.share);
+  const free: Record<string, number> = {};
+  for (const pid of PROPERTY_CANDIDATES) free[pid] = freeSlots(m, pid);
+  return {
+    id: m.id,
+    name: m.name,
+    day: m.day - 1,
+    companies,
+    decisions: m.decisions.slice(-60),
+    history: m.history.slice(-30),
+    mine: me ? { companyId: me.id, state: me.state } : null,
+    freeSlots: free,
+  };
 }

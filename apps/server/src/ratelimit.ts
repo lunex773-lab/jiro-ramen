@@ -86,6 +86,8 @@ export const HTTP_LIMITS = {
   session: new KeyedLimiter(20, 1 / 3),
   /** WebSocket 接続: IP ごとに 30 回まで、2秒に1回回復 */
   ws: new KeyedLimiter(30, 1 / 2),
+  /** 市場の操作: プレイヤーごとに 60 回まで、毎秒 1 回回復 */
+  market: new KeyedLimiter(60, 1),
 };
 
 /** WebSocket メッセージの制限（接続ごと）: 毎秒 40、バースト 80。move も数える */

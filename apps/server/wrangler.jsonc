@@ -16,11 +16,18 @@
   "observability": { "enabled": true },
 
   // 共同経営ルーム。1ルーム = 1 Durable Object（ルームIDから idFromName で決まる。設計書 2.2）
+  // オンライン市場。1市場 = 1 Durable Object（統合進化設計書 v2.1 Phase 3+4）
   "durable_objects": {
-    "bindings": [{ "name": "ROOMS", "class_name": "GameRoom" }]
+    "bindings": [
+      { "name": "ROOMS", "class_name": "GameRoom" },
+      { "name": "MARKETS", "class_name": "MarketRoom" }
+    ]
   },
   // SQLite ストレージを使う Durable Object として登録する（無料プランでも使える方式）
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoom"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["GameRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["MarketRoom"] }
+  ],
 
   "d1_databases": [
     {
