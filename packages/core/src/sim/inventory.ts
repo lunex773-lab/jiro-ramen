@@ -139,13 +139,14 @@ export function autoOrderTarget(s: GameState, itemId: string): number {
   const manual = s.autoOrder[itemId] ?? 0;
   if (s.autoOrderMode !== 'sales' || manual <= 0) return manual;
   const A = BALANCE.autoOrderSales;
-  const days: number[] = [s.today.usedItems?.[itemId] ?? 0];
+  const days: number[] = s.today.served > 0 ? [s.today.usedItems?.[itemId] ?? 0] : [];
   for (let i = s.history.length - 1; i >= 0 && days.length < A.days; i--) {
     const r = s.history[i]!;
-    if (r.day === s.day) continue;
+    // 営業しなかった日（拡張の工事・1杯も出せなかった日）は売れ行きの目安にしない
+    if (r.day === s.day || r.served === 0) continue;
     if (r.usedItems) days.push(r.usedItems[itemId] ?? 0);
   }
-  const avg = days.reduce((a, b) => a + b, 0) / days.length;
+  const avg = days.length > 0 ? days.reduce((a, b) => a + b, 0) / days.length : 0;
   let short = false;
   for (const [k, n] of Object.entries(s.today.stockoutItems ?? {})) if (n >= 2 && STOCKOUT_SOURCE[k]?.raw.includes(itemId)) short = true;
   const want = avg * A.safety * (short ? A.stockoutBoost : 1);
@@ -160,6 +161,8 @@ export const STOCKOUT_SOURCE: Record<string, { raw: string[]; label: string }> =
   yasai: { raw: ['moyashi', 'cabbage'], label: 'ヤサイ' },
   abura: { raw: ['backfat_raw', 'soy'], label: 'アブラ' },
   garlic: { raw: ['garlic_raw'], label: 'ニンニク' },
+  // スープは豚骨（ゲンコツ・背ガラ）と背脂で炊く（スープが切れると1杯も出せない）
+  soup: { raw: ['bones', 'backfat_raw'], label: 'スープ' },
   ichimi: { raw: ['ichimi'], label: '一味' },
   'menu:noodle': { raw: ['noodle'], label: '麺（売り切れ）' },
 };
@@ -266,9 +269,12 @@ export function receiveDeliveries(s: GameState, ctx: SimCtx, morning: boolean): 
   s.deliveries = remaining;
 }
 
+/** 冷蔵庫に入りきらないときに先に確保する食材（ないと1杯も出せない: 麺・スープを炊く豚骨） */
+const ESSENTIAL_ITEMS = ['noodle', 'bones'];
+
 /**
  * 自動発注（閉店後の翌朝便）。目標在庫に足りない分をパック単位で発注する。
- * 冷蔵の食材が冷蔵庫に入りきらないときは、足りない分を比例して減らし、残りが少ない食材から先に入れる
+ * 冷蔵の食材が冷蔵庫に入りきらないときは、足りない分を比例して減らし（麺・豚骨は最低1パック）、余った容量は麺・豚骨、次に残りが少ない食材から入れる
  * （以前は表の順に発注していたため、麺・豚・ガラで冷蔵庫が埋まり、もやしが入らずヤサイが作れなくなって店が止まった。
  * 統合進化設計書 v2.1 の経済の測定で発見）
  */
@@ -300,15 +306,18 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
   if (wantKg > avail + 1e-6 && fridgeNeeds.length > 0) {
     const k = avail / wantKg;
     let left = avail;
-    // 比例して減らす
+    // 比例して減らす。ないと1杯も出せない食材（麺・スープの豚骨）は、かさばっても最低1パックは入れる
     for (const n of fridgeNeeds) {
-      const p = Math.floor(n.packs * k);
+      const essential = ESSENTIAL_ITEMS.includes(n.itemId);
+      let p = Math.floor(n.packs * k);
+      if (essential && p === 0 && n.packs > 0 && n.kgPerPack <= left + 1e-6) p = 1;
       if (p < n.packs) reduced.push(n.itemId);
       n.packs = p;
       left -= p * n.kgPerPack;
     }
-    // 余った容量は、残りが少ない食材から1パックずつ
-    const order = [...fridgeNeeds].sort((a, b) => a.coverage - b.coverage || a.kgPerPack - b.kgPerPack);
+    // 余った容量は、麺・豚骨、次に残りが少ない食材から1パックずつ
+    const ess = (n: Need) => (ESSENTIAL_ITEMS.includes(n.itemId) ? 0 : 1);
+    const order = [...fridgeNeeds].sort((a, b) => ess(a) - ess(b) || a.coverage - b.coverage || a.kgPerPack - b.kgPerPack);
     let added = true;
     while (added) {
       added = false;

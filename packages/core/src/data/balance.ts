@@ -82,8 +82,24 @@ export const BALANCE = {
     priceExponentHigh: 1.3,
     /** 価格による来客の倍率の下限 */
     priceFloor: 0.35,
+    /**
+     * 来客の価格の比べ方。'reference' = メニューの平均価格 ÷ 基準（referencePrice）、
+     * 'menu' = 定価に対する割合の平均（メニューが解放されて平均価格が上がっても、定価のままなら倍率は1）
+     */
+    priceAnchor: 'reference' as 'reference' | 'menu',
     /** 満足度のうち「値段に見合うか」の重み */
     valueWeight: 0.09,
+    /**
+     * 「値段に見合うか」= (品質 × qualityWeight + base) × (比べる価格 ÷ 払った価格)^priceExponent
+     *   − sensitivityPenalty × 価格への敏感さ × 高すぎる割合。比べる価格は anchor（基準の価格 / そのメニューの定価）
+     */
+    value: {
+      qualityWeight: 1.1,
+      base: 0.2,
+      priceExponent: 1,
+      sensitivityPenalty: 0.3,
+      anchor: 'reference' as 'reference' | 'menu',
+    },
     maxCustomers: 60,
     walkSpeed: 1.25,
     ticketTime: 2,

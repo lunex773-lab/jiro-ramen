@@ -120,7 +120,7 @@ export function prepUseRate(s: GameState, itemId: string): number {
   let n = 0;
   for (let i = s.history.length - 1; i >= 0 && n < BALANCE.prepPlan.days; i--) {
     const r = s.history[i]!;
-    if (r.day === s.day) continue;
+    if (r.day === s.day || r.served === 0) continue;
     n += 1;
     const short = (r.stockoutItems?.[itemId] ?? 0) + (r.stockoutItems?.[`menu:${itemId}`] ?? 0) >= 2;
     best = Math.max(best, ((r.usedItems?.[itemId] ?? 0) / D) * (short ? BALANCE.prepPlan.stockoutBoost : 1));

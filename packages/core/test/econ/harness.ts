@@ -355,6 +355,48 @@ export const CASES: CasePolicy[] = [
     },
     evening: (s, ctx) => growCarefully(s, ctx),
   },
+  // ── 価格の戦略の比べ方を細かく（調理担当がいる店） ──
+  {
+    id: 'c19_price090_cook',
+    name: '19. やや安い（0.9倍）＋調理担当＋売れ行きに合わせる',
+    setup: salesMode,
+    morning: (s, ctx) => {
+      setAllPrices(s, ctx, 0.9);
+      if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
+    },
+  },
+  {
+    id: 'c20_price115_cook',
+    name: '20. やや高い（1.15倍）＋調理担当＋売れ行きに合わせる',
+    setup: salesMode,
+    morning: (s, ctx) => {
+      setAllPrices(s, ctx, 1.15);
+      if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
+    },
+  },
+  // ── 拡張したあとの価格（17 と同じ成長のしかた） ──
+  {
+    id: 'c21_growth_low',
+    name: '21. 17＋拡張したら安く（0.85倍）して客を呼ぶ',
+    setup: salesMode,
+    morning: (s, ctx) => {
+      setAllPrices(s, ctx, s.career.stage >= 1 ? 0.85 : 1);
+      if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
+      else if (s.career.stage >= 1 && s.employees.length < 3) hireCheapest(s, ctx, 'server');
+    },
+    evening: (s, ctx) => growCarefully(s, ctx),
+  },
+  {
+    id: 'c22_growth_high',
+    name: '22. 17＋拡張したら高く（1.2倍）する',
+    setup: salesMode,
+    morning: (s, ctx) => {
+      setAllPrices(s, ctx, s.career.stage >= 1 ? 1.2 : 1);
+      if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
+      else if (s.career.stage >= 1 && s.employees.length < 3) hireCheapest(s, ctx, 'server');
+    },
+    evening: (s, ctx) => growCarefully(s, ctx),
+  },
 ];
 
 // ───────────────── 集計 ─────────────────

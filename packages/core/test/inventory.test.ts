@@ -125,6 +125,7 @@ describe('自動発注「売れ行きに合わせる」', () => {
     expect(autoOrderTarget(s, 'pork_raw')).toBe(s.autoOrder.pork_raw);
     expect(applyAction(s, 'p1', { type: 'setAutoOrderMode', mode: 'sales' }, ctx).ok).toBe(true);
     // 使用量が多い日（豚ウデ肉を1日12本）
+    s.today.served = 40;
     s.today.usedItems = { pork_raw: 12 };
     const t = autoOrderTarget(s, 'pork_raw');
     expect(t).toBe(Math.round(12 * BALANCE.autoOrderSales.safety));

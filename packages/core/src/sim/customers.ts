@@ -99,6 +99,12 @@ export function soldOut(s: GameState, menuId: string): boolean {
 }
 
 /** 売り切れの理由（豚・麺・卵のどれが足りないか。原因の説明用） */
+/** スープが1杯分も残っておらず、炊いている途中の寸胴もない */
+export function soupOut(s: GameState): boolean {
+  const pots = equipmentByRole(s, 'soup').filter((e) => isUsable(e));
+  return !pots.some((e) => e.soupL >= BALANCE.cooking.soupPerBowlSmall || !!e.process);
+}
+
 function stockoutReason(s: GameState): string {
   if (stockOf(s, 'noodle') + stockOf(s, 'homemade_noodle') < 300) return 'noodle';
   if (stockOf(s, 'buta') + stockOf(s, 'pork_block') * 18 < 5) return 'buta';
@@ -204,13 +210,30 @@ export function averagePrice(s: GameState): number {
   return ids.reduce((a, id) => a + (s.prices[id] ?? MENU[id]!.defaultPrice), 0) / ids.length;
 }
 
+/** 定価に対する今の価格の割合（解放済みのメニューの平均）。1 = 定価のまま */
+export function priceRatio(s: GameState): number {
+  const ids = MENU_IDS.filter((id) => {
+    const m = MENU[id]!;
+    return !m.unlock || s.career.unlocked.includes(m.unlock);
+  });
+  if (ids.length === 0) return 1;
+  return ids.reduce((a, id) => a + (s.prices[id] ?? MENU[id]!.defaultPrice) / MENU[id]!.defaultPrice, 0) / ids.length;
+}
+
+/** 価格による来客の倍率 */
+export function priceDemandFactor(s: GameState): number {
+  const c = BALANCE.customers;
+  // 基準に対する価格の割合（1より大きいと高い）
+  const r = c.priceAnchor === 'menu' ? priceRatio(s) : averagePrice(s) / c.referencePrice;
+  return clamp(Math.pow(1 / r, r > 1 ? c.priceExponentHigh : c.priceExponentLow), c.priceFloor, 1.7);
+}
+
 /** 1秒あたりの来店期待値（設計書 7.3） */
 export function arrivalRate(s: GameState): number {
   const c = BALANCE.customers;
   const repF = Math.pow(Math.max(0.3, s.reputation) / 3, c.reputationExponent);
   const x = s.openT / BALANCE.openDuration;
-  const avgP = averagePrice(s);
-  const priceF = clamp(Math.pow(c.referencePrice / avgP, avgP > c.referencePrice ? c.priceExponentHigh : c.priceExponentLow), c.priceFloor, 1.7);
+  const priceF = priceDemandFactor(s);
   const demand = 1 + effectSum(s, 'demand');
   // 常連客は安定した需要を生む
   const regularF = 1 + Math.min(0.6, s.regulars.reduce((a, r) => a + r.loyalty, 0) * 0.03);
@@ -515,6 +538,8 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
           break;
         }
         c.menuId = choice.menuId;
+        // スープが切れていて、炊いている途中でもない（このままでは出せない）。閉店後の原因の説明と「売れ行きに合わせる」発注で使う
+        if (!c.script && soupOut(s)) noteStockout(s, 'soup');
         if (tm) useEquipment(s, ctx, tm);
         else if (!tm || !isUsable(tm)) notify(s, ctx, 'ticket:manual', 'warn', '券売機が使えないため手売りで対応しています（時間がかかります）');
         c.state = 'waitingSeat';
@@ -845,8 +870,10 @@ export function onServed(s: GameState, ctx: SimCtx, o: Order, q: QualityResult):
   if (!o.callRevealed) c.sat.service = Math.min(c.sat.service, 0.3 + 0.3 * (1 - c.traits.serviceSensitivity));
   // 値段に見合うか
   const price = o.price;
-  const valueBase = (q.quality * 1.1 + 0.2) * (BALANCE.customers.referencePrice / price);
-  c.sat.value = clamp01(valueBase - 0.3 * c.traits.priceSensitivity * Math.max(0, price / BALANCE.customers.referencePrice - 1));
+  const V = BALANCE.customers.value;
+  const anchor = V.anchor === 'menu' ? (MENU[o.menuId]?.defaultPrice ?? BALANCE.customers.referencePrice) : BALANCE.customers.referencePrice;
+  const valueBase = (q.quality * V.qualityWeight + V.base) * Math.pow(anchor / price, V.priceExponent);
+  c.sat.value = clamp01(valueBase - V.sensitivityPenalty * c.traits.priceSensitivity * Math.max(0, price / anchor - 1));
   s.today.totalSeatWait += c.seatWait;
   s.today.totalQueueWait += c.queueWait;
 
