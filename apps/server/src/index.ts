@@ -4,6 +4,9 @@
 import { createAnonymous, gameVersion, profile } from './api/account';
 import { deleteSave, downloadSave, uploadSave } from './api/saves';
 import { connectRoom, createSession, joinSession, leaveSession } from './api/session';
+import { rankingsApi, rewardsApi } from './api/ranking';
+import { grantGlobalRewards } from './rank-store';
+import { jstDateKey } from '@jiro/core';
 import { actMarketApi, commitDayApi, createMarketApi, joinMarketApi, listMarketsApi, startDayApi, viewMarketApi } from './api/market';
 import { requirePlayer } from './auth';
 import type { Env } from './env';
@@ -51,6 +54,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const marketView = /^\/api\/v1\/market\/([^/]+)$/.exec(path);
   const marketAct = /^\/api\/v1\/market\/([^/]+)\/act$/.exec(path);
   const marketDay = /^\/api\/v1\/market\/([^/]+)\/day\/(start|commit)$/.exec(path);
+  const rankingPath = path === '/api/v1/rankings' || path === '/api/v1/rewards';
   const known =
     path === '/api/v1/profile' ||
     path === '/api/v1/save' ||
@@ -61,7 +65,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     saveSlot !== null ||
     marketView !== null ||
     marketAct !== null ||
-    marketDay !== null;
+    marketDay !== null ||
+    rankingPath;
   if (!known) throw new HttpError(404, 'not_found', 'API が見つかりません');
 
   // ここから先は認証が必要
@@ -105,6 +110,9 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     limit(HTTP_LIMITS.market, player.id);
     return actMarketApi(req, env, player, decodeURIComponent(marketAct[1]!));
   }
+  // ランキングと報酬
+  if (path === '/api/v1/rankings' && m === 'GET') return rankingsApi(req, env, ctx, player);
+  if (path === '/api/v1/rewards' && m === 'GET') return rewardsApi(env, player);
   if (marketDay && m === 'POST') {
     limit(HTTP_LIMITS.market, player.id);
     const id = decodeURIComponent(marketDay[1]!);
@@ -131,5 +139,15 @@ export default {
       log('error', 'unhandled', { method: req.method, path: new URL(req.url).pathname, error: String((e as Error)?.stack ?? e) });
       return withCors(errorResponse(new HttpError(500, 'internal_error', 'サーバーでエラーが発生しました')), cors);
     }
+  },
+  /** 毎日の定時の処理（JST 1:30。wrangler.jsonc の triggers）: 昨日で終わった週・月・年の全体ランキングの上位に称号 */
+  async scheduled(_ev: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      (async () => {
+        await ensureSchema(env.DB);
+        const n = await grantGlobalRewards(env.DB, jstDateKey(Date.now()), Date.now());
+        log('info', 'global_rewards', { granted: n });
+      })().catch((e: unknown) => log('error', 'global_rewards_failed', { error: String(e) })),
+    );
   },
 } satisfies ExportedHandler<Env>;

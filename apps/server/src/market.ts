@@ -39,6 +39,7 @@ import {
 } from '@jiro/core';
 import type { Env } from './env';
 import { RidCache } from './checkpoint';
+import { grantCommunityRewards, rankStatements } from './rank-store';
 import { ensureSchema } from './schema';
 import { isObj, log, safeJsonParse } from './util';
 
@@ -315,12 +316,16 @@ export class MarketRoom extends DurableObject<Env> {
         .prepare('INSERT OR REPLACE INTO sync_runs (market_id, period, target_date, auto_days, expired_days, started_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .bind(m.id, periodId, run.targetDate, run.autoDays, run.expiredDays, run.startedAt, now),
     );
+    // ランキングの集計（追加の数値と、企業ごとの週・月・年・累計の作り直し）
+    stmts.push(...rankStatements(db, m.id, m.settings.entry, rows, periodId, now));
     // プレイヤーの企業の状態（破産など）
     for (const c of m.companies) {
       if (c.kind !== 'player' || !c.ownerId) continue;
       stmts.push(db.prepare('UPDATE market_companies SET status = ?, name = ?, updated_at = ? WHERE market_id = ? AND company_id = ? AND status != ?').bind(c.status, c.name, now, m.id, c.id, c.status));
     }
     await db.batch(stmts);
+    // その日で週・月・年が終わるなら、コミュニティ内の上位に称号（同じ順位で二度は渡さない）
+    await grantCommunityRewards(db, m.id, periodId, now);
   }
 
   override async alarm(): Promise<void> {
