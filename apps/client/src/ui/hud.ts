@@ -26,6 +26,9 @@ import {
   COMPLAINT_CAUSE_LABEL,
   WEEKDAY_LABEL,
   weekdayOf,
+  gameDate,
+  calendarDemand,
+  seasonName,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 import { targetName, type FocusResult } from '../game/targeting';
@@ -250,8 +253,15 @@ export class Hud {
     if (key === this.lastTopKey) return;
     this.lastTopKey = key;
     const t = (this.topParts ??= this.buildTop());
-    // 曜日（シフトは曜日ごと）。0日目は練習の日なので出さない
-    t.day.textContent = s.day > 0 ? `${s.day}日目（${WEEKDAY_LABEL[weekdayOf(s.day)]}）` : `${s.day}日目`;
+    // 暦（1日目 = 4月1日）と曜日（シフトは曜日ごと・客の多さも曜日と季節で変わる）。0日目は練習の日なので出さない
+    if (s.day > 0) {
+      const g = gameDate(s.day);
+      t.day.textContent = `${s.day}日目 ${g.month}/${g.date}（${WEEKDAY_LABEL[weekdayOf(s.day)]}）`;
+      const f = calendarDemand(s.day);
+      t.day.title = `${seasonName(s.day)}・客の多さ ${f >= 1.03 ? '多い日' : f <= 0.97 ? '少ない日' : 'ふつう'}（曜日と季節で変わる）`;
+    } else {
+      t.day.textContent = `${s.day}日目`;
+    }
     t.clock.className = `clock ${s.phase}`;
     t.clock.textContent = clockText(s);
     t.money.className = `money ${s.money < 0 ? 'neg' : ''}`;

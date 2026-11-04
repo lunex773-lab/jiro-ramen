@@ -27,6 +27,7 @@ export * from './sim/interact';
 export * from './sim/customers';
 export * from './sim/employees';
 export * from './sim/staff';
+export * from './sim/calendar';
 export * from './sim/manners';
 export * from './sim/media';
 export * from './sim/layout';
