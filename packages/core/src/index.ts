@@ -39,5 +39,7 @@ export * from './sim/complaints';
 export * from './sim/accident';
 export * from './sim/commute';
 export * from './sim/company';
+export * from './sim/stores';
+export * from './sim/manager';
 export * from './save';
 export * from './net';

@@ -48,6 +48,97 @@ export function makePlayer(s: GameState, id: string, name: string, isHost: boole
   };
 }
 
+/** 自動発注の目安の初期値（8席の店の一人営業の量） */
+export const DEFAULT_AUTO_ORDER: Readonly<Record<string, number>> = {
+  noodle: 20_000,
+  pork_raw: 8,
+  bones: 10_000,
+  backfat_raw: 2_000,
+  moyashi: 12_000,
+  cabbage: 3_000,
+  garlic_raw: 1_000,
+  soy: 5_400,
+  ichimi: 300,
+};
+
+/**
+ * GameState の店の部分を、新しく開く店の中身にする（新しいキャリアの1店舗目と、出店した店）。
+ * 初期の設備・席・丼と、開業日に必要な最低限の在庫。ID の連番は会社で共通（店をまたいでも重ならない）
+ */
+export function fillNewStore(s: GameState, stage: number): void {
+  s.inventory = [];
+  s.deliveries = [];
+  s.autoOrder = { ...DEFAULT_AUTO_ORDER };
+  s.equipment = [];
+  s.seats = [];
+  s.bowls = [];
+  s.dirt = [];
+  s.kitchenGrime = 0;
+  s.lostItems = [];
+  s.employees = [];
+  s.candidates = [];
+  s.customers = [];
+  s.orders = [];
+  s.queue = [];
+  s.insideQueue = [];
+  s.arrivalAcc = 0;
+  s.regularsVisitedToday = [];
+  s.reviews = [];
+  s.todayReviews = [];
+  s.regulars = [];
+  s.pausedMenu = [];
+  s.history = [];
+  s.closedForConstruction = 0;
+  s.career.stage = stage;
+
+  for (const p of STARTING_LAYOUT) {
+    const e = makeEquipment(s, p.type, p.gx, p.gz, p.rot, true);
+    if (p.type === 'soup_pot') {
+      e.soupL = 18;
+      e.soupQuality = 0.8;
+      e.soupCost = 18 * 58;
+    }
+    s.equipment.push(e);
+  }
+
+  const st = STAGES[stage]!;
+  st.seats.forEach((_, i) => {
+    const seat: Seat = {
+      id: `seat${i}`,
+      index: i,
+      // 8席の店は初めから8脚。最初から広い物件（12席など）は全部の席に椅子がある
+      installed: stage === 0 ? i < STARTING_SEATS : true,
+      offset: { x: 0, z: 0 },
+      dirt: 0,
+      customerId: null,
+      bowlId: null,
+      lostItemId: null,
+    };
+    s.seats.push(seat);
+  });
+
+  for (let i = 0; i < STARTING_BOWLS; i++) {
+    s.bowls.push({ id: newId(s, 'b'), state: 'clean', loc: { at: 'rack' }, contents: null, orderId: null });
+  }
+
+  // 開業日に必要な最低限の在庫（1店舗目は前の店主からの引き継ぎ分。出店した店は初期費用に含む）
+  addLot(s, 'noodle', 15_000, 0.3);
+  addLot(s, 'pork_raw', 4, 850);
+  addLot(s, 'pork_block', 2, 870);
+  addLot(s, 'buta', 36, 48);
+  addLot(s, 'soy', 3_600, 0.39);
+  addLot(s, 'tare', 1_500, 0.29);
+  addLot(s, 'bones', 10_000, 0.18);
+  addLot(s, 'backfat_raw', 2_000, 0.35);
+  addLot(s, 'moyashi', 8_000, 0.12);
+  addLot(s, 'cabbage', 2_000, 0.15);
+  addLot(s, 'garlic_raw', 1_000, 1.0);
+  addLot(s, 'garlic', 300, 1.0);
+  addLot(s, 'abura', 600, 0.38);
+  addLot(s, 'yasai', 5_000, 0.13);
+  addLot(s, 'ichimi', 300, 2);
+}
+
 export function createGame(opts: NewGameOptions = {}): GameState {
   const seed = (opts.seed ?? Math.floor(Math.random() * 2 ** 31)) >>> 0;
   const s: GameState = {
@@ -71,17 +162,7 @@ export function createGame(opts: NewGameOptions = {}): GameState {
     cashAtDayStart: BALANCE.initialMoney,
     inventory: [],
     deliveries: [],
-    autoOrder: {
-      noodle: 20_000,
-      pork_raw: 8,
-      bones: 10_000,
-      backfat_raw: 2_000,
-      moyashi: 12_000,
-      cabbage: 3_000,
-      garlic_raw: 1_000,
-      soy: 5_400,
-      ichimi: 300,
-    },
+    autoOrder: { ...DEFAULT_AUTO_ORDER },
     equipment: [],
     seats: [],
     bowls: [],
@@ -125,51 +206,7 @@ export function createGame(opts: NewGameOptions = {}): GameState {
   // JSON で表現できない -Infinity は使わない
   s.career.bestDayProfit = -1e12;
 
-  for (const p of STARTING_LAYOUT) {
-    const e = makeEquipment(s, p.type, p.gx, p.gz, p.rot, true);
-    if (p.type === 'soup_pot') {
-      e.soupL = 18;
-      e.soupQuality = 0.8;
-      e.soupCost = 18 * 58;
-    }
-    s.equipment.push(e);
-  }
-
-  const st = STAGES[0]!;
-  st.seats.forEach((_, i) => {
-    const seat: Seat = {
-      id: `seat${i}`,
-      index: i,
-      installed: i < STARTING_SEATS,
-      offset: { x: 0, z: 0 },
-      dirt: 0,
-      customerId: null,
-      bowlId: null,
-      lostItemId: null,
-    };
-    s.seats.push(seat);
-  });
-
-  for (let i = 0; i < STARTING_BOWLS; i++) {
-    s.bowls.push({ id: newId(s, 'b'), state: 'clean', loc: { at: 'rack' }, contents: null, orderId: null });
-  }
-
-  // 開業日に必要な最低限の在庫（前の店主からの引き継ぎ分）
-  addLot(s, 'noodle', 15_000, 0.3);
-  addLot(s, 'pork_raw', 4, 850);
-  addLot(s, 'pork_block', 2, 870);
-  addLot(s, 'buta', 36, 48);
-  addLot(s, 'soy', 3_600, 0.39);
-  addLot(s, 'tare', 1_500, 0.29);
-  addLot(s, 'bones', 10_000, 0.18);
-  addLot(s, 'backfat_raw', 2_000, 0.35);
-  addLot(s, 'moyashi', 8_000, 0.12);
-  addLot(s, 'cabbage', 2_000, 0.15);
-  addLot(s, 'garlic_raw', 1_000, 1.0);
-  addLot(s, 'garlic', 300, 1.0);
-  addLot(s, 'abura', 600, 0.38);
-  addLot(s, 'yasai', 5_000, 0.13);
-  addLot(s, 'ichimi', 300, 2);
+  fillNewStore(s, 0);
 
   s.players.push(makePlayer(s, opts.playerId ?? 'p1', opts.playerName?.trim() || '店主', true));
   // 1日目の仕込み開始時点（爆発事故のリセット用）。練習の日（0日目）は事故が起きないので作らない

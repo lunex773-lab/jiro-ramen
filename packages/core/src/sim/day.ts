@@ -10,6 +10,7 @@ import type { DayReport, GameState } from '../types';
 import { clamp, newId } from '../util';
 import { closeLostItems } from './customers';
 import { recordCompanyDay } from './company';
+import { runAbsentStores } from './stores';
 import { cash, emptyDayStats, finalProfit, foldIntoLastReport, netSales, operatingProfit, recordPL, totalDebt } from './economy';
 import { finishRepair, resaleValue, runMaintenance, upkeepTotal, useEquipment } from './equipment';
 import { dropHand } from './interact';
@@ -330,7 +331,8 @@ export function nextDay(s: GameState, ctx: SimCtx): { ok: boolean; reason?: stri
   }
   // 閉店のあとに動いたお金（夜の自動発注・閉店後の採用や設備など）をその日の日報に足す
   foldIntoLastReport(s);
-  // 会社の日報（店舗の合計）
+  // プレイヤーがいない店のその日（店長の営業）と、会社の日報（店舗の合計）
+  runAbsentStores(s, ctx, s.day);
   recordCompanyDay(s, s.day);
   s.day += 1;
   s.t = 0;

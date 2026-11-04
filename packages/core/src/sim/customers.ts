@@ -31,6 +31,7 @@ import { hasRolled, markRolled, onCustomerArrive, onVisitEnd } from './visitors'
 import { COMPLAINT_TEXT, UNREASONABLE_TEXT } from '../data/events';
 import { drawGroupSize, findGroupSeats, groupMembers, holdAfterMeal, leaveAfterMeal, meanGroupSize, messyLeaveDirt, rollMessy } from './manners';
 import { maybeYoutuber, onMealFinished } from './media';
+import { activeStore, storeProperty } from './company';
 
 // ───────────────────────── 生成 ─────────────────────────
 
@@ -228,21 +229,56 @@ export function priceDemandFactor(s: GameState): number {
   return clamp(Math.pow(1 / r, r > 1 ? c.priceExponentHigh : c.priceExponentLow), c.priceFloor, 1.7);
 }
 
-/** 1秒あたりの来店期待値（設計書 7.3） */
-export function arrivalRate(s: GameState): number {
+/**
+ * 1秒あたりの来店期待値（設計書 7.3）。物件（立地）の人通りの倍率を掛ける（1店舗目は 1）。
+ * events: false ならイベント（SNS バズ・記事の反響など）の効果を入れない（プレイヤーがいない店の1日の計算）
+ */
+export function arrivalRate(s: GameState, opts: { events?: boolean } = {}): number {
   const c = BALANCE.customers;
   const repF = Math.pow(Math.max(0.3, s.reputation) / 3, c.reputationExponent);
   const x = s.openT / BALANCE.openDuration;
   const priceF = priceDemandFactor(s);
+  const propF = s.company ? storeProperty(activeStore(s)).demand : 1;
   const demand = 1 + effectSum(s, 'demand');
   // 常連客は安定した需要を生む
   const regularF = 1 + Math.min(0.6, s.regulars.reduce((a, r) => a + r.loyalty, 0) * 0.03);
   const ticketMachines = equipmentByRole(s, 'ticket');
   const ticketF = ticketMachines.length === 0 ? 0.6 : 1;
   // SNS バズ・覆面調査員の記事の反響（売上は通常どおり提供したときに計上される）
-  const eventF = eventDemandFactor(s);
+  const eventF = opts.events === false ? 1 : eventDemandFactor(s);
   const stageF = c.stageDemand[s.career.stage] ?? c.stageDemand[c.stageDemand.length - 1] ?? 1;
-  return c.baseRate * repF * timeCurve(x) * priceF * demand * regularF * ticketF * eventF * stageF;
+  return c.baseRate * repF * timeCurve(x) * priceF * demand * regularF * ticketF * eventF * stageF * propF;
+}
+
+/** 1日（営業時間）の来店の見込み（人）。arrivalRate を営業時間で積分する */
+export function expectedDailyArrivals(s: GameState, opts: { events?: boolean } = {}): number {
+  const D = BALANCE.openDuration;
+  const n = 54;
+  const saved = s.openT;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    s.openT = ((i + 0.5) / n) * D;
+    sum += arrivalRate(s, opts) * (D / n);
+  }
+  s.openT = saved;
+  return sum;
+}
+
+/** 客単価の見込み（メニューの人気と今の値段から。トッピングのコールは無料なので入れない） */
+export function expectedTicket(s: GameState): number {
+  const ref = BALANCE.customers.referencePrice;
+  const sens = 1 + 2 * 0.45;
+  let w = 0;
+  let sum = 0;
+  for (const id of MENU_IDS) {
+    const m = MENU[id]!;
+    if (m.unlock && !s.career.unlocked.includes(m.unlock)) continue;
+    const price = s.prices[id] ?? m.defaultPrice;
+    const k = (MENU_POPULARITY[id] ?? 0.05) * Math.pow(ref / price, sens);
+    w += k;
+    sum += k * price;
+  }
+  return w > 0 ? sum / w : ref;
 }
 
 function activeCustomers(s: GameState): number {

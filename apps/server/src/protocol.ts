@@ -14,7 +14,7 @@ export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire',
   'fire', 'setRole', 'setPriority', 'setShift', 'setDateShift', 'setAutoOrderMode', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
-  'accidentReset',
+  'accidentReset', 'openStore', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy',
 ] as const satisfies readonly ActionType[];
 
 /**
@@ -70,6 +70,24 @@ function isArgs(v: unknown): boolean {
   return entries.every(([k, x]) => isId(k) && k.length <= 32 && (isNum(x) || typeof x === 'boolean' || (typeof x === 'string' && x.length <= 64)));
 }
 
+/** 店の方針（知っているキーだけ。値の範囲は core の setStorePolicy で確かめる） */
+function isPolicy(v: unknown): boolean {
+  if (!isObj(v)) return false;
+  const keys = Object.keys(v);
+  if (keys.length === 0 || keys.length > 4) return false;
+  for (const k of keys) {
+    const x = v[k];
+    if (k === 'priceMult' || k === 'repairCap') {
+      if (!isNum(x)) return false;
+    } else if (k === 'orderMode') {
+      if (x !== 'manual' && x !== 'sales') return false;
+    } else if (k === 'maintenance') {
+      if (typeof x !== 'boolean') return false;
+    } else return false;
+  }
+  return true;
+}
+
 type FieldRules = Record<string, (v: unknown) => boolean>;
 
 const RULES: Record<AcceptedActionType, FieldRules> = {
@@ -108,6 +126,12 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   giveUp: {},
   // 事故の ID（違えばサーバーは何もしない。同時に届いた2回目以降も何もしない）
   accidentReset: { accidentId: isId },
+  // 会社と店舗（Phase 2。ホストだけ。中身の検証は core）
+  openStore: { propertyId: isId, managerId: isId },
+  enterStore: { storeId: isId },
+  assignManager: { storeId: isId, employeeId: (v: unknown) => v === null || isId(v) },
+  transferEmployee: { employeeId: isId, toStoreId: isId, asManager: optBool },
+  setStorePolicy: { storeId: isId, policy: isPolicy },
 };
 
 /** 操作要求の形を検証する。正しければ余計なキーを除いた Action を返す */

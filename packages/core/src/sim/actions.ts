@@ -6,7 +6,7 @@ import { BOWL_PACK, EQUIPMENT, SEAT_PRICE } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
 import { MENU } from '../data/menu';
 import { moveWithCollision, stageOf } from '../geometry';
-import type { EmployeeRole, EventKind, GameState, Id, Rot, ShiftDay, Vec2 } from '../types';
+import type { EmployeeRole, EventKind, GameState, Id, Rot, ShiftDay, StorePolicy, Vec2 } from '../types';
 import { dist, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipment';
@@ -22,6 +22,7 @@ import { accidentFainted, resetAccident } from './accident';
 import { forceEvent } from './visitors';
 import { promote, setDateShift, setShift, type DateShiftMode } from './staff';
 import { answerRequest } from './media';
+import { assignManager, enterStore, openStore, setStorePolicy, transferEmployee } from './stores';
 
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
@@ -65,7 +66,18 @@ export type Action =
   /** 爆発事故のあと、事故当日の仕込み開始時点に戻す（accidentId は事故の ID。違えば何もしない） */
   | { type: 'accidentReset'; accidentId: Id }
   /** テスト用: イベントを強制的に起こす（ひとりプレイのみ。共同経営のサーバーは受け付けない） */
-  | { type: 'debugEvent'; kind: EventKind };
+  | { type: 'debugEvent'; kind: EventKind }
+  // ── 会社と店舗（Phase 2） ──
+  /** 出店する（閉店後。物件の候補と、店長にする今の店の社員） */
+  | { type: 'openStore'; propertyId: string; managerId: Id }
+  /** 店に入る（閉店後。次の営業日からその店で営業する） */
+  | { type: 'enterStore'; storeId: Id }
+  /** 店長を決める（その店の社員。null で外す） */
+  | { type: 'assignManager'; storeId: Id; employeeId: Id | null }
+  /** 今の店の従業員をほかの店へ異動させる（閉店後） */
+  | { type: 'transferEmployee'; employeeId: Id; toStoreId: Id; asManager?: boolean }
+  /** 店の方針（店長の営業の価格・発注・修理費の上限・定期メンテ） */
+  | { type: 'setStorePolicy'; storeId: Id; policy: Partial<StorePolicy> };
 
 export type ActionType = Action['type'];
 
@@ -266,6 +278,21 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return answerRequest(s, ctx, a.requestId, a.accept === true);
     case 'expand':
       return expand(s, ctx);
+    case 'openStore':
+      if (typeof a.propertyId !== 'string' || typeof a.managerId !== 'string') return fail('不正な指定');
+      return openStore(s, ctx, a.propertyId, a.managerId);
+    case 'enterStore':
+      if (typeof a.storeId !== 'string') return fail('不正な指定');
+      return enterStore(s, ctx, a.storeId);
+    case 'assignManager':
+      if (typeof a.storeId !== 'string' || (a.employeeId !== null && typeof a.employeeId !== 'string')) return fail('不正な指定');
+      return assignManager(s, ctx, a.storeId, a.employeeId);
+    case 'transferEmployee':
+      if (typeof a.employeeId !== 'string' || typeof a.toStoreId !== 'string') return fail('不正な指定');
+      return transferEmployee(s, ctx, a.employeeId, a.toStoreId, a.asManager === true);
+    case 'setStorePolicy':
+      if (typeof a.storeId !== 'string' || typeof a.policy !== 'object' || a.policy === null) return fail('不正な指定');
+      return setStorePolicy(s, a.storeId, a.policy);
     case 'setPrice': {
       const m = Object.hasOwn(MENU, a.menuId) ? MENU[a.menuId] : undefined;
       if (!m || !isNum(a.price)) return fail('不正な価格');

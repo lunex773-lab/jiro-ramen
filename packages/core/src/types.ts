@@ -657,7 +657,9 @@ export type TxnType =
   | 'loanRepay'
   | 'interest'
   | 'arrearsPay'
-  | 'relocation';
+  | 'relocation'
+  /** 出店（物件の初期費用） */
+  | 'store';
 
 export interface Txn {
   id: Id;
@@ -721,6 +723,8 @@ export interface DayReport extends DayStats {
   reviews: number;
   avgSatisfaction: number;
   avgWait: number;
+  /** プレイヤーがいない店の日報: 'manager' = 店長の営業（1日単位の計算）、'closed' = 休業（Phase 2-4） */
+  managed?: 'manager' | 'closed';
 }
 
 export interface Arrear {

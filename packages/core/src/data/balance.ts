@@ -56,6 +56,63 @@ export const BALANCE = {
     stockoutBoost: 1.5,
   },
 
+  /**
+   * 会社と複数店舗（統合進化設計書 v2.1 Phase 2）。オーナーの判断: 2店舗目は12席の店が軌道に乗ったら、物件は候補から選ぶ、店長は社員から任命。
+   * 物件ごとの家賃・来客・初期費用は data/properties.ts
+   */
+  company: {
+    /** 持てる店の数の上限 */
+    maxStores: 4,
+    /** 出店の条件: この段階（1 = 12席）以上で、評判がこれ以上の店があること */
+    unlockStage: 1,
+    unlockReputation: 4.0,
+    /** 出店のあとに必要な手元資金（初期費用とは別） */
+    minFundsAfterOpen: 100_000,
+    /** 新しい店の最初の評判 = 初期値 + (出店を決めた店の評判 − 初期値) × brandCarry（のれん） */
+    brandCarry: 0.5,
+    /**
+     * プレイヤーがいない店の「店長の営業」（1日単位の計算）。係数は細かいシミュレーション（test/econ）の結果に合わせる
+     */
+    model: {
+      /** 席1つあたりの1日の提供の上限（人手が足りているとき） */
+      seatTurns: 8.2,
+      /** 店長が一人で出せる杯数（能力0.65のとき） */
+      leadPoints: 48,
+      /** ほかの従業員が増やす杯数（担当ごと。能力0.65のとき） */
+      rolePoints: { cook: 20, server: 22, cleaner: 12, prep: 10 } as Record<string, number>,
+      /** 2人目以降の従業員の効き方の減り（人数が増えるほど1人あたりは減る） */
+      extraDiminish: 0.08,
+      /** 能力の効き方: 倍率 = skillBase + skillSlope × 能力 */
+      skillBase: 0.6,
+      skillSlope: 0.6,
+      /** 来店した人のうち、待てずに帰らない割合（席と人手に余裕があっても少しは帰る） */
+      joinShare: 0.92,
+      /** 1杯あたりに使う仕入れの食材（仕込みの分を含む。細かいシミュレーションの使用量から） */
+      usePerBowl: {
+        noodle: 340, pork_raw: 0.19, bones: 120, backfat_raw: 45, moyashi: 280, cabbage: 70, garlic_raw: 12, soy: 90, ichimi: 1.2,
+      } as Record<string, number>,
+      /** 使う量に対する廃棄（ゆですぎ・こぼし・残り）の割合 */
+      wasteShare: 0.1,
+      /** 朝にそろえる在庫 = 見込みの杯数の分 × この倍率 */
+      stockSafety: 1.25,
+      /** 冷蔵庫の容量1kgあたりで回せる1日の杯数（12席で1日90杯を超えると冷蔵庫1台では足りない） */
+      bowlsPerFridgeKg: 0.75,
+      /** 光熱費 = utilitiesBase + 1杯あたり（設備の使用を含む） */
+      utilitiesPerBowl: 38.5,
+      /** 修理費（1杯あたり。定期メンテを予約しないと増える） */
+      repairPerBowl: 31,
+      repairNoMaintenanceMult: 1.8,
+      /** 評判: 目標 = base + 店長の能力の効き − 高すぎる値段の効き + 安い値段の効き。毎日 approach の割合だけ近づく */
+      repBase: 4.4,
+      repManagerSlope: 0.8,
+      repHighPricePenalty: 2.0,
+      repLowPriceBonus: 0.5,
+      repApproach: 0.08,
+      /** 休業した日の評判の下がり */
+      repClosedDecay: 0.03,
+    },
+  },
+
   /** 支払いの猶予日数（これを超えた未払いは期限超過） */
   arrearsGraceDays: 3,
   /** 資金注意の閾値（固定費の何日分） */

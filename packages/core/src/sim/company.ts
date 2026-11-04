@@ -4,8 +4,8 @@
 // プレイヤーがいない店の中身は stores[].snapshot にしまい、店を切り替えるときに GameState の店の部分と入れ替える。
 
 import { PROPERTIES } from '../data/properties';
-import type { CompanyDayReport, CompanyState, DayReport, GameState, StoreEntry, StoreKey, StorePolicy } from '../types';
-import { netSales } from './economy';
+import type { CompanyDayReport, CompanyState, DayReport, GameState, StoreEntry, StoreKey, StorePolicy, StoreSnapshot } from '../types';
+import { emptyDayStats, netSales } from './economy';
 
 /** 店ごとの項目の一覧（types.ts の StoreKey とそろえる。抜けがあると型エラーになる） */
 const STORE_KEY_SET: Record<StoreKey, true> = {
@@ -131,4 +131,48 @@ export function recordCompanyDay(s: GameState, day: number): CompanyDayReport {
   c.history.push(report);
   if (c.history.length > 60) c.history.splice(0, c.history.length - 60);
   return report;
+}
+
+// ───────────────────────── 中身の出し入れ ─────────────────────────
+
+/** GameState の店の部分を取り出す（参照を移す。GameState 側はこのあと putStore で置き換える） */
+export function takeStore(s: GameState): StoreSnapshot {
+  const snap: Record<string, unknown> = {};
+  for (const k of STORE_KEYS) snap[k] = s[k];
+  snap.stage = s.career.stage;
+  return snap as unknown as StoreSnapshot;
+}
+
+/** 店の中身を GameState の店の部分に入れる */
+export function putStore(s: GameState, snap: StoreSnapshot): void {
+  const t = s as unknown as Record<string, unknown>;
+  for (const k of STORE_KEYS) t[k] = snap[k];
+  s.career.stage = snap.stage;
+}
+
+/**
+ * プレイヤーがいない店の中身を一時的に GameState に入れて fn を動かし、元に戻す（店の関数をそのまま使うため）。
+ * その間だけ、その日の集計（today）・知らせ・時刻は別にする（プレイヤーがいる店の日報や知らせに混ざらない）
+ */
+export function withStore<T>(s: GameState, entry: StoreEntry, fn: () => T): T {
+  if (!entry.snapshot) return fn();
+  const mine = takeStore(s);
+  const keep = { today: s.today, cashAtDayStart: s.cashAtDayStart, active: s.company.activeStoreId, phase: s.phase, openT: s.openT, t: s.t, notices: s.notices };
+  putStore(s, entry.snapshot);
+  s.company.activeStoreId = entry.id;
+  s.today = emptyDayStats();
+  s.notices = [];
+  try {
+    return fn();
+  } finally {
+    entry.snapshot = takeStore(s);
+    putStore(s, mine);
+    s.today = keep.today;
+    s.cashAtDayStart = keep.cashAtDayStart;
+    s.company.activeStoreId = keep.active;
+    s.phase = keep.phase;
+    s.openT = keep.openT;
+    s.t = keep.t;
+    s.notices = keep.notices;
+  }
 }

@@ -22,6 +22,7 @@ import { clamp01, dist, hashString, newId, pick, rand, randRange } from '../util
 import { cash, recordPL } from './economy';
 import { defOf, isUsable } from './equipment';
 import { stockOf } from './inventory';
+import { activeStore } from './company';
 import {
   bowlsOnAssembly,
   getActor,
@@ -475,6 +476,8 @@ function canTake(s: GameState, e: Employee, t: Task): boolean {
   if (!kind) return false;
   const override = e.priorities[t.kind];
   if (override !== undefined && override <= -100) return false;
+  // 店長は担当に関係なく店の仕事を何でもする（店長の営業の計算と同じ前提。Phase 2）
+  if (s.company && activeStore(s).managerId === e.id) return true;
   if (kind.roles.includes(e.profile.role)) {
     // 調理担当の接客系は、接客担当がいないときだけ
     if (e.profile.role === 'cook' && (t.kind === 'serve' || t.kind === 'askCall' || t.kind === 'complaint' || t.kind === 'manner' || t.kind === 'linger' || t.kind === 'film')) {
