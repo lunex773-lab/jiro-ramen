@@ -113,7 +113,8 @@ describe('団体客（8）', () => {
     };
     let withGroups = 0;
     let solo = 0;
-    for (const seed of [1, 2, 3, 4, 5, 6]) {
+    // 4人組は1回の来店の約5%なので、全部の人数が出るように12日分見る
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
       withGroups += total(null, seed);
       solo += total([1, 0, 0, 0], seed);
     }

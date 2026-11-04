@@ -80,28 +80,31 @@ export const BALANCE = {
     reputationExponent: 1.6,
     /** 価格基準（この平均価格で価格倍率1.0） */
     referencePrice: 1_000,
-    /** 価格の効き方（来客の倍率 = (基準 ÷ 平均価格)^指数）。基準より安いとき／高いとき */
-    priceExponentLow: 1.3,
-    priceExponentHigh: 1.3,
+    /**
+     * 価格の効き方（来客の倍率 = (基準 ÷ 平均価格)^指数）。基準より安いとき／高いとき。
+     * 1.3・1.3 → 1.8・2.6（安くすると客が大きく増え、高くすると大きく減る。経済の調整 Phase 1-5）
+     */
+    priceExponentLow: 1.8,
+    priceExponentHigh: 2.6,
     /** 価格による来客の倍率の下限 */
     priceFloor: 0.35,
     /**
      * 来客の価格の比べ方。'reference' = メニューの平均価格 ÷ 基準（referencePrice）、
      * 'menu' = 定価に対する割合の平均（メニューが解放されて平均価格が上がっても、定価のままなら倍率は1）
      */
-    priceAnchor: 'reference' as 'reference' | 'menu',
-    /** 満足度のうち「値段に見合うか」の重み */
-    valueWeight: 0.09,
+    priceAnchor: 'menu' as 'reference' | 'menu',
+    /** 満足度のうち「値段に見合うか」の重み。0.09 → 0.3（高すぎる値段は満足度・口コミ・常連に効く。経済の調整 Phase 1-5） */
+    valueWeight: 0.3,
     /**
      * 「値段に見合うか」= (品質 × qualityWeight + base) × (比べる価格 ÷ 払った価格)^priceExponent
      *   − sensitivityPenalty × 価格への敏感さ × 高すぎる割合。比べる価格は anchor（基準の価格 / そのメニューの定価）
      */
     value: {
-      qualityWeight: 1.1,
-      base: 0.2,
-      priceExponent: 1,
-      sensitivityPenalty: 0.3,
-      anchor: 'reference' as 'reference' | 'menu',
+      qualityWeight: 1.0,
+      base: 0.15,
+      priceExponent: 2.5,
+      sensitivityPenalty: 0.5,
+      anchor: 'menu' as 'reference' | 'menu',
     },
     maxCustomers: 60,
     walkSpeed: 1.25,
