@@ -36,5 +36,6 @@ export * from './sim/events';
 export * from './sim/visitors';
 export * from './sim/complaints';
 export * from './sim/accident';
+export * from './sim/commute';
 export * from './save';
 export * from './net';

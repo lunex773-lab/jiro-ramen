@@ -25,6 +25,7 @@ import {
   staffSummary,
   startComplaint,
   updateAttendance,
+  updateCommute,
   wagesDue,
   weekdayOf,
   type Employee,
@@ -56,6 +57,12 @@ function partTimer(s: GameState, diligence: number, patience: number, role: 'coo
 
 const shift = (start: number, end: number, extra: Partial<ShiftDay> = {}): ShiftDay => ({ start, end, breakAt: 0, breakLen: 0, fromPrep: false, ...extra });
 
+/** 出勤の処理と出退勤の歩き（入店・あいさつ・手洗い／退店）だけを進める（仕事はさせない） */
+function tickStaff(s: GameState, dt: number, ctx: SimCtx): void {
+  updateAttendance(s, dt, ctx);
+  for (const e of s.employees) if (e.presentToday && e.commute) updateCommute(s, e, dt, ctx);
+}
+
 /** 朝の出勤確認から営業の終わりまで、出勤の処理だけを1秒ずつ進める（客・調理は動かさない） */
 function attendanceDay(s: GameState, ctx: SimCtx): void {
   s.phase = 'prep';
@@ -64,10 +71,10 @@ function attendanceDay(s: GameState, ctx: SimCtx): void {
   for (let t = 1; t <= BALANCE.openDuration; t++) {
     s.openT = t;
     s.t += 1;
-    updateAttendance(s, 1, ctx);
+    tickStaff(s, 1, ctx);
   }
   s.phase = 'closing';
-  updateAttendance(s, 1, ctx);
+  tickStaff(s, 1, ctx);
 }
 
 describe('雇用形態と採用', () => {
@@ -163,17 +170,26 @@ describe('シフト', () => {
     expect(e.presentToday).toBe(false);
     s.phase = 'open';
     const seen: Record<string, boolean> = {};
+    const said: string[] = [];
     for (let t = 1; t <= BALANCE.openDuration; t++) {
       s.openT = t;
-      updateAttendance(s, 1, ctx);
+      s.t += 1;
+      tickStaff(s, 1, ctx);
+      if (e.say && e.say.until > s.t && said[said.length - 1] !== e.say.text) said.push(e.say.text);
       const min = t / SEC_PER_MIN;
       if (min < 59) seen.before ||= e.presentToday;
       if (min > 61 && min < 119) seen.working = (seen.working ?? true) && e.presentToday;
-      if (min > 121 && min < 149) seen.inBreak ||= e.presentToday;
+      // 休憩と退勤は、あいさつをして店の外まで歩いてから姿が消える（数分かかる）
+      if (min > 126 && min < 149) seen.inBreak ||= e.presentToday;
       if (min > 151 && min < 179) seen.after = (seen.after ?? true) && e.presentToday;
-      if (min > 181) seen.leftLate ||= e.presentToday;
+      if (min > 186) seen.leftLate ||= e.presentToday;
     }
     expect(seen).toEqual({ before: false, working: true, inBreak: false, after: true, leftLate: false });
+    // 出勤・休憩・戻り・退勤のあいさつ
+    expect(said.some((x) => x.startsWith('おはようございます'))).toBe(true);
+    expect(said.some((x) => x.startsWith('休憩'))).toBe(true);
+    expect(said.some((x) => x.startsWith('戻りました') || x.startsWith('休憩ありがとう'))).toBe(true);
+    expect(said.some((x) => x.includes('お疲れ様でした'))).toBe(true);
     expect(e.att!.status).toBe('left');
     // 90分 = 1.5時間ぶん（秒の刻みの誤差は 10円の丸めの中）
     expect(payDue(e, s)).toBe(Math.round((hourlyOf(e) * 1.5) / 10) * 10);
@@ -227,7 +243,7 @@ describe('勤怠（隠しパラメータ）', () => {
       for (let t = 1; t <= BALANCE.openDuration; t++) {
         s.openT = t;
         s.t += 1;
-        updateAttendance(s, 1, ctx);
+        tickStaff(s, 1, ctx);
       }
       for (const e of s.employees) {
         const o = observed.get(e.id)!;
@@ -262,9 +278,11 @@ describe('勤怠（隠しパラメータ）', () => {
       expect(r.late).toBe(o.late);
       expect(r.slack).toBe(o.conduct);
       // 履歴（最新の logMax 件）の出来事は、実際に起きた日と一致する
+      // いちばん古い日は件数の上限で一部だけ消えていることがあるので、その次の日から比べる
       const from = r.log[0]?.day ?? Infinity;
-      expect(new Set(r.log.filter((l) => l.kind === 'absent').map((l) => l.day))).toEqual(new Set([...o.absentDays].filter((d) => d >= from)));
-      expect(new Set(r.log.filter((l) => l.kind === 'late').map((l) => l.day))).toEqual(new Set([...o.lateDays].filter((d) => d >= from)));
+      const after = (days: Iterable<number>) => new Set([...days].filter((d) => d > from));
+      expect(after(r.log.filter((l) => l.kind === 'absent').map((l) => l.day))).toEqual(after(o.absentDays));
+      expect(after(r.log.filter((l) => l.kind === 'late').map((l) => l.day))).toEqual(after(o.lateDays));
     }
     // 1日に起きるサボりは上限まで、間隔をあける
     for (const e of s.employees) expect(e.conduct!.today).toBeLessThanOrEqual(BALANCE.staff.conduct.maxPerDay);

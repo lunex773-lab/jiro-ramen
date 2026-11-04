@@ -227,7 +227,7 @@ function panic(s: GameState, acc: AccidentState): void {
       if (c) sayEvent(c, s, line, 2.5);
     } else {
       const e = s.employees.find((x) => x.id === p.id);
-      if (e) e.say = { text: line, until: s.t + eventSayTime(line, 2.5) };
+      if (e) e.say = { text: line, until: s.t + eventSayTime(line, 2.5), kind: 'event' };
     }
   });
 }

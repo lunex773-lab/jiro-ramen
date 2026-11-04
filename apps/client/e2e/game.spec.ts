@@ -556,6 +556,81 @@ test('従業員: アルバイトとして採用し、曜日ごとのシフトを
   await expect(card.getByRole('button', { name: '社員にする' })).toHaveCount(0);
 });
 
+test('従業員は店の外から歩いて入り、「おはようございます」とあいさつして手を洗ってから働き、「お疲れ様でした」と言って歩いて帰る', async ({ page }) => {
+  await startNewGame(page);
+  type CW = { __jiro: { controls: { yaw: number; pitch: number }; host: { tick(dt: number): void; state: Record<string, any> } } };
+  await page.evaluate(() => {
+    const s = (window as unknown as CW).__jiro.host.state;
+    s.career.unlocked.push('hiring');
+    s.candidates = [
+      {
+        id: 'cand-walk',
+        profile: {
+          name: '歩 太郎', role: 'cook', skills: { speed: 0.6, cooking: 0.6, service: 0.6, hygiene: 0.6, movement: 0.6 },
+          wage: 9000, hireFee: 0, experience: 0, employment: 'part', hourly: 2000, diligence: 1, patience: 1, look: 777,
+        },
+      },
+    ];
+  });
+  await page.locator('.chip.menu').click();
+  await page.getByRole('button', { name: '従業員', exact: true }).click();
+  await page.locator('.manage-body').getByRole('button', { name: '採用する' }).click();
+  await press(page.locator('.manage .close'));
+  // 採用した人は店の外（歩道）から歩いて来る
+  const emp = () => page.evaluate(() => {
+    const e = (window as unknown as CW).__jiro.host.state.employees[0];
+    return { x: e.pos.x, z: e.pos.z, present: e.presentToday, commute: e.commute ? { kind: e.commute.kind, phase: e.commute.phase } : null, say: e.say ? e.say.text : null };
+  });
+  const e0 = await emp();
+  expect(e0.commute).toEqual({ kind: 'arrive', phase: 'walkIn' });
+  expect(e0.z).toBeLessThan(0);
+  // 時間を進め、店に入って厨房の入口であいさつするところで止める
+  const tickUntil = (cond: string, max = 600) =>
+    page.evaluate(([code, n]) => {
+      const a = (window as unknown as CW).__jiro;
+      const f = new Function('e', 's', `return (${code});`) as (e: unknown, s: unknown) => boolean;
+      for (let i = 0; i < (n as number); i++) {
+        const st = a.host.state;
+        if (f(st.employees[0], st)) return true;
+        a.host.tick(0.1);
+      }
+      return false;
+    }, [cond, max] as const);
+  expect(await tickUntil("e.commute && e.commute.phase === 'greet'")).toBe(true);
+  // その人の方を向く
+  await page.evaluate(() => {
+    const a = (window as unknown as CW).__jiro;
+    const e = a.host.state.employees[0];
+    const p = a.host.state.players[0];
+    a.controls.yaw = Math.atan2(e.pos.x - p.pos.x, e.pos.z - p.pos.z);
+    a.controls.pitch = -0.05;
+  });
+  await expect(page.locator('.bubble.greet')).toContainText('おはようございま', { timeout: 15_000 });
+  await shot(page, '42-staff-greet');
+  // 手を洗ってから働き始める（手洗いの間は仕事をしない）
+  expect(await tickUntil("e.commute && e.commute.phase === 'wash'")).toBe(true);
+  expect((await emp()).commute?.phase).toBe('wash');
+  expect(await tickUntil('!e.commute')).toBe(true);
+  // 開店して、退勤の時刻にする →「お疲れ様でした」と言って歩いて店の外へ
+  await page.getByRole('button', { name: /開店する/ }).click();
+  await page.evaluate(() => {
+    const s = (window as unknown as CW).__jiro.host.state;
+    s.employees[0].att.leaveAt = s.openT + 0.5;
+  });
+  expect(await tickUntil("e.commute && e.commute.kind === 'leave'")).toBe(true);
+  await page.evaluate(() => {
+    const a = (window as unknown as CW).__jiro;
+    const e = a.host.state.employees[0];
+    const p = a.host.state.players[0];
+    a.controls.yaw = Math.atan2(e.pos.x - p.pos.x, e.pos.z - p.pos.z);
+  });
+  await expect(page.locator('.bubble.greet')).toContainText('お疲れ様でした', { timeout: 15_000 });
+  await shot(page, '43-staff-goodbye');
+  expect(await tickUntil('!e.presentToday', 900)).toBe(true);
+  const e1 = await emp();
+  expect(e1.z).toBeLessThan(0);
+});
+
 test('店の前に「禁煙」の張り紙があり、店の外でタバコを吸う客に声をかけられる', async ({ page }) => {
   await startNewGame(page);
   type W = { __jiro: { world: { scene: { getObjectByName(n: string): unknown } }; host: { state: Record<string, any>; tick(dt: number): void }; debugFace(id: string): boolean } };

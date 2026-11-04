@@ -482,6 +482,9 @@ input, select { font: inherit; }
   margin-left: -6px;
 }
 .bubble.angry { background: #ffdddd; color: #8b0000; }
+/* 従業員の出退勤のあいさつ（おはようございます・お疲れ様でした） */
+.bubble.greet { background: #eef6ff; color: #12345a; border: 1.5px solid #7fa8d8; }
+.bubble.greet::after { border-top-color: #eef6ff; }
 .seatno {
   position: absolute;
   left: 0;

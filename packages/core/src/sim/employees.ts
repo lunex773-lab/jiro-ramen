@@ -43,6 +43,8 @@ import { complaintVerbFor } from './complaints';
 import { evRand } from './events';
 import { unpermittedFilming } from './media';
 import { accidentPanic } from './accident';
+import { moveAlong, staffRoute, walkSpeed } from './walk';
+import { updateCommute } from './commute';
 import { attendHireDay, dailyWageOf, initNewHire, isPartTime, isSlacking, rollCall, rollPostpone, wagesDueToday } from './staff';
 
 export const ROLE_LABEL: Record<EmployeeRole, string> = {
@@ -239,23 +241,6 @@ export function morningRollCall(s: GameState, ctx: SimCtx): void {
  * 従業員の道のり。店内は経路探索、店の外（歩道）へは入口を通る（店の前の喫煙客に声をかけるときなど）。
  * 店の外にいるときは入口から店内へ戻る
  */
-function staffRoute(s: GameState, from: Vec2, to: Vec2): { points: Vec2[]; cost: number } | null {
-  const st = stageOf(s);
-  const doorX = (st.door.x0 + st.door.x1) / 2;
-  const inner = { x: doorX, z: 0.35 };
-  const outer = { x: doorX, z: -0.5 };
-  if (from.z >= 0 && to.z >= 0) return findPath(s, from, to, 'staff');
-  if (from.z >= 0 && to.z < 0) {
-    const r = findPath(s, from, inner, 'staff');
-    if (!r) return null;
-    return { points: [...r.points, outer, to], cost: r.cost + dist(inner, outer) + dist(outer, to) };
-  }
-  if (from.z < 0 && to.z < 0) return { points: [to], cost: dist(from, to) };
-  const r = findPath(s, inner, to, 'staff');
-  if (!r) return null;
-  return { points: [outer, inner, ...r.points], cost: dist(from, outer) + dist(outer, inner) + r.cost };
-}
-
 function releaseTask(e: Employee): void {
   e.ai.taskId = null;
   e.ai.steps = [];
@@ -443,7 +428,7 @@ function canTake(s: GameState, e: Employee, t: Task): boolean {
   if (kind.roles.includes(e.profile.role)) {
     // 調理担当の接客系は、接客担当がいないときだけ
     if (e.profile.role === 'cook' && (t.kind === 'serve' || t.kind === 'askCall' || t.kind === 'complaint' || t.kind === 'manner' || t.kind === 'linger' || t.kind === 'film')) {
-      const servers = s.employees.some((x) => x.presentToday && x.profile.role === 'server');
+      const servers = s.employees.some((x) => x.presentToday && !x.commute && x.profile.role === 'server');
       if (servers && t.kind !== 'serve') return false;
     }
     return true;
@@ -459,30 +444,6 @@ function taskScore(e: Employee, t: Task): number {
 
 // ───────────────────────── 実行 ─────────────────────────
 
-function walkSpeed(s: GameState, e: Employee): number {
-  let v = BALANCE.staff.baseWalkSpeed * (0.7 + 0.6 * e.profile.skills.movement);
-  if (isNarrowAt(s, e.pos)) v *= 0.75;
-  if (s.dirt.some((d) => d.kind === 'spill' && dist(d.pos, e.pos) < 0.6)) v *= 0.6;
-  return v;
-}
-
-function moveAlong(e: Employee, dt: number, speed: number): boolean {
-  let left = speed * dt;
-  while (left > 0 && e.ai.path.length > 0) {
-    const tgt = e.ai.path[0]!;
-    const d = dist(e.pos, tgt);
-    if (d > 1e-6) e.yaw = Math.atan2(tgt.x - e.pos.x, tgt.z - e.pos.z);
-    if (d <= left) {
-      e.pos = { x: tgt.x, z: tgt.z };
-      e.ai.path.shift();
-      left -= d;
-    } else {
-      e.pos = { x: e.pos.x + ((tgt.x - e.pos.x) / d) * left, z: e.pos.z + ((tgt.z - e.pos.z) / d) * left };
-      left = 0;
-    }
-  }
-  return e.ai.path.length === 0;
-}
 
 function reservedBy(s: GameState, key: string, except: string): boolean {
   return s.employees.some((x) => x.id !== except && x.ai.taskId === key);
@@ -553,12 +514,17 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
     // 出勤前・休憩中・退勤後・欠勤（状態は staff.ts の出勤の処理が決める）
     if (!e.presentToday) continue;
     // 火事に気づいたら仕事の手を止めて火の方を見る（店からは出ない）
-    if (accidentPanic(s) && !e.work) {
+    if (accidentPanic(s) && !e.work && e.pos.z >= 0.05) {
       const acc = s.events!.accident!;
       releaseTask(e);
       e.ai.state = 'idle';
       e.ai.note = '火事に驚いている';
       e.yaw = Math.atan2(acc.pos.x - e.pos.x, acc.pos.z - e.pos.z);
+      continue;
+    }
+    // 出退勤の途中（歩いて入る・あいさつ・手洗い／あいさつ・歩いて出る）は仕事をしない
+    if (e.commute) {
+      updateCommute(s, e, dt, ctx);
       continue;
     }
     // サボっている間は仕事を選ばない（作業の途中では始まらない）

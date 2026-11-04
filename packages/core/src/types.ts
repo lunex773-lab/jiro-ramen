@@ -240,6 +240,26 @@ export interface EmployeeProfile {
   look?: number;
 }
 
+/**
+ * 出退勤の動き（オーナーの指示: 歩いて入店し、キッチンにあいさつして手洗いしてから働き始め、「お疲れ様でした」と言って帰る。社員も含めて全員）
+ *   arrive: 出勤（店の外から歩いて入る →「おはようございます！」→ 手洗い → 仕事）
+ *   return: 休憩から戻る（歩いて入る →「戻りました！」→ 手洗い → 仕事）
+ *   back:   勝手に持ち場を離れていた人が戻る（歩いて入る → 手洗い → 仕事。あいさつはしない）
+ *   leave:  退勤（「お疲れ様でした！」→ 歩いて店の外へ）
+ *   break:  休憩（「休憩いただきます！」→ 歩いて店の外へ）
+ *   away:   勝手に持ち場を離れる（何も言わずに店の外へ）
+ */
+export type CommuteKind = 'arrive' | 'return' | 'back' | 'leave' | 'break' | 'away';
+
+export interface Commute {
+  kind: CommuteKind;
+  phase: 'walkIn' | 'greet' | 'toSink' | 'wash' | 'walkOut';
+  /** あいさつ・手洗いの残り秒 */
+  t: number;
+  /** 出退勤を始めた時刻（s.t。詰まったときの打ち切り用） */
+  since: number;
+}
+
 export type EmployeeAiState = 'idle' | 'moving' | 'working' | 'waiting' | 'absent' | 'stuck' | 'slacking' | 'break' | 'off';
 
 export interface Employee extends ActorBase {
@@ -281,7 +301,10 @@ export interface Employee extends ActorBase {
   /** その日に伸びた能力の量（1日の上限のため） */
   growth?: { day: number; gained: Partial<Record<keyof EmployeeSkills, number>> };
   /** 従業員の吹き出し（クレームで言い返したときなど） */
-  say?: { text: string; until: number } | null;
+  /** セリフ。kind: 'greet' は出退勤のあいさつ、'event' は火事などのイベント（ないものは口論・言い返しなど） */
+  say?: { text: string; until: number; kind?: 'greet' | 'event' } | null;
+  /** 出退勤の途中（店の外から歩いて入る・あいさつ・手洗い／あいさつ・歩いて出る）。この間は仕事をしない。古い状態にはない */
+  commute?: Commute | null;
 }
 
 export interface TaskStep {
@@ -972,6 +995,8 @@ export interface Bankruptcy {
 export interface GameState {
   schema: number;
   seed: number;
+  /** 閉店のあと、従業員が帰るのを待ち始めた時刻（s.t。待っている間だけ） */
+  closeWaitSince?: number;
   rng: number;
   shopName: string;
   /** 0 から始まる連番ID */

@@ -10,7 +10,7 @@ import { coolBowl } from './cooking';
 import { addDirt, spawnLostItemOwners, updateArrivals, updateCustomers } from './customers';
 import { allCustomersGone, checkGoals, settleDay, startClosing } from './day';
 import { onEmployeeWorkDone, updateEmployees } from './employees';
-import { updateAttendance } from './staff';
+import { sendStaffHome, updateAttendance } from './staff';
 import { defOf, effectSum, updateRepairs } from './equipment';
 import { assignBowls, completeProcess, progressWork, roleOf } from './interact';
 import { receiveDeliveries, stockOf } from './inventory';
@@ -82,7 +82,8 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
   }
 
   if (s.phase === 'open' && s.openT >= BALANCE.openDuration) startClosing(s, ctx);
-  if (s.phase === 'closing' && allCustomersGone(s)) {
+  // お客さんがいなくなったら、従業員が「お疲れ様でした！」と言って帰るのを待ってから精算する
+  if (s.phase === 'closing' && allCustomersGone(s) && sendStaffHome(s, ctx)) {
     settleDay(s, ctx);
   }
   if (s.tutorial) updateTutorial(s, ctx);

@@ -540,10 +540,16 @@ export class World {
         continue;
       }
       const panicE = e.work ? null : this.panicAt(e.pos);
-      this.placeChar(c, e.pos.x, e.pos.z, panicE ?? (e.ai.state === 'working' || e.work ? e.yaw : null), dt, smooth);
+      const cm = e.commute;
+      const holdYaw = e.ai.state === 'working' || !!e.work || cm?.phase === 'greet' || cm?.phase === 'wash';
+      this.placeChar(c, e.pos.x, e.pos.z, panicE ?? (holdYaw ? e.yaw : null), dt, smooth);
+      // あいさつのときは軽くおじぎをする
+      const bow = cm?.phase === 'greet' && panicE === null ? 0.32 : 0;
+      c.model.group.rotation.x += (bow - c.model.group.rotation.x) * Math.min(1, dt * 8);
       // サボっている従業員はスマホを見ている
       c.model.setHeld(e.ai.state === 'slacking' && e.hand.kind === 'none' ? 'phone' : heldKind(e.hand));
-      const pose: CharacterPose = e.work ? 'work' : c.moving > 0 ? (e.hand.kind !== 'none' ? 'carry' : 'walk') : 'stand';
+      // 手洗いは手元の作業の姿勢
+      const pose: CharacterPose = e.work || cm?.phase === 'wash' ? 'work' : c.moving > 0 ? (e.hand.kind !== 'none' ? 'carry' : 'walk') : 'stand';
       c.model.update(pose, t, dt);
     }
     for (const p of s.players) {
@@ -900,7 +906,9 @@ export class World {
       if (!c) continue;
       const head = c.model.group.position.clone();
       head.y += 1.95;
-      show(`say:${e.id}`, e.say.text, head, 'bubble angry staff event', 2);
+      // 出退勤のあいさつは普通の吹き出し、火事などのイベントはイベントの縁、口論・言い返しは怒りの色
+      const cls = e.say.kind === 'greet' ? 'bubble staff greet' : e.say.kind === 'event' ? 'bubble staff event' : 'bubble angry staff event';
+      show(`say:${e.id}`, e.say.text, head, cls, e.say.kind === 'greet' ? 1 : 2);
     }
     // 上部の表示（日付・時刻・資金・メニュー）の下から置く
     for (const p of layoutBubbles(items, w, hgt, 6, 46)) {

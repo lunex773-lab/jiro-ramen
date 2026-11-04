@@ -12,6 +12,7 @@ import { BALANCE } from '../data/balance';
 import { stageOf } from '../geometry';
 import type { Attendance, Employee, EmployeeSkills, Employment, GameState, ShiftDay, StaffLogEntry, StaffLogKind, StaffRecord } from '../types';
 import { clamp01, hashString } from '../util';
+import { startArrive, startLeave } from './commute';
 import { dropHand } from './interact';
 import { evRand } from './events';
 import { emit, notify, type SimCtx } from './notices';
@@ -280,24 +281,30 @@ export function initNewHire(e: Employee): void {
   e.shifts = Array.from({ length: 7 }, () => fullDayShift());
 }
 
-/** 勤務を離れる（作業中なら終わるまで待つ）。離れられたら true */
-function leaveFloor(s: GameState, e: Employee, ctx: SimCtx): boolean {
+/**
+ * 勤務を離れる（作業中なら終わるまで待つ）。離れられたら true。
+ * あいさつ（退勤・休憩）をしてから歩いて店の外へ出る（commute.ts）。もう店の外にいる人はそのまま
+ */
+function leaveFloor(s: GameState, e: Employee, ctx: SimCtx, kind: 'leave' | 'break' | 'away'): boolean {
   if (e.work) return false;
   e.ai.taskId = null;
   e.ai.steps = [];
   e.ai.path = [];
   if (e.hand.kind !== 'none') dropHand(s, e, ctx);
   e.hand = { kind: 'none' };
-  e.presentToday = false;
+  if (!e.presentToday) {
+    e.commute = null;
+    return true;
+  }
+  // すでに同じ向きで出ていく途中なら、そのまま
+  if (e.commute && (e.commute.kind === 'leave' || e.commute.kind === 'break' || e.commute.kind === 'away') && e.commute.kind === kind) return true;
+  startLeave(s, e, kind);
   return true;
 }
 
-function arriveFloor(s: GameState, e: Employee): void {
-  const st = stageOf(s);
-  e.pos = { x: st.staffSpawn.x, z: st.staffSpawn.z };
-  e.presentToday = true;
-  e.ai.state = 'idle';
-  e.ai.cooldown = 0;
+/** 店に入る（出勤・休憩から戻る・持ち場に戻る）。歩道から歩いて来て、あいさつと手洗いをしてから働き始める */
+function arriveFloor(s: GameState, e: Employee, kind: 'arrive' | 'return' | 'back', order = 0): void {
+  startArrive(s, e, kind, order);
 }
 
 /** その日の予定から時刻を決める（引いた結果 absent / lateMin はそのまま使う） */
@@ -356,10 +363,13 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
   const st = stageOf(s);
   const A = ST.attendance;
   const construction = s.closedForConstruction > 0;
+  // 仕込みから来る人は、歩道から順に歩いて来る（遠くから来る人ほど遅れて着く）
+  let order = 0;
   for (const e of s.employees) {
     e.pos = { x: st.staffSpawn.x + 0.2, z: st.staffSpawn.z + 0.2 };
     e.hand = { kind: 'none' };
     e.work = null;
+    e.commute = null;
     e.ai.taskId = null;
     e.ai.steps = [];
     e.ai.path = [];
@@ -387,8 +397,9 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
     if (construction) {
       // 工事の休業日: アルバイトは来ない。社員は今までどおり（給与あり）
       a.status = 'closed';
-      e.presentToday = !isPartTime(e);
-      e.ai.state = e.presentToday ? 'idle' : 'off';
+      e.presentToday = false;
+      e.ai.state = 'off';
+      if (!isPartTime(e)) arriveFloor(s, e, 'arrive', order++);
       continue;
     }
     if (!sh) {
@@ -419,14 +430,40 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
       a.arrived = true;
       a.prepWorked = true;
       a.status = 'working';
-      e.presentToday = true;
-      e.ai.state = 'idle';
+      e.presentToday = false;
+      arriveFloor(s, e, 'arrive', order++);
     } else {
       a.status = a.lateMin > 0 ? 'late' : 'scheduled';
       e.presentToday = false;
       e.ai.state = 'off';
     }
   }
+}
+
+/**
+ * 閉店してお客さんがいなくなったら、店に残っている全員が「お疲れ様でした！」と言って歩いて帰る。
+ * 全員が店の外へ出たら（詰まっても打ち切りの秒数を過ぎたら）true（このあと精算する）
+ */
+export function sendStaffHome(s: GameState, ctx: SimCtx): boolean {
+  s.closeWaitSince ??= s.t;
+  let staying = 0;
+  for (const e of s.employees) {
+    if (!e.presentToday) continue;
+    if (!(e.commute && e.commute.kind === 'leave')) {
+      if (e.conduct?.kind) e.conduct.kind = null;
+      leaveFloor(s, e, ctx, 'leave');
+    }
+    if (e.presentToday) staying += 1;
+  }
+  if (staying === 0 || s.t - s.closeWaitSince > BALANCE.commute.closeWaitMax) {
+    delete s.closeWaitSince;
+    for (const e of s.employees) {
+      e.commute = null;
+      e.presentToday = false;
+    }
+    return true;
+  }
+  return false;
 }
 
 /** このバージョンより前の状態（出勤の記録がない）で始まった日の従業員に、出勤の記録を補う（出勤していれば一日中いる扱い） */
@@ -491,7 +528,8 @@ export function attendHireDay(s: GameState, e: Employee): void {
     a.arrived = true;
     a.prepWorked = true;
     a.status = 'working';
-    e.presentToday = true;
+    e.presentToday = false;
+    arriveFloor(s, e, 'arrive');
   } else {
     a.status = 'scheduled';
     e.presentToday = false;
@@ -514,7 +552,7 @@ export function updateAttendance(s: GameState, dt: number, ctx: SimCtx): void {
         if (a.arriveAt >= 0 && t >= a.arriveAt && t < a.leaveAt) {
           a.arrived = true;
           a.status = 'working';
-          arriveFloor(s, e);
+          arriveFloor(s, e, 'arrive');
           if (a.lateMin > 0 && !a.lateNoted) {
             a.lateNoted = true;
             logStaff(s, e, 'late', `${a.lateMin}分遅刻して出勤した`);
@@ -532,27 +570,23 @@ export function updateAttendance(s: GameState, dt: number, ctx: SimCtx): void {
       if (a.status === 'left') continue;
       // 給与の対象の時間: 出勤〜退勤の予定のうち、休憩を除いた部分（時間の刻みに左右されないよう、区間の重なりで数える）
       a.workedSec += paidOverlap(a, t - dt, t);
-      // 退勤
+      // 退勤（「お疲れ様でした！」と言って歩いて帰る）
       if (t >= a.leaveAt) {
         if (e.conduct?.kind) e.conduct.kind = null;
-        if (leaveFloor(s, e, ctx)) {
+        if (leaveFloor(s, e, ctx, 'leave')) {
           a.status = 'left';
-          e.ai.state = 'off';
           emit(ctx, { type: 'staffLeave', actorId: e.id });
         }
-        if (!e.presentToday) continue;
+        continue;
       }
-      // 休憩
+      // 休憩（「休憩いただきます！」で外へ。終わったら「戻りました！」で戻って手を洗う）
       const inBreak = a.breakFrom >= 0 && t >= a.breakFrom && t < a.breakTo;
       if (inBreak && a.status !== 'break') {
         if (e.conduct?.kind) e.conduct.kind = null;
-        if (leaveFloor(s, e, ctx)) {
-          a.status = 'break';
-          e.ai.state = 'break';
-        }
+        if (leaveFloor(s, e, ctx, 'break')) a.status = 'break';
       } else if (!inBreak && a.status === 'break') {
         a.status = 'working';
-        arriveFloor(s, e);
+        arriveFloor(s, e, 'return');
       }
       if (a.status === 'break') continue;
       updateConduct(s, e, ctx);
@@ -560,13 +594,10 @@ export function updateAttendance(s: GameState, dt: number, ctx: SimCtx): void {
       // 閉店作業: 閉店まで働く人だけ残る。休憩中の人は戻る
       if (a.status === 'break') {
         a.status = 'working';
-        arriveFloor(s, e);
+        arriveFloor(s, e, 'return');
       }
       if (e.conduct?.kind) endConduct(s, e);
-      if (a.arrived && a.status !== 'left' && a.leaveAt < UNTIL_CLOSE && leaveFloor(s, e, ctx)) {
-        a.status = 'left';
-        e.ai.state = 'off';
-      }
+      if (a.arrived && a.status !== 'left' && a.leaveAt < UNTIL_CLOSE && leaveFloor(s, e, ctx, 'leave')) a.status = 'left';
     }
   }
 }
@@ -589,8 +620,9 @@ function endConduct(s: GameState, e: Employee): void {
   const wasPrivate = c.kind === 'private';
   c.kind = null;
   c.until = -1;
-  if (wasPrivate) arriveFloor(s, e);
   e.ai.state = 'idle';
+  // 勝手に持ち場を離れていた人は歩いて戻り、手を洗ってから働く
+  if (wasPrivate) arriveFloor(s, e, 'back');
 }
 
 /** サボり・私的な休憩（一定間隔で抽選。作業の途中・手に物を持っているときは始めない） */
@@ -605,6 +637,7 @@ function updateConduct(s: GameState, e: Employee, ctx: SimCtx): void {
     if (s.openT >= c.until) endConduct(s, e);
     return;
   }
+  if (e.commute) return;
   if (s.openT < c.nextCheck) return;
   c.nextCheck = s.openT + C.checkEvery;
   if (s.tutorial || c.today >= C.maxPerDay || s.openT - c.lastAt < C.gap) return;
@@ -620,7 +653,8 @@ function updateConduct(s: GameState, e: Employee, ctx: SimCtx): void {
   e.ai.path = [];
   e.ai.state = 'slacking';
   if (kind === 'private') {
-    e.presentToday = false;
+    // 何も言わずに歩いて店の外へ
+    startLeave(s, e, 'away');
     e.ai.note = '持ち場を離れている';
     logStaff(s, e, 'private', '勤務中に勝手に休憩に行った');
     notify(s, ctx, `conduct:${e.id}`, 'info', `${e.profile.name}さんが持ち場を離れました`);
@@ -736,11 +770,11 @@ function reapplyToday(s: GameState, e: Employee, ctx: SimCtx): void {
   planTimes(a, sh);
   if (!sh) {
     // 今日の予定を消した: 店にいれば上がる
-    if (a.arrived && e.presentToday) leaveFloor(s, e, ctx);
+    if (a.arrived && e.presentToday) leaveFloor(s, e, ctx, 'leave');
+    else if (!a.arrived && e.presentToday) leaveFloor(s, e, ctx, 'leave');
     if (!e.work) {
-      e.presentToday = false;
       a.status = a.arrived ? 'left' : 'off';
-      e.ai.state = 'off';
+      if (!e.presentToday) e.ai.state = 'off';
     }
     return;
   }
@@ -756,10 +790,10 @@ function reapplyToday(s: GameState, e: Employee, ctx: SimCtx): void {
       a.arrived = true;
       a.prepWorked = true;
       a.status = 'working';
-      arriveFloor(s, e);
+      arriveFloor(s, e, 'arrive');
     } else if (a.arriveAt >= 0 && a.arrived) {
       // 仕込みから来ていた人の出勤を遅らせた: いったん上がり、出勤の時刻に来る
-      leaveFloor(s, e, ctx);
+      leaveFloor(s, e, ctx, 'leave');
       a.arrived = false;
       a.prepWorked = false;
       a.status = a.lateMin > 0 ? 'late' : 'scheduled';
@@ -774,7 +808,7 @@ function reapplyToday(s: GameState, e: Employee, ctx: SimCtx): void {
   else if (a.status === 'left' && s.openT < a.leaveAt) {
     // 上がった人の退勤を延ばした: 戻る
     a.status = 'working';
-    arriveFloor(s, e);
+    arriveFloor(s, e, 'arrive');
   }
 }
 
