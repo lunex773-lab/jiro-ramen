@@ -20,10 +20,11 @@ import { lastCompanyDay, verifyCommit } from './verify';
 import { applyAction, type Action, type ActionResult } from './sim/actions';
 import { activeStore, companyPolicyOf, recordCompanyDay, storeReport, withStore } from './sim/company';
 import { withPlannedAds } from './sim/ads';
-import { expectedDailyArrivals } from './sim/customers';
+import { expectedDailyArrivals, priceRatio } from './sim/customers';
 import { bankruptcyCheck, checkGoals, declareBankruptcy, loanAvailable, payArrears, startNextDay, takeLoan } from './sim/day';
 import { cash, finalProfit, totalDebt } from './sim/economy';
 import { refreshCandidates } from './sim/employees';
+import { employeeSatisfaction, enterpriseValue, storeQuality } from './sim/metrics';
 import { receiveDeliveries } from './sim/inventory';
 import { expansionInfo } from './sim/layout';
 import { planManagerDay, runManagerDay, standaloneArrivals } from './sim/manager';
@@ -85,6 +86,11 @@ export interface CompanyDayRecord {
   money: number;
   debt: number;
   stores: number;
+  /** 従業員満足度（0〜1。従業員がいなければ null）・店舗品質（0〜1）・その日の始めと終わりの企業価値（純資産。sim/metrics.ts） */
+  employeeSat?: number | null;
+  quality?: number;
+  valueStart?: number;
+  value?: number;
 }
 
 export interface MarketCompany {
@@ -485,6 +491,8 @@ export interface CommitResult {
   stateVersion?: number;
   bankrupt?: boolean;
   duplicate?: boolean;
+  /** 監査記録に残す気になる点（受け取りには影響しない。仕様書 7「不自然な価格操作の検知」など） */
+  watch?: string[];
 }
 
 /** 0時を過ぎて、まだ同期していない期間がある（同期が済むまで新しい日は始められない） */
@@ -546,7 +554,7 @@ function sanitize(next: GameState, demand: Record<string, number>): GameState {
   return next;
 }
 
-function dayRecord(s: GameState, day: number, periodId: DateKey, source: 'manual' | 'auto', flags: string[] | null): CompanyDayRecord {
+function dayRecord(s: GameState, day: number, periodId: DateKey, source: 'manual' | 'auto', flags: string[] | null, valueStart: number): CompanyDayRecord {
   const cr = s.company.history.find((x) => x.day === day);
   let customers = 0;
   let satisfactionSum = 0;
@@ -573,6 +581,10 @@ function dayRecord(s: GameState, day: number, periodId: DateKey, source: 'manual
     money: s.money,
     debt: totalDebt(s),
     stores: s.company.stores.length,
+    employeeSat: employeeSatisfaction(s),
+    quality: storeQuality(s),
+    valueStart,
+    value: enterpriseValue(s),
   };
 }
 
@@ -605,6 +617,7 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
     c.progress.synchronizationStatus = 'idle';
     return done({ ok: false, code: 'rejected', reason: '前の日の状態から説明できない変化があるため、この日は受け取れません。前の日の状態からやり直してください', reject: v.reject });
   }
+  const valueStart = enterpriseValue(c.state);
   c.state = sanitize(next, o.demand);
   c.openDay = null;
   c.progress.stateVersion += 1;
@@ -618,12 +631,13 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
   c.progress.lastProcessedGameDate = o.gameDate;
   c.progress.manualProgressDays += 1;
   c.progress.totalManualDays += 1;
-  c.days.push(dayRecord(c.state, o.gameDate, o.periodId, 'manual', v.flags));
+  c.days.push(dayRecord(c.state, o.gameDate, o.periodId, 'manual', v.flags, valueStart));
   if (!m.pendingPeriods.includes(o.periodId)) {
     m.pendingPeriods.push(o.periodId);
     m.pendingPeriods.sort();
   }
-  return done({ ok: true, gameDate: o.gameDate, stateVersion: c.progress.stateVersion, flags: v.flags.length > 0 ? v.flags : undefined });
+  const watch = watchPoints(c.state);
+  return done({ ok: true, gameDate: o.gameDate, stateVersion: c.progress.stateVersion, flags: v.flags.length > 0 ? v.flags : undefined, watch: watch.length > 0 ? watch : undefined });
 }
 
 // ───────────────────────── 自動営業（1日単位の計算） ─────────────────────────
@@ -716,6 +730,7 @@ function autoPlayDate(m: MarketState, day: number, group: MarketCompany[], perio
     const pol = companyPolicyOf(c.state);
     // 閉店後の判断: AI 企業の判断、プレイヤー企業は方針で許可していれば本店の拡張（AI 企業と同じ条件）
     const evening = c.kind === 'ai' ? () => aiDecide(m, c, day) : pol.allowExpansion ? () => autoExpand(m, c, '自動経営の方針で') : undefined;
+    const valueStart = enterpriseValue(c.state);
     const r = autoPlayDay(c.state, day, demands.get(c.id)!, { allowLoan: c.kind === 'ai' || pol.allowLoan, evening });
     c.progress.stateVersion += 1;
     c.progress.processingVersion = B().autoSimVersion;
@@ -729,7 +744,7 @@ function autoPlayDate(m: MarketState, day: number, group: MarketCompany[], perio
     c.progress.lastProcessedGameDate = day;
     c.progress.autoSimulationDays += 1;
     c.progress.totalAutoDays += 1;
-    c.days.push(dayRecord(c.state, day, periodId, 'auto', null));
+    c.days.push(dayRecord(c.state, day, periodId, 'auto', null, valueStart));
   }
 }
 
@@ -826,6 +841,17 @@ export function finishSync(m: MarketState, now: number): void {
   if (m.syncLog.length > 60) m.syncLog.splice(0, m.syncLog.length - 60);
 }
 
+/**
+ * 気になる点（受け取りやランキングには影響しない。監査記録に残して、誤検知と正当な経営を人が見分けられるようにする。仕様書 7）。
+ * 値段が定価から大きく離れている（平均で定価の0.6倍未満・2倍超）
+ */
+export function watchPoints(s: GameState): string[] {
+  const out: string[] = [];
+  const r = priceRatio(s);
+  if (r < 0.6 || r > 2) out.push(`値段が定価から大きく離れている（平均で定価の${Math.round(r * 100)}%）`);
+  return out;
+}
+
 /** 期間ごとの企業の集計（ランキングのもと。上限を超えた日は数えない） */
 export interface CompanyPeriodSummary {
   companyId: Id;
@@ -849,6 +875,13 @@ export interface CompanyPeriodSummary {
   moneyEnd: number;
   debtEnd: number;
   stores: number;
+  /** 従業員満足度の合計と日数・店舗品質の合計と日数（上限を超えた日は数えない）・期間の始めと終わりの企業価値 */
+  empSatSum: number;
+  empSatDays: number;
+  qualitySum: number;
+  qualityDays: number;
+  valueStart: number;
+  valueEnd: number;
 }
 
 export function periodSummary(m: MarketState, periodId: DateKey): CompanyPeriodSummary[] {
@@ -881,6 +914,12 @@ export function periodSummary(m: MarketState, periodId: DateKey): CompanyPeriodS
       moneyEnd: last.money,
       debtEnd: last.debt,
       stores: last.stores,
+      empSatSum: ok.reduce((a, r) => a + (typeof r.employeeSat === 'number' ? r.employeeSat : 0), 0),
+      empSatDays: ok.filter((r) => typeof r.employeeSat === 'number').length,
+      qualitySum: ok.reduce((a, r) => a + (r.quality ?? 0), 0),
+      qualityDays: ok.filter((r) => typeof r.quality === 'number').length,
+      valueStart: rs[0]!.valueStart ?? rs[0]!.money - rs[0]!.debt,
+      valueEnd: last.value ?? last.money - last.debt,
     };
     market += line.netSales;
     out.push(line);

@@ -13,6 +13,7 @@ import {
   marketView,
   nextJstMidnight,
   nextSyncAt,
+  periodSummary,
   playerCompany,
   runSync,
   startDay,
@@ -22,7 +23,37 @@ import {
   type MarketState,
 } from '@jiro/core';
 
+import { computeRanking, type RankAggRow, type RankBoard, type RankMetric } from '../../server/src/ranking';
+
 const SERVER = 'https://mock.jiro.test';
+
+/** 同期が済んだ期間の集計から、ランキングのもとの行を作る（サーバーの rank_agg と同じ形。期間はまとめて1つ） */
+function rankRows(m: MarketState): RankAggRow[] {
+  const by = new Map<string, RankAggRow>();
+  for (const run of m.syncLog) {
+    for (const r of periodSummary(m, run.periodId)) {
+      const cur = by.get(r.companyId) ?? {
+        scope_key: 'W', market_id: m.id, company_id: r.companyId, entry: m.settings.entry, kind: r.kind, player_id: r.ownerId, name: r.name, days: 0, manual_days: 0, flagged_days: 0,
+        net_sales: 0, operating_profit: 0, final_profit: 0, sat_sum: 0, sat_count: 0, market_net_sales: 0, emp_sat_sum: 0, emp_sat_days: 0, quality_sum: 0, quality_days: 0, value_start: r.valueStart, value_end: r.valueEnd,
+      };
+      cur.days += r.days;
+      cur.manual_days += r.manualDays;
+      cur.net_sales += r.netSales;
+      cur.operating_profit += r.operatingProfit;
+      cur.final_profit += r.finalProfit;
+      cur.sat_sum += r.satisfactionSum;
+      cur.sat_count += r.satisfactionCount;
+      cur.market_net_sales += r.marketNetSales;
+      cur.emp_sat_sum += r.empSatSum;
+      cur.emp_sat_days += r.empSatDays;
+      cur.quality_sum += r.qualitySum;
+      cur.quality_days += r.qualityDays;
+      cur.value_end = r.valueEnd;
+      by.set(r.companyId, cur);
+    }
+  }
+  return [...by.values()];
+}
 const SHOTS = process.env.SHOTS_DIR;
 const shot = async (page: Page, name: string) => {
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` });
@@ -87,6 +118,13 @@ function mockMarket(page: Page) {
           commits.push(r);
           return send({ ...r, companyId: playerCompany(market!, 'u1')?.id ?? null });
         }
+        if (p === '/api/v1/rankings') {
+          const board = (url.searchParams.get('board') ?? 'community') as RankBoard;
+          const metric = (url.searchParams.get('metric') ?? 'overall') as RankMetric;
+          const lines = computeRanking(market ? rankRows(market) : [], board, metric).map((l) => ({ ...l, prevRank: null, mine: l.playerId === 'u1' }));
+          return send({ board, scope: url.searchParams.get('scope'), scopeKey: 'W2026-11-02', prevKey: 'W2026-10-26', metric, metricLabel: metric, perDay: board !== 'community', total: lines.length, rows: lines, mine: lines.filter((l) => l.mine) });
+        }
+        if (p === '/api/v1/rewards') return send({ rewards: [{ key: 'r1', title: '🥇 2026-11-02の週・コミュニティ 総合1位', createdAt: start }] });
         if (p === '/api/v1/market/mk1') {
           const v = marketView(market!, 'u1');
           const t = now();
@@ -205,6 +243,22 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   // 0時に営業中だった2日目は30分を過ぎて無効 → サーバーの1日目の終わりの状態から2日目をやり直す
   await expect(screen.locator('[data-market-play]')).toContainText('2日目');
   await expect(screen.locator('.market-log')).toContainText('日目');
+
+  // ランキング（コミュニティ・全体、期間、種別、自社の順位、称号）
+  await screen.locator('[data-open-ranking]').click();
+  const rk = page.locator('.screen.ranking');
+  await expect(rk.locator('[data-rank-row]')).toHaveCount(4);
+  await expect(rk.locator('.trow.mine')).toContainText('テスト亭（あなた）');
+  await expect(rk.locator('[data-my-rank]')).toContainText('位');
+  await rk.locator('[data-metric]').selectOption('sales');
+  await expect(rk.locator('.ranking-mine')).toContainText('sales');
+  await rk.locator('[data-board="grown"]').click();
+  await expect(rk.locator('.ranking-mine')).toContainText('1日あたり');
+  await rk.locator('[data-scope="month"]').click();
+  await expect(rk.locator('[data-reward="r1"]')).toContainText('総合1位');
+  await shot(page, '62-ranking');
+  await rk.locator('[data-ranking-back]').click();
+  await expect(screen.locator('[data-market-day]')).toHaveText('1日目まで');
 });
 
 test('共通市場: 0時を過ぎて計算が済んでいない間は、新しい日を始められない', async ({ page }) => {

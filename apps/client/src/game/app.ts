@@ -36,6 +36,7 @@ import { findFocus, interactableBoxes } from './targeting';
 import { openLobby } from '../ui/lobby';
 import { MarketScreen, openMarketLobby } from '../ui/market';
 import { MarketHost, MarketSession, prepareState } from './market-play';
+import { RankingScreen } from '../ui/ranking';
 import type { Api, Auth } from '../net/api';
 import { installRotatedScroll } from '../ui/rotated-scroll';
 import { cloudDownload, cloudUpload } from '../net/cloud';
@@ -284,7 +285,15 @@ export class App {
   /** オンライン市場の画面（サーバーの市場を読み直しながら経営する） */
   showMarket(api: Api, auth: Auth, marketId: string): void {
     this.leaveGame();
-    const screen = new MarketScreen(this.uiLayer, api, auth, marketId, () => this.showMarketLobby(), () => void this.startMarketPlay(api, auth, marketId));
+    const screen = new MarketScreen(
+      this.uiLayer,
+      api,
+      auth,
+      marketId,
+      () => this.showMarketLobby(),
+      () => void this.startMarketPlay(api, auth, marketId),
+      () => this.showRanking(api, auth, marketId),
+    );
     this.show(screen.el);
   }
 
@@ -316,6 +325,13 @@ export class App {
     this.startGame(new MarketHost(r.state, me?.id ?? 'p1', session));
     this.marketPlay = { session, api, auth, marketId };
     toast(this.uiLayer, `${r.ticket.gameDate}日目の営業（日の終わりにサーバーへ送ります）`, 'info', 3000);
+  }
+
+  /** ランキングの画面（コミュニティ・全体。閉じると市場の画面へ） */
+  showRanking(api: Api, auth: Auth, marketId: string): void {
+    this.leaveGame();
+    const r = new RankingScreen(api, auth, marketId, 'この市場', () => this.showMarket(api, auth, marketId));
+    this.show(r.el);
   }
 
   /** 市場の画面へ戻る（端末の営業をやめる） */

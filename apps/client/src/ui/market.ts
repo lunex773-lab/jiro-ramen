@@ -230,6 +230,7 @@ export class MarketScreen {
     private marketId: string,
     private onBack: () => void,
     private onPlay: () => void,
+    private onRanking: () => void = () => undefined,
   ) {
     this.head = h('div', { class: 'market-head' });
     this.body = h('div', { class: 'market-body' });
@@ -311,6 +312,18 @@ export class MarketScreen {
       h('div', { class: 'kv' }, h('span', null, 'いちばん進んだ会社'), h('b', { 'data-leader-day': String(v.leaderDay) }, `${v.leaderDay}日目まで`)),
       h('div', { class: 'kv' }, h('span', null, '同期'), h('b', { 'data-sync': v.clock.syncPending ? 'pending' : 'idle' }, syncText)),
       h('div', { class: 'market-code' }, h('span', { class: 'note' }, '招待コード'), codeBlock(this.root, v.code)),
+      h(
+        'button',
+        {
+          class: 'btn',
+          'data-open-ranking': '',
+          onclick: () => {
+            this.stop();
+            this.onRanking();
+          },
+        },
+        '🏆 ランキング',
+      ),
       mine
         ? h(
             'button',

@@ -25,22 +25,14 @@ export function scopesEndingOn(period: DateKey): string[] {
     .map((x) => x.key);
 }
 
-/** 期間の集計の追加の数値（従業員満足度・店舗品質・企業価値）。core の集計に値がなければ0 */
-function extOf(r: CompanyPeriodSummary): { empSatSum: number; empSatDays: number; qualitySum: number; qualityDays: number; valueStart: number; valueEnd: number } {
-  const x = r as CompanyPeriodSummary & Partial<Record<'empSatSum' | 'empSatDays' | 'qualitySum' | 'qualityDays' | 'valueStart' | 'valueEnd', number>>;
-  const n = (v: number | undefined) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-  return { empSatSum: n(x.empSatSum), empSatDays: n(x.empSatDays), qualitySum: n(x.qualitySum), qualityDays: n(x.qualityDays), valueStart: n(x.valueStart), valueEnd: n(x.valueEnd) };
-}
-
 /** 期間の集計を書く文（company_period_ext と、その企業の rank_agg の作り直し）。company_periods の行のあとに実行する */
 export function rankStatements(db: D1Database, marketId: string, entry: string, rows: CompanyPeriodSummary[], period: DateKey, now: number): D1PreparedStatement[] {
   const out: D1PreparedStatement[] = [];
   for (const r of rows) {
-    const x = extOf(r);
     out.push(
       db
         .prepare('INSERT OR REPLACE INTO company_period_ext (market_id, company_id, period, emp_sat_sum, emp_sat_days, quality_sum, quality_days, value_start, value_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(marketId, r.companyId, period, x.empSatSum, x.empSatDays, x.qualitySum, x.qualityDays, Math.round(x.valueStart), Math.round(x.valueEnd)),
+        .bind(marketId, r.companyId, period, r.empSatSum, r.empSatDays, r.qualitySum, r.qualityDays, Math.round(r.valueStart), Math.round(r.valueEnd)),
     );
     for (const s of scopesFor(period)) {
       out.push(

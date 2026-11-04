@@ -272,5 +272,8 @@ export async function commitDayApi(req: Request, env: Env, ctx: ExecutionContext
   } else if (b.ok === true && Array.isArray(b.flags) && b.flags.length > 0 && b.duplicate !== true) {
     ctx.waitUntil(audit(env.DB, { kind: 'market_day_flagged', playerId: player.id, detail: { ...detail, reasons: b.flags.slice(0, 8) } }));
   }
+  if (b.ok === true && Array.isArray(b.watch) && b.watch.length > 0 && b.duplicate !== true) {
+    ctx.waitUntil(audit(env.DB, { kind: 'market_day_watch', playerId: player.id, detail: { ...detail, reasons: b.watch.slice(0, 8) } }));
+  }
   return json(b);
 }

@@ -30,7 +30,9 @@ export type AuditKind =
   /** 受け取ったが上限を超えた・食い違いがあった（順位から外す）。detail に理由 */
   | 'market_day_flagged'
   /** 0時から30分を過ぎて届いた日（無効） */
-  | 'market_day_expired';
+  | 'market_day_expired'
+  /** 受け取ったが気になる点（不自然な値段など。人が見分けるための記録） */
+  | 'market_day_watch';
 
 export interface AuditEntry {
   kind: AuditKind;

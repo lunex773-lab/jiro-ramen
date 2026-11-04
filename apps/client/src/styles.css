@@ -996,3 +996,14 @@ input, select { font: inherit; }
 .emp-wellbeing { margin: 2px 0; }
 .cal-day .cal-unwish { display: block; font-style: normal; font-size: 10px; color: var(--warn, #e0a030); }
 .rest-days { flex-wrap: wrap; gap: 4px; }
+
+/* ランキング（Phase 4） */
+.screen.ranking .screen-inner.wide { max-width: 900px; }
+.ranking-tabs { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.ranking-tabs .tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.ranking-tabs .tab { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; }
+.ranking-tabs .tab.on { background: var(--yellow); color: #222; }
+.ranking-table .move.up { color: var(--good); }
+.ranking-table .move.down { color: var(--bad, #e05050); }
+.ranking-table .trow.mine { outline: 2px solid var(--yellow); }
+

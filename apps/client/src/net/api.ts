@@ -154,6 +154,19 @@ export class Api {
     return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/day/commit`, { method: 'POST', token, body });
   }
 
+  /** ランキング（board: community / fresh / grown、scope: week / month / year / total、metric: overall など） */
+  rankings<T>(token: string, q: { board: string; scope: string; metric: string; marketId?: string; date?: string }): Promise<T> {
+    const p = new URLSearchParams({ board: q.board, scope: q.scope, metric: q.metric });
+    if (q.marketId) p.set('marketId', q.marketId);
+    if (q.date) p.set('date', q.date);
+    return this.req(`/api/v1/rankings?${p.toString()}`, { token });
+  }
+
+  /** 自分の称号（報酬） */
+  rewards<T>(token: string): Promise<T> {
+    return this.req('/api/v1/rewards', { token });
+  }
+
   wsUrl(roomId: string, joinToken: string): string {
     const u = new URL(`${this.base}/api/v1/room/${encodeURIComponent(roomId)}/ws`);
     u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';

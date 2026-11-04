@@ -44,6 +44,7 @@ export * from './sim/company';
 export * from './sim/stores';
 export * from './sim/manager';
 export * from './sim/ads';
+export * from './sim/metrics';
 export * from './data/market';
 export * from './market';
 export * from './save';
