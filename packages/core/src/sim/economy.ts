@@ -16,6 +16,7 @@ export function emptyDayStats(): DayStats {
     satisfactionSum: 0, satisfactionCount: 0, mistakes: 0, stockouts: 0, complaints: 0, breakdowns: 0, remakes: 0,
     wasteItems: {},
     stockoutItems: {},
+    usedItems: {},
   };
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { addLot, applyAction, consume, expireLots, fridgeCapacity, fridgeUsage, nextDay, pendingOf, placeOrder, receiveDeliveries, runAutoOrder, stockOf } from '../src';
-import { addSoloBot, eqByType, newGame, run, runDay, standAt } from './helpers';
+import { addLot, applyAction, autoOrderTarget, BALANCE, consume, expireLots, fridgeCapacity, fridgeUsage, nextDay, pendingOf, placeOrder, receiveDeliveries, runAutoOrder, stockOf } from '../src';
+import { addBot, addSoloBot, eqByType, newGame, run, runDay, standAt } from './helpers';
 
 describe('在庫', () => {
   it('在庫以上は消費できず、失敗しても在庫は変わらない', () => {
@@ -116,5 +116,42 @@ describe('自動発注と冷蔵庫の容量（統合進化設計書 v2.1 の測�
     const waste = (h: typeof base) => h.reduce((a, r) => a + r.waste, 0);
     expect(served(over)).toBeGreaterThan(20);
     expect(waste(over)).toBeGreaterThan(waste(base));
+  });
+});
+
+describe('自動発注「売れ行きに合わせる」', () => {
+  it('最近の使用量に余裕をみた量まで発注し、品切れした食材は多めにする。手動の目安の半分は必ず持つ。手動では目安のまま', () => {
+    const { s, ctx } = newGame(43);
+    expect(autoOrderTarget(s, 'pork_raw')).toBe(s.autoOrder.pork_raw);
+    expect(applyAction(s, 'p1', { type: 'setAutoOrderMode', mode: 'sales' }, ctx).ok).toBe(true);
+    // 使用量が多い日（豚ウデ肉を1日12本）
+    s.today.usedItems = { pork_raw: 12 };
+    const t = autoOrderTarget(s, 'pork_raw');
+    expect(t).toBe(Math.round(12 * BALANCE.autoOrderSales.safety));
+    s.today.stockoutItems = { buta: 6 };
+    expect(autoOrderTarget(s, 'pork_raw')).toBe(Math.round(12 * BALANCE.autoOrderSales.safety * BALANCE.autoOrderSales.stockoutBoost));
+    // 使わなかった食材も、手動の目安の半分は持つ
+    s.today.usedItems = {};
+    s.today.stockoutItems = {};
+    expect(autoOrderTarget(s, 'ichimi')).toBe(Math.round(s.autoOrder.ichimi! * BALANCE.autoOrderSales.floorOfManual));
+    expect(applyAction(s, 'p1', { type: 'setAutoOrderMode', mode: 'manual' }, ctx).ok).toBe(true);
+    expect(autoOrderTarget(s, 'pork_raw')).toBe(s.autoOrder.pork_raw);
+    expect(applyAction(s, 'p1', { type: 'setAutoOrderMode', mode: 'x' as 'manual' }, ctx).ok).toBe(false);
+  });
+
+  it('調理担当を雇って杯数が増えても、売れ行きに合わせると豚の品切れが目安の量のままより少ない', { timeout: 120_000 }, () => {
+    const play = (mode: 'manual' | 'sales') => {
+      const { s, ctx } = newGame(44);
+      addSoloBot(s);
+      addBot(s, 'cook', 0.6);
+      applyAction(s, 'p1', { type: 'setAutoOrderMode', mode }, ctx);
+      for (let d = 0; d < 12; d++) {
+        applyAction(s, 'p1', { type: 'openShop' }, ctx);
+        runDay(s, ctx);
+        nextDay(s, ctx);
+      }
+      return s.history.slice(4).reduce((a, r) => a + (r.stockoutItems?.buta ?? 0) + (r.stockoutItems?.['menu:buta'] ?? 0), 0);
+    };
+    expect(play('sales')).toBeLessThan(play('manual'));
   });
 });

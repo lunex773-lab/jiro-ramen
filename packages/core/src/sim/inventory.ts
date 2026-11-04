@@ -123,8 +123,45 @@ export function consume(s: GameState, itemId: string, qty: number): Consumed {
     minFresh = Math.min(minFresh, lotFreshness(s, l));
   }
   s.inventory = s.inventory.filter((l) => l.qty > 1e-6);
+  // 仕入れる食材の使用量を数える（売れ行きに合わせる自動発注のため）
+  if (INGREDIENTS[itemId]?.purchasable) {
+    const u = (s.today.usedItems ??= {});
+    u[itemId] = (u[itemId] ?? 0) + qty;
+  }
   return { ok: true, cost, quality: qualSum / qty, freshness: minFresh };
 }
+
+/**
+ * 自動発注の目安の量。「売れ行きに合わせる」なら、今日と最近の日報の使用量の平均 × 余裕（品切れした食材はさらに多め）。
+ * 手動なら設定した目安のまま
+ */
+export function autoOrderTarget(s: GameState, itemId: string): number {
+  const manual = s.autoOrder[itemId] ?? 0;
+  if (s.autoOrderMode !== 'sales' || manual <= 0) return manual;
+  const A = BALANCE.autoOrderSales;
+  const days: number[] = [s.today.usedItems?.[itemId] ?? 0];
+  for (let i = s.history.length - 1; i >= 0 && days.length < A.days; i--) {
+    const r = s.history[i]!;
+    if (r.day === s.day) continue;
+    if (r.usedItems) days.push(r.usedItems[itemId] ?? 0);
+  }
+  const avg = days.reduce((a, b) => a + b, 0) / days.length;
+  let short = false;
+  for (const [k, n] of Object.entries(s.today.stockoutItems ?? {})) if (n >= 2 && STOCKOUT_SOURCE[k]?.raw.includes(itemId)) short = true;
+  const want = avg * A.safety * (short ? A.stockoutBoost : 1);
+  return Math.round(Math.max(manual * A.floorOfManual, want));
+}
+
+/** 品切れのもとの食材（仕込みで作る物 → 仕入れる食材）。閉店後の原因の説明と「売れ行きに合わせる」自動発注で使う */
+export const STOCKOUT_SOURCE: Record<string, { raw: string[]; label: string }> = {
+  buta: { raw: ['pork_raw'], label: '豚' },
+  'menu:buta': { raw: ['pork_raw'], label: '豚（売り切れ）' },
+  yasai: { raw: ['moyashi', 'cabbage'], label: 'ヤサイ' },
+  abura: { raw: ['backfat_raw'], label: 'アブラ' },
+  garlic: { raw: ['garlic_raw'], label: 'ニンニク' },
+  ichimi: { raw: ['ichimi'], label: '一味' },
+  'menu:noodle': { raw: ['noodle'], label: '麺（売り切れ）' },
+};
 
 /** 廃棄（P/L の廃棄損に計上） */
 export function discardWaste(s: GameState, ctx: SimCtx, itemId: string, qty: number, cost: number, reason: string): void {
@@ -237,7 +274,8 @@ export function receiveDeliveries(s: GameState, ctx: SimCtx, morning: boolean): 
 export function runAutoOrder(s: GameState, ctx: SimCtx): void {
   type Need = { itemId: string; packs: number; full: number; kgPerPack: number; coverage: number; fridge: boolean };
   const needs: Need[] = [];
-  for (const [itemId, target] of Object.entries(s.autoOrder)) {
+  for (const itemId of Object.keys(s.autoOrder)) {
+    const target = autoOrderTarget(s, itemId);
     const def = INGREDIENTS[itemId];
     if (!def || !def.purchasable || target <= 0) continue;
     if (def.unlock && !s.career.unlocked.includes(def.unlock)) continue;

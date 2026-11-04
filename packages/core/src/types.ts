@@ -699,6 +699,8 @@ export interface DayStats {
   wasteItems: Record<string, number>;
   /** 品切れの内訳（食材・メニューごとの回数。原因の説明に使う）。古い日報にはない */
   stockoutItems?: Record<string, number>;
+  /** 仕入れる食材の使用量（その日に使った分。「売れ行きに合わせる」自動発注に使う）。古い日報にはない */
+  usedItems?: Record<string, number>;
   /** 店内外のトラブル（食べ方・居座り・喫煙・店員の口論など）と、そのうち対応したもの（第2版 10。古いセーブにはない） */
   troubles?: number;
   troublesHandled?: number;
@@ -1039,6 +1041,11 @@ export interface GameState {
   deliveries: Delivery[];
   /** 当日の自動発注設定（itemId → 目標在庫） */
   autoOrder: Record<string, number>;
+  /**
+   * 自動発注のしかた。manual: 目安の量まで（今まで）。sales: 最近の使用量に合わせて自動で量を決める（統合進化設計書 v2.1。店長の発注方針にも使う）。
+   * 古い状態にはない → manual
+   */
+  autoOrderMode?: 'manual' | 'sales';
 
   equipment: Equipment[];
   seats: Seat[];

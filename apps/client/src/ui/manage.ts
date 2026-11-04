@@ -43,6 +43,7 @@ import {
   shiftPaidHours,
   shiftProblem,
   shiftsOf,
+  autoOrderTarget,
   shiftFor,
   hasDateShift,
   shiftTimeText,
@@ -373,6 +374,16 @@ export class ManageMenu {
         h('p', { class: 'note' }, '翌朝便は通常価格で翌日の開店前に届きます。当日便は3割高で約60秒後に届きます。自動発注は閉店後に目標在庫まで翌朝便で発注します。'),
         h(
           'div',
+          { class: 'row wrap auto-mode' },
+          h('span', null, '自動発注のしかた:'),
+          h('button', { class: `mini ${s.autoOrderMode !== 'sales' ? 'on' : 'ghost'}`, 'data-mode': 'manual', onclick: () => this.act({ type: 'setAutoOrderMode', mode: 'manual' }, '自動発注を「目安の量まで」にしました') }, '目安の量まで'),
+          h('button', { class: `mini ${s.autoOrderMode === 'sales' ? 'on' : 'ghost'}`, 'data-mode': 'sales', onclick: () => this.act({ type: 'setAutoOrderMode', mode: 'sales' }, '自動発注を「売れ行きに合わせる」にしました') }, '売れ行きに合わせる'),
+        ),
+        s.autoOrderMode === 'sales'
+          ? h('p', { class: 'note' }, '最近3日の使用量に余裕をみた量まで自動で発注します（品切れした食材は多めに。冷蔵庫に入りきらないときは比例して減らします）。目安の量の半分は必ず持ちます。')
+          : null,
+        h(
+          'div',
           { class: 'table' },
           purch.map((d) => {
             const unit = purchaseUnitCost(d.id, false);
@@ -396,6 +407,7 @@ export class ManageMenu {
                 h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setAutoOrder', itemId: d.id, qty: Math.max(0, target - d.packQty) }) }, '−'),
                 h('b', null, target > 0 ? `${target.toLocaleString('ja-JP')}${d.unit}` : 'なし'),
                 h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setAutoOrder', itemId: d.id, qty: target + d.packQty }) }, '＋'),
+                s.autoOrderMode === 'sales' && target > 0 ? h('small', { class: 'auto-now' }, `今夜の目安 ${autoOrderTarget(s, d.id).toLocaleString('ja-JP')}${d.unit}`) : null,
               ),
             );
           }),

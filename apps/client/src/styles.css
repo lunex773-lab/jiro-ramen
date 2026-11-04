@@ -967,3 +967,6 @@ input, select { font: inherit; }
 /* 設定: プレイヤー名の欄が広すぎて見出しが折り返していた（第2版 21-2） */
 .screen.settings .kv > span { white-space: nowrap; }
 .screen.settings .kv input.input { width: min(260px, 55%); }
+.auto-mode { gap: 6px; align-items: center; margin: 4px 0; font-size: 12px; }
+.auto-mode .mini.on { background: var(--yellow); color: #1a1408; }
+.auto-now { color: var(--muted); font-size: 11px; margin-left: 4px; }

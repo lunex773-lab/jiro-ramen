@@ -14,7 +14,7 @@ import { finishRepair, resaleValue, runMaintenance, upkeepTotal, useEquipment } 
 import { dropHand } from './interact';
 import { morningRollCall, refreshCandidates, wagesDue } from './employees';
 import { closeStaffDay, expectedWages } from './staff';
-import { expireLots, receiveDeliveries, runAutoOrder } from './inventory';
+import { expireLots, receiveDeliveries, runAutoOrder, STOCKOUT_SOURCE } from './inventory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { drawAccident, takePrepSnapshot } from './accident';
 import { onDayEndEvents, onDayStartEvents, onOpenShopEvents } from './visitors';
@@ -181,6 +181,7 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
     ...s.today,
     wasteItems: { ...s.today.wasteItems },
     stockoutItems: { ...(s.today.stockoutItems ?? {}) },
+    usedItems: { ...(s.today.usedItems ?? {}) },
     day: s.day,
     operatingProfit: op,
     netSales: netSales(s.today),
@@ -213,17 +214,6 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
   emit(ctx, { type: 'dayEnd', value: op });
   return report;
 }
-
-/** 品切れのもとの食材（仕込みで作る物 → 仕入れる食材） */
-export const STOCKOUT_SOURCE: Record<string, { raw: string[]; label: string }> = {
-  buta: { raw: ['pork_raw'], label: '豚' },
-  'menu:buta': { raw: ['pork_raw'], label: '豚（売り切れ）' },
-  yasai: { raw: ['moyashi', 'cabbage'], label: 'ヤサイ' },
-  abura: { raw: ['backfat_raw'], label: 'アブラ' },
-  garlic: { raw: ['garlic_raw'], label: 'ニンニク' },
-  ichimi: { raw: ['ichimi'], label: '一味' },
-  'menu:noodle': { raw: ['noodle'], label: '麺（売り切れ）' },
-};
 
 /**
  * 閉店後に、品切れが多かった食材と、どの自動発注を増やせばよいかを知らせる（設計書 v2.1 §11「数値だけでなく原因を説明」）。

@@ -100,6 +100,8 @@ describe('メッセージ検証', () => {
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: ['3'], shift: sh, mode: 'once' })).toBeNull();
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: sh, mode: 'always' })).toBeNull();
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: { ...sh, end: 999 }, mode: 'once' })).toBeNull();
+    expect(parseAction({ type: 'setAutoOrderMode', mode: 'sales' })).toEqual({ type: 'setAutoOrderMode', mode: 'sales' });
+    expect(parseAction({ type: 'setAutoOrderMode', mode: 'auto' })).toBeNull();
     expect(parseAction({ type: 'promote', employeeId: 'e1' })).toEqual({ type: 'promote', employeeId: 'e1' });
     expect(parseAction({ type: 'answerRequest', requestId: 'rq1', accept: false })).toEqual({ type: 'answerRequest', requestId: 'rq1', accept: false });
     expect(parseAction({ type: 'answerRequest', requestId: 'rq1', accept: 'yes' })).toBeNull();

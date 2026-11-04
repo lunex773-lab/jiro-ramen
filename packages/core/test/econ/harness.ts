@@ -7,7 +7,6 @@ import {
   BALANCE,
   EQUIPMENT,
   expansionInfo,
-  STOCKOUT_SOURCE,
   MENU,
   refreshCandidates,
   STAGES,
@@ -120,7 +119,6 @@ function rowOf(s: GameState, r: DayReport): DayRow {
 export function runCase(policy: CasePolicy, days: number, seed = 777): { rows: DayRow[]; s: GameState } {
   const { s, ctx } = newGame(seed);
   addSoloBot(s, 0.65);
-  for (const k of Object.keys(BASE_ORDER)) delete BASE_ORDER[k];
   policy.setup?.(s, ctx);
   const rows: DayRow[] = [];
   for (let d = 1; d <= days; d++) {
@@ -189,30 +187,9 @@ function buySeats(s: GameState, ctx: SimCtx): void {
   }
 }
 
-/**
- * 仕入れを売れ行きに合わせる（品切れが出たら自動発注の目安を増やし、廃棄が多ければ減らす）。
- * 実際のプレイヤーがするのと同じ範囲（設定画面の自動発注の値だけを変える）
- */
-const BASE_ORDER: Record<string, number> = {};
-function adaptStock(s: GameState, ctx: SimCtx): void {
-  const r = s.history[s.history.length - 1];
-  if (!r) return;
-  if (Object.keys(BASE_ORDER).length === 0) Object.assign(BASE_ORDER, s.autoOrder);
-  const left: Record<string, number> = {};
-  for (const l of s.inventory) left[l.itemId] = (left[l.itemId] ?? 0) + l.qty;
-  const next: Record<string, number> = { ...s.autoOrder };
-  // 品切れした食材のもとを増やす（ゲームの知らせと同じ対応表）
-  const short = new Set<string>();
-  for (const [k, n] of Object.entries(r.stockoutItems ?? {})) if (n >= 2) for (const raw of STOCKOUT_SOURCE[k]?.raw ?? []) short.add(raw);
-  for (const [itemId, qty] of Object.entries(s.autoOrder)) {
-    const base = BASE_ORDER[itemId] ?? qty;
-    let v = qty;
-    if (short.has(itemId)) v = qty * 1.25;
-    else if ((left[itemId] ?? 0) > qty * 0.7) v = qty * 0.92;
-    next[itemId] = Math.round(Math.min(base * 3, Math.max(base * 0.6, v)));
-  }
-  for (const [itemId, qty] of Object.entries(next)) if (qty !== s.autoOrder[itemId]) applyAction(s, 'p1', { type: 'setAutoOrder', itemId, qty }, ctx);
-}
+const salesMode = (s: GameState, ctx: SimCtx) => {
+  applyAction(s, 'p1', { type: 'setAutoOrderMode', mode: 'sales' }, ctx);
+};
 
 function buyPlaced(s: GameState, ctx: SimCtx, type: string, keep: number): boolean {
   const def = EQUIPMENT[type];
@@ -267,20 +244,20 @@ export const CASES: CasePolicy[] = [
     },
   },
   // ── 投資の効果を測る比較用（仕入れを売れ行きに合わせる、ふつうのプレイヤー） ──
-  { id: 'c11_smart_solo', name: '11. 一人営業＋仕入れを売れ行きに合わせる（投資の比較の基準）', evening: (s, ctx) => adaptStock(s, ctx) },
+  { id: 'c11_smart_solo', name: '11. 一人営業＋自動発注「売れ行きに合わせる」（投資の比較の基準）', setup: salesMode },
   {
     id: 'c12_smart_cook',
     name: '12. 11＋調理担当を1人',
+    setup: salesMode,
     morning: (s, ctx) => {
       if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
     },
-    evening: (s, ctx) => adaptStock(s, ctx),
   },
   {
     id: 'c13_smart_sign',
     name: '13. 11＋黄色い大看板（10日目以降、資金に余裕があれば）',
+    setup: salesMode,
     evening: (s, ctx, d) => {
-      adaptStock(s, ctx);
       if (d >= 10) buyPlaced(s, ctx, 'sign', 150_000);
     },
   },
@@ -291,8 +268,8 @@ export const CASES: CasePolicy[] = [
       if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
       else if (s.career.stage >= 1 && s.employees.length < 3) hireCheapest(s, ctx, 'server');
     },
+    setup: salesMode,
     evening: (s, ctx) => {
-      adaptStock(s, ctx);
       tryExpand(s, ctx, false);
       buySeats(s, ctx);
     },

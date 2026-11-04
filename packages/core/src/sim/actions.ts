@@ -46,6 +46,8 @@ export type Action =
   | { type: 'setPriority'; employeeId: Id; kind: string; value: number }
   /** アルバイトの曜日ごとのシフト（weekday: 月=0 … 日=6、shift: null でその曜日は休み） */
   | { type: 'setShift'; employeeId: Id; weekday: number; shift: ShiftDay | null }
+  /** 自動発注のしかた（manual: 目安の量まで / sales: 売れ行きに合わせる） */
+  | { type: 'setAutoOrderMode'; mode: 'manual' | 'sales' }
   /** カレンダーで日にちを選んでシフトを決める（once: その日だけ / weekly: 毎週くりかえす / reset: くりかえしに戻す） */
   | { type: 'setDateShift'; employeeId: Id; days: number[]; shift: ShiftDay | null; mode: DateShiftMode }
   /** アルバイトを社員にする */
@@ -252,6 +254,10 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return setPriority(s, a.employeeId, a.kind, a.value) ? { ok: true } : fail('変更できません');
     case 'setShift':
       return setShift(s, ctx, a.employeeId, a.weekday, a.shift);
+    case 'setAutoOrderMode':
+      if (a.mode !== 'manual' && a.mode !== 'sales') return fail('不正な値');
+      s.autoOrderMode = a.mode;
+      return { ok: true };
     case 'setDateShift':
       return setDateShift(s, ctx, a.employeeId, a.days, a.shift, a.mode);
     case 'promote':
