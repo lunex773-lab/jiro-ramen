@@ -4,6 +4,7 @@
 import { BALANCE } from '../data/balance';
 import { GOALS, UNLOCK_NAMES } from '../data/career';
 import { EQUIPMENT } from '../data/equipment';
+import { INGREDIENTS } from '../data/ingredients';
 import { STAGES } from '../data/stages';
 import type { DayReport, GameState } from '../types';
 import { clamp, newId } from '../util';
@@ -179,6 +180,7 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
   const report: DayReport = {
     ...s.today,
     wasteItems: { ...s.today.wasteItems },
+    stockoutItems: { ...(s.today.stockoutItems ?? {}) },
     day: s.day,
     operatingProfit: op,
     netSales: netSales(s.today),
@@ -204,10 +206,40 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
   s.orders = [];
   s.dirt = s.dirt.filter((d) => d.kind === 'grime');
   updateFinanceWarnings(s, ctx);
+  // 品切れの原因（どの食材が足りなかったか）と、どの自動発注を増やせばよいか
+  explainStockouts(s, ctx);
   // 翌朝便の自動発注
   runAutoOrder(s, ctx);
   emit(ctx, { type: 'dayEnd', value: op });
   return report;
+}
+
+/** 品切れのもとの食材（仕込みで作る物 → 仕入れる食材） */
+export const STOCKOUT_SOURCE: Record<string, { raw: string[]; label: string }> = {
+  buta: { raw: ['pork_raw'], label: '豚' },
+  'menu:buta': { raw: ['pork_raw'], label: '豚（売り切れ）' },
+  yasai: { raw: ['moyashi', 'cabbage'], label: 'ヤサイ' },
+  abura: { raw: ['backfat_raw'], label: 'アブラ' },
+  garlic: { raw: ['garlic_raw'], label: 'ニンニク' },
+  ichimi: { raw: ['ichimi'], label: '一味' },
+  'menu:noodle': { raw: ['noodle'], label: '麺（売り切れ）' },
+};
+
+/**
+ * 閉店後に、品切れが多かった食材と、どの自動発注を増やせばよいかを知らせる（設計書 v2.1 §11「数値だけでなく原因を説明」）。
+ * 調理担当を雇って杯数が増えると、豚の仕入れ（自動発注の初期値）が足りなくなることが多い
+ */
+export function explainStockouts(s: GameState, ctx: SimCtx): void {
+  const items = s.today.stockoutItems ?? {};
+  let worst: string | null = null;
+  for (const [k, n] of Object.entries(items)) if (STOCKOUT_SOURCE[k] && n >= 3 && (!worst || n > (items[worst] ?? 0))) worst = k;
+  if (!worst) {
+    clearNotice(s, 'stockout:cause');
+    return;
+  }
+  const src = STOCKOUT_SOURCE[worst]!;
+  const raws = src.raw.map((id) => `${INGREDIENTS[id]?.name ?? id}（今の目安 ${(s.autoOrder[id] ?? 0).toLocaleString('ja-JP')}）`).join('・');
+  notify(s, ctx, 'stockout:cause', 'warn', `今日は${src.label}の品切れが${items[worst]}回ありました。在庫・発注で ${raws} の自動発注を増やすか、仕込みを早めにしましょう`);
 }
 
 export function checkGoals(s: GameState, ctx: SimCtx): void {

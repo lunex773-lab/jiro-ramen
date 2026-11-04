@@ -7,8 +7,7 @@ import {
   BALANCE,
   EQUIPMENT,
   expansionInfo,
-  fridgeCapacity,
-  INGREDIENTS,
+  STOCKOUT_SOURCE,
   MENU,
   refreshCandidates,
   STAGES,
@@ -68,6 +67,7 @@ export interface DayRow {
   reputation: number;
   avgWait: number;
   bankrupt: boolean;
+  stockoutItems: Record<string, number>;
 }
 
 function debtOf(s: GameState): number {
@@ -112,6 +112,7 @@ function rowOf(s: GameState, r: DayReport): DayRow {
     reputation: r.reputation,
     avgWait: Math.round(r.avgWait * 10) / 10,
     bankrupt: s.phase === 'bankrupt',
+    stockoutItems: { ...(r.stockoutItems ?? {}) },
   };
 }
 
@@ -197,25 +198,18 @@ function adaptStock(s: GameState, ctx: SimCtx): void {
   const r = s.history[s.history.length - 1];
   if (!r) return;
   if (Object.keys(BASE_ORDER).length === 0) Object.assign(BASE_ORDER, s.autoOrder);
-  // 閉店時の残り（品切れした食材は残りが少ない）
   const left: Record<string, number> = {};
   for (const l of s.inventory) left[l.itemId] = (left[l.itemId] ?? 0) + l.qty;
-  const cap = fridgeCapacity(s) * 0.85;
   const next: Record<string, number> = { ...s.autoOrder };
+  // 品切れした食材のもとを増やす（ゲームの知らせと同じ対応表）
+  const short = new Set<string>();
+  for (const [k, n] of Object.entries(r.stockoutItems ?? {})) if (n >= 2) for (const raw of STOCKOUT_SOURCE[k]?.raw ?? []) short.add(raw);
   for (const [itemId, qty] of Object.entries(s.autoOrder)) {
     const base = BASE_ORDER[itemId] ?? qty;
-    const rest = left[itemId] ?? 0;
     let v = qty;
-    if (r.stockouts > 2 && rest < qty * 0.15) v = qty * 1.2;
-    else if (rest > qty * 0.7) v = qty * 0.9;
+    if (short.has(itemId)) v = qty * 1.25;
+    else if ((left[itemId] ?? 0) > qty * 0.7) v = qty * 0.92;
     next[itemId] = Math.round(Math.min(base * 3, Math.max(base * 0.6, v)));
-  }
-  // 冷蔵庫に入る分まで（冷蔵の食材の合計が容量の85%を超えるなら、増やした分を比例して戻す）
-  const kgOf = (o: Record<string, number>) => Object.entries(o).reduce((a, [id, q]) => a + (INGREDIENTS[id]?.storage === 'fridge' ? q * (INGREDIENTS[id]?.kgPerUnit ?? 0) : 0), 0);
-  const kg = kgOf(next);
-  if (kg > cap) {
-    const k = cap / kg;
-    for (const id of Object.keys(next)) if (INGREDIENTS[id]?.storage === 'fridge') next[id] = Math.round(next[id]! * k);
   }
   for (const [itemId, qty] of Object.entries(next)) if (qty !== s.autoOrder[itemId]) applyAction(s, 'p1', { type: 'setAutoOrder', itemId, qty }, ctx);
 }

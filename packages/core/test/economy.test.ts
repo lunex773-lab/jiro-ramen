@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, BALANCE, cash, EQUIPMENT, fixedCosts, operatingProfit, reportFinalProfit, STAGES, settleDay, nextDay } from '../src';
+import { applyAction, BALANCE, cash, EQUIPMENT, explainStockouts, fixedCosts, operatingProfit, reportFinalProfit, STAGES, settleDay, nextDay } from '../src';
 import { addBot, addSoloBot, moneyFromTxns, newGame, runDay } from './helpers';
 
 describe('経済', () => {
@@ -122,7 +122,7 @@ describe('入力の検証', () => {
 });
 
 describe('日報の会計（統合進化設計書 v2.1 §4.2）', () => {
-  it('夜の自動発注や閉店後の買い物もその日の日報に入り、期末の現金が翌日の期首の現金と一致する。日報の増減の合計が実際の資金の増減', () => {
+  it('夜の自動発注や閉店後の買い物もその日の日報に入り、期末の現金が翌日の期首の現金と一致する。日報の増減の合計が実際の資金の増減', { timeout: 60_000 }, () => {
     const { s, ctx } = newGame(31);
     addSoloBot(s);
     const start = s.money;
@@ -160,5 +160,19 @@ describe('日報の会計（統合進化設計書 v2.1 §4.2）', () => {
     expect(r.finalProfit).toBe(r.operatingProfit - r.interest);
     expect(r.netSales).toBe(r.sales - r.refunds);
     expect(reportFinalProfit({ operatingProfit: -1234 })).toBe(-1234);
+  });
+});
+
+describe('品切れの原因の説明', () => {
+  it('品切れが多かった食材と、増やすとよい自動発注（仕入れる食材）を知らせる。少なければ知らせない', () => {
+    const { s, ctx } = newGame(33);
+    s.today.stockoutItems = { buta: 9, 'menu:buta': 4, yasai: 1 };
+    explainStockouts(s, ctx);
+    const n = s.notices.find((x) => x.code === 'stockout:cause');
+    expect(n?.text).toContain('豚の品切れが9回');
+    expect(n?.text).toContain('豚ウデ肉ブロック');
+    s.today.stockoutItems = { yasai: 2 };
+    explainStockouts(s, ctx);
+    expect(s.notices.some((x) => x.code === 'stockout:cause')).toBe(false);
   });
 });

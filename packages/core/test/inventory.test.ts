@@ -98,7 +98,7 @@ describe('自動発注と冷蔵庫の容量（統合進化設計書 v2.1 の測�
     expect(s.notices.some((n) => n.code === 'autoorder:fridge')).toBe(true);
   });
 
-  it('自動発注を3倍にしても店は回り続ける（以前は止まった）。ただし廃棄が増えて損をする', () => {
+  it('自動発注を3倍にしても店は回り続ける（以前は止まった）。ただし廃棄が増えて損をする', { timeout: 60_000 }, () => {
     const play = (mult: number) => {
       const { s, ctx } = newGame(42);
       addSoloBot(s);

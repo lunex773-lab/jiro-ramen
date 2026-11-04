@@ -697,6 +697,8 @@ export interface DayStats {
   breakdowns: number;
   remakes: number;
   wasteItems: Record<string, number>;
+  /** 品切れの内訳（食材・メニューごとの回数。原因の説明に使う）。古い日報にはない */
+  stockoutItems?: Record<string, number>;
   /** 店内外のトラブル（食べ方・居座り・喫煙・店員の口論など）と、そのうち対応したもの（第2版 10。古いセーブにはない） */
   troubles?: number;
   troublesHandled?: number;

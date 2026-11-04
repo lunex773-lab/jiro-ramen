@@ -23,6 +23,7 @@ import { clamp, clamp01, dist, newId, pick, rand, randNormal, randRange } from '
 import type { QualityResult } from './cooking';
 import { effectSum, equipmentByRole, isUsable, useEquipment, defOf } from './equipment';
 import { stockOf } from './inventory';
+import { noteStockout } from './economy';
 import { emit, notify, type SimCtx } from './notices';
 import { canComplain, startComplaint } from './complaints';
 import { addDaily, dailyCount, eventDemandFactor, ensureEvents, eventsAllowed, evRand, noteDraw, noteFire, takeForced } from './events';
@@ -95,6 +96,13 @@ export function soldOut(s: GameState, menuId: string): boolean {
   if (stockOf(s, 'noodle') + stockOf(s, 'homemade_noodle') < m.noodleG) return true;
   if (m.extras?.egg && stockOf(s, 'egg') < m.extras.egg) return true;
   return false;
+}
+
+/** 売り切れの理由（豚・麺・卵のどれが足りないか。原因の説明用） */
+function stockoutReason(s: GameState): string {
+  if (stockOf(s, 'noodle') + stockOf(s, 'homemade_noodle') < 300) return 'noodle';
+  if (stockOf(s, 'buta') + stockOf(s, 'pork_block') * 18 < 5) return 'buta';
+  return 'other';
 }
 
 const MENU_POPULARITY: Record<string, number> = {
@@ -494,7 +502,7 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
         const choice = c.script ? { menuId: c.script.menuId, stockout: false } : chooseMenu(s, c);
         c.stockout = choice.stockout;
         if (choice.stockout) {
-          s.today.stockouts += 1;
+          noteStockout(s, `menu:${stockoutReason(s)}`);
           c.sat.stock = 0.4;
         }
         if (!choice.menuId) {

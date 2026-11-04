@@ -15,7 +15,15 @@ export function emptyDayStats(): DayStats {
     served: 0, customers: 0, lost: 0, balked: 0, totalSeatWait: 0, totalQueueWait: 0,
     satisfactionSum: 0, satisfactionCount: 0, mistakes: 0, stockouts: 0, complaints: 0, breakdowns: 0, remakes: 0,
     wasteItems: {},
+    stockoutItems: {},
   };
+}
+
+/** 品切れを数える（内訳つき） */
+export function noteStockout(s: GameState, what: string): void {
+  s.today.stockouts += 1;
+  const m = (s.today.stockoutItems ??= {});
+  m[what] = (m[what] ?? 0) + 1;
 }
 
 /** 純売上 = 売上 − 返金（統合進化設計書 v2.1 §4.2） */

@@ -29,7 +29,7 @@ import type {
 } from '../types';
 import { clamp01, dist, newId } from '../util';
 import { emptyContents, evaluateBowl, isBowlComplete, menuOf, noodleQualityFor, soupPerBowl, toppingAmount } from './cooking';
-import { cash, recordPL } from './economy';
+import { cash, noteStockout, recordPL } from './economy';
 import { growFromWork, noteServed } from './staff';
 import {
   defOf,
@@ -1133,7 +1133,7 @@ export function applyToppings(s: GameState, ctx: SimCtx, bowl: Bowl, actor: Acto
     if (!r.ok) {
       // 足りない分は盛れない（在庫以上は消費しない: 設計書 8.3）
       short.push(CALLS[k].name);
-      s.today.stockouts += 1;
+      noteStockout(s, need.itemId);
       continue;
     }
     c.toppings[k] = lv;
@@ -1161,7 +1161,7 @@ export function applyToppings(s: GameState, ctx: SimCtx, bowl: Bowl, actor: Acto
       c.cost += part.cost;
     }
     short.push('豚');
-    s.today.stockouts += 1;
+    noteStockout(s, 'buta');
   }
   if (menu.extras?.egg) {
     const r = consume(s, 'egg', menu.extras.egg);
