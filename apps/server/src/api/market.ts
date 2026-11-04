@@ -157,26 +157,86 @@ export async function createMarketApi(req: Request, env: Env, ctx: ExecutionCont
   return json({ marketId, code, name }, 201);
 }
 
-/** POST /api/v1/market/join {code, companyName} → {marketId, companyId} */
+interface CommunityRow {
+  id: string;
+  visibility: string | null;
+  entry: string | null;
+  ends_at: number | null;
+}
+
+/** 市場を探す（招待コード、または公開の市場の id） */
+async function findMarket(env: Env, body: Record<string, unknown>): Promise<CommunityRow> {
+  if (body.marketId !== undefined) {
+    if (typeof body.marketId !== 'string' || !isUuid(body.marketId)) throw new HttpError(400, 'bad_request', '市場の指定が不正です');
+    const m = await env.DB.prepare(
+      "SELECT m.id, c.visibility, c.entry, c.ends_at FROM markets m LEFT JOIN communities c ON c.market_id = m.id WHERE m.id = ? AND m.status = 'open'",
+    )
+      .bind(body.marketId)
+      .first<CommunityRow>();
+    // 公開の市場だけ、招待コードなしで入れる（オーナーの判断 18）
+    if (!m || m.visibility !== 'public') throw new HttpError(404, 'market_not_found', '公開の市場が見つかりません');
+    return m;
+  }
+  const code = normalizeRoomCode(body.code);
+  if (!code) throw new HttpError(400, 'invalid_code', '招待コードは6文字の英数字です');
+  const m = await env.DB.prepare(
+    "SELECT m.id, c.visibility, c.entry, c.ends_at FROM markets m LEFT JOIN communities c ON c.market_id = m.id WHERE m.code = ? AND m.status = 'open'",
+  )
+    .bind(code)
+    .first<CommunityRow>();
+  if (!m) throw new HttpError(404, 'market_not_found', '市場が見つかりません（招待コードを確認してください）');
+  return m;
+}
+
+/**
+ * POST /api/v1/market/join {code | marketId, companyName, bring?: {marketId, companyId}} → {marketId, companyId}
+ * bring: 終わった市場の自分の会社を持っていく（育てた企業で参加できる市場だけ。オーナーの判断 15）
+ */
 export async function joinMarketApi(req: Request, env: Env, ctx: ExecutionContext, player: AuthedPlayer): Promise<Response> {
   const body = await readJson(req, MARKET_BODY_LIMIT);
   if (!isObj(body)) throw new HttpError(400, 'bad_request', '本文の形式が不正です');
-  const code = normalizeRoomCode(body.code);
-  if (!code) throw new HttpError(400, 'invalid_code', '招待コードは6文字の英数字です');
-  const companyName = cleanName(body.companyName);
-  if (!companyName) throw new HttpError(400, 'invalid_name', '会社（店）の名前は1〜20文字で入力してください');
-  const m = await env.DB.prepare("SELECT id FROM markets WHERE code = ? AND status = 'open'").bind(code).first<{ id: string }>();
-  if (!m) throw new HttpError(404, 'market_not_found', '市場が見つかりません（招待コードを確認してください）');
-  const already = await env.DB.prepare('SELECT 1 AS ok FROM market_members WHERE market_id = ? AND player_id = ?').bind(m.id, player.id).first();
-  if (!already) await requireCompanySlot(env, player.id);
-  const b = await readBody(
-    await stub(env, m.id).fetch('https://market/internal/join', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...identity(player) },
-      body: JSON.stringify({ companyName }),
-    }),
-  );
+  const m = await findMarket(env, body);
   const now = Date.now();
+  if (m.ends_at !== null && now >= m.ends_at) throw new HttpError(409, 'market_ended', 'この市場の競争期間は終わっています');
+  const already = await env.DB.prepare('SELECT 1 AS ok FROM market_members WHERE market_id = ? AND player_id = ?').bind(m.id, player.id).first();
+  const bring = isObj(body.bring) ? body.bring : null;
+  let b: Record<string, unknown>;
+  let companyName: string;
+  if (bring) {
+    if (m.entry === 'fresh') throw new HttpError(409, 'fresh_only', 'この市場は新規の企業だけが参加できます');
+    if (typeof bring.marketId !== 'string' || !isUuid(bring.marketId) || typeof bring.companyId !== 'string') throw new HttpError(400, 'bad_request', '持っていく会社の指定が不正です');
+    const own = await env.DB.prepare("SELECT name FROM market_companies WHERE market_id = ? AND company_id = ? AND player_id = ? AND status = 'active'")
+      .bind(bring.marketId, bring.companyId, player.id)
+      .first<{ name: string }>();
+    if (!own) throw new HttpError(404, 'company_not_found', '持っていける会社が見つかりません');
+    // 元の市場から出す（終わった市場だけ）→ 新しい市場に入れる。入れられなければ元に戻す
+    const ex = await readBody(await stub(env, bring.marketId).fetch('https://market/internal/export', { method: 'POST', headers: identity(player) }));
+    try {
+      b = await readBody(
+        await stub(env, m.id).fetch('https://market/internal/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...identity(player) },
+          body: JSON.stringify({ company: ex.company }),
+        }),
+      );
+    } catch (e) {
+      await stub(env, bring.marketId).fetch('https://market/internal/restore', { method: 'POST', headers: identity(player) });
+      throw e;
+    }
+    companyName = own.name;
+    await env.DB.prepare("UPDATE market_companies SET status = 'moved', updated_at = ? WHERE market_id = ? AND company_id = ?").bind(now, bring.marketId, bring.companyId).run();
+  } else {
+    companyName = cleanName(body.companyName) ?? '';
+    if (!companyName) throw new HttpError(400, 'invalid_name', '会社（店）の名前は1〜20文字で入力してください');
+    if (!already) await requireCompanySlot(env, player.id);
+    b = await readBody(
+      await stub(env, m.id).fetch('https://market/internal/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...identity(player) },
+        body: JSON.stringify({ companyName }),
+      }),
+    );
+  }
   const companyId = typeof b.companyId === 'string' ? b.companyId : null;
   const stmts = [env.DB.prepare('INSERT OR IGNORE INTO market_members (market_id, player_id, joined_at) VALUES (?, ?, ?)').bind(m.id, player.id, now)];
   if (companyId) {
@@ -192,18 +252,69 @@ export async function joinMarketApi(req: Request, env: Env, ctx: ExecutionContex
     );
   }
   await env.DB.batch(stmts);
-  ctx.waitUntil(audit(env.DB, { kind: 'market_join', playerId: player.id, detail: { marketId: m.id } }));
+  ctx.waitUntil(audit(env.DB, { kind: 'market_join', playerId: player.id, detail: { marketId: m.id, brought: bring ? bring.marketId : null } }));
   return json({ marketId: m.id, companyId });
 }
 
-/** GET /api/v1/markets → 参加している市場の一覧 */
+/** GET /api/v1/communities → 公開の市場の一覧（終わる前・空きのあるもの。オーナーの判断 18） */
+export async function publicCommunitiesApi(env: Env): Promise<Response> {
+  const now = Date.now();
+  const rows = await env.DB.prepare(
+    `SELECT m.id, m.name, m.created_at, c.description, c.entry, c.ai_fill, c.max_companies, c.period_days, c.ends_at,
+       (SELECT COUNT(*) FROM market_companies mc WHERE mc.market_id = m.id AND mc.status = 'active') AS players
+     FROM markets m JOIN communities c ON c.market_id = m.id
+     WHERE m.status = 'open' AND c.visibility = 'public' AND (c.ends_at IS NULL OR c.ends_at > ?)
+     ORDER BY m.created_at DESC LIMIT 50`,
+  )
+    .bind(now)
+    .all<{ id: string; name: string; created_at: number; description: string; entry: string; ai_fill: number; max_companies: number; period_days: number | null; ends_at: number | null; players: number }>();
+  return json({
+    communities: rows.results
+      .filter((r) => r.players < r.max_companies)
+      .map((r) => ({ marketId: r.id, name: r.name, description: r.description, entry: r.entry, aiFill: r.ai_fill === 1, maxCompanies: r.max_companies, periodDays: r.period_days, endsAt: r.ends_at, players: r.players, createdAt: r.created_at })),
+  });
+}
+
+/** POST /api/v1/market/:id/retire → 会社を引退させる（終わった市場・破産した会社。1人5社の数から外れる） */
+export async function retireCompanyApi(env: Env, ctx: ExecutionContext, player: AuthedPlayer, marketId: string): Promise<Response> {
+  if (!isUuid(marketId)) throw new HttpError(404, 'market_not_found', '市場が見つかりません');
+  await requireMember(env, marketId, player.id);
+  const b = await readBody(await stub(env, marketId).fetch('https://market/internal/retire', { method: 'POST', headers: identity(player) }));
+  if (typeof b.companyId === 'string') {
+    await env.DB.prepare("UPDATE market_companies SET status = 'retired', updated_at = ? WHERE market_id = ? AND company_id = ?").bind(Date.now(), marketId, b.companyId).run();
+  }
+  ctx.waitUntil(audit(env.DB, { kind: 'market_join', playerId: player.id, detail: { marketId, retired: b.companyId ?? null } }));
+  return json({ ok: true });
+}
+
+/** GET /api/v1/markets → 参加している市場の一覧（自分の会社の状態・競争期間が終わったか） */
 export async function listMarketsApi(env: Env, player: AuthedPlayer): Promise<Response> {
   const rows = await env.DB.prepare(
-    "SELECT m.id, m.code, m.name, m.created_at, m.owner_id FROM market_members mm JOIN markets m ON m.id = mm.market_id WHERE mm.player_id = ? AND m.status = 'open' ORDER BY mm.joined_at DESC LIMIT 20",
+    `SELECT m.id, m.code, m.name, m.created_at, m.owner_id, c.ends_at, c.entry,
+       (SELECT mc.company_id FROM market_companies mc WHERE mc.market_id = m.id AND mc.player_id = ? ORDER BY mc.created_at DESC LIMIT 1) AS company_id,
+       (SELECT mc.status FROM market_companies mc WHERE mc.market_id = m.id AND mc.player_id = ? ORDER BY mc.created_at DESC LIMIT 1) AS company_status,
+       (SELECT mc.name FROM market_companies mc WHERE mc.market_id = m.id AND mc.player_id = ? ORDER BY mc.created_at DESC LIMIT 1) AS company_name
+     FROM market_members mm JOIN markets m ON m.id = mm.market_id LEFT JOIN communities c ON c.market_id = m.id
+     WHERE mm.player_id = ? AND m.status = 'open' ORDER BY mm.joined_at DESC LIMIT 20`,
   )
-    .bind(player.id)
-    .all<{ id: string; code: string; name: string; created_at: number; owner_id: string }>();
-  return json({ markets: rows.results.map((r) => ({ marketId: r.id, code: r.code, name: r.name, createdAt: r.created_at, isOwner: r.owner_id === player.id })) });
+    .bind(player.id, player.id, player.id, player.id)
+    .all<{ id: string; code: string; name: string; created_at: number; owner_id: string; ends_at: number | null; entry: string | null; company_id: string | null; company_status: string | null; company_name: string | null }>();
+  const now = Date.now();
+  return json({
+    markets: rows.results.map((r) => ({
+      marketId: r.id,
+      code: r.code,
+      name: r.name,
+      createdAt: r.created_at,
+      isOwner: r.owner_id === player.id,
+      endsAt: r.ends_at,
+      ended: r.ends_at !== null && now >= r.ends_at,
+      entry: r.entry ?? 'grown',
+      companyId: r.company_id,
+      companyName: r.company_name,
+      companyStatus: r.company_status,
+    })),
+  });
 }
 
 /** GET /api/v1/market/:id → その市場の今（自分の企業は中身ごと） */

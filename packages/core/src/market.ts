@@ -17,6 +17,7 @@ import { createGame } from './state';
 import type { GameState, Id, StoreEntry } from './types';
 import { hashString } from './util';
 import { lastCompanyDay, verifyCommit } from './verify';
+import { shiftGameDays } from './sim/rebase';
 import { applyAction, type Action, type ActionResult } from './sim/actions';
 import { activeStore, companyPolicyOf, recordCompanyDay, storeReport, withStore } from './sim/company';
 import { withPlannedAds } from './sim/ads';
@@ -360,9 +361,10 @@ export function joinProblem(m: MarketState, ownerId: string): string | null {
 /**
  * 市場に参加する（すでに参加していればその企業を返す）。いっぱいなら、市場シェアがいちばん小さい AI 企業が市場から撤退する
  */
-export function joinMarket(m: MarketState, ownerId: string, companyName: string): { ok: boolean; reason?: string; company?: MarketCompany } {
+export function joinMarket(m: MarketState, ownerId: string, companyName: string, now?: number): { ok: boolean; reason?: string; company?: MarketCompany } {
   const mine = playerCompany(m, ownerId);
   if (mine) return { ok: true, company: mine };
+  if (now !== undefined && isEnded(m, now)) return { ok: false, reason: 'この市場の競争期間は終わっています' };
   const problem = joinProblem(m, ownerId);
   if (problem) return { ok: false, reason: problem };
   if (activeCompanies(m).length >= m.settings.maxCompanies) {
@@ -535,7 +537,8 @@ export function startDay(
   const periodId = jstDateKey(now);
   c.openDay = { token, gameDate: day, periodId, startedAt: now, baseVersion, demand };
   c.progress.synchronizationStatus = 'playing';
-  if (!m.pendingPeriods.includes(periodId)) {
+  // 競争期間が終わった市場は、0時の同期をしない（営業は続けられる。オーナーの判断 16）
+  if (!isEnded(m, now) && !m.pendingPeriods.includes(periodId)) {
     m.pendingPeriods.push(periodId);
     m.pendingPeriods.sort();
   }
@@ -632,7 +635,10 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
   c.progress.manualProgressDays += 1;
   c.progress.totalManualDays += 1;
   c.days.push(dayRecord(c.state, o.gameDate, o.periodId, 'manual', v.flags, valueStart));
-  if (!m.pendingPeriods.includes(o.periodId)) {
+  if (isEnded(m, jstMidnight(o.periodId))) {
+    // 終わった市場の日は集計しない（記録は直近だけ残す）
+    if (c.days.length > B().keepDayRecords) c.days.splice(0, c.days.length - B().keepDayRecords);
+  } else if (!m.pendingPeriods.includes(o.periodId)) {
     m.pendingPeriods.push(o.periodId);
     m.pendingPeriods.sort();
   }
@@ -964,6 +970,105 @@ function marketDayLine(m: MarketState, day: number): MarketDayReport {
   };
 }
 
+// ───────────────────────── コミュニティの終わり・会社の移動（仕様書 6.2） ─────────────────────────
+
+/** 競争期間が終わったか（無期限なら終わらない） */
+export function isEnded(m: MarketState, now: number): boolean {
+  return m.settings.endsAt !== null && now >= m.settings.endsAt;
+}
+
+/** 別の市場へ持っていく会社（育てた会社で参加する。オーナーの判断 15） */
+export interface ExportedCompany {
+  name: string;
+  state: GameState;
+  fromMarketId: string;
+  fromCompanyId: Id;
+}
+
+/**
+ * 終わった市場から会社を出す（別のコミュニティへ移す）。会社は「移った」になり、この市場では営業しない（記録は残す）。
+ * 移す先で受け取れなかったときは restoreCompany で戻す
+ */
+export function exportCompany(m: MarketState, ownerId: string, now: number): { ok: boolean; reason?: string; company?: ExportedCompany } {
+  const c = playerCompany(m, ownerId);
+  if (!c) return { ok: false, reason: 'この市場に会社がありません' };
+  if (c.status !== 'active') return { ok: false, reason: '営業している会社だけ移せます' };
+  if (!isEnded(m, now)) return { ok: false, reason: '競争期間が終わってから、別のコミュニティへ移せます' };
+  if (c.openDay) return { ok: false, reason: '端末で営業中です' };
+  c.status = 'moved';
+  c.bankruptDay = c.progress.lastProcessedGameDate;
+  log(m, c.id, `${c.name}は別のコミュニティへ移りました`);
+  return { ok: true, company: { name: c.name, state: JSON.parse(JSON.stringify(c.state)) as GameState, fromMarketId: m.id, fromCompanyId: c.id } };
+}
+
+/** 移す先で受け取れなかった会社を、元の市場に戻す */
+export function restoreCompany(m: MarketState, ownerId: string): boolean {
+  const c = m.companies.find((x) => x.kind === 'player' && x.ownerId === ownerId && x.status === 'moved');
+  if (!c) return false;
+  c.status = 'active';
+  c.bankruptDay = null;
+  return true;
+}
+
+/**
+ * 育てた会社で市場に入る（「育てた企業で参加できる」市場だけ）。お金・店・従業員・在庫・評判はそのままで、
+ * 会社の暦をこの市場の次の日付にずらす（オーナーの判断 15）
+ */
+export function importCompany(m: MarketState, ownerId: string, exp: ExportedCompany, now: number): { ok: boolean; reason?: string; company?: MarketCompany } {
+  if (m.settings.entry !== 'grown') return { ok: false, reason: 'この市場は新規の企業だけが参加できます' };
+  if (isEnded(m, now)) return { ok: false, reason: 'この市場の競争期間は終わっています' };
+  if (playerCompany(m, ownerId)) return { ok: false, reason: 'この市場にはもう会社があります' };
+  const problem = joinProblem(m, ownerId);
+  if (problem) return { ok: false, reason: problem };
+  if (activeCompanies(m).length >= m.settings.maxCompanies) {
+    const ai = activeCompanies(m)
+      .filter((c) => c.kind === 'ai')
+      .sort((a, b) => marketShare(m, a.id) - marketShare(m, b.id) || b.joinedDay - a.joinedDay)[0]!;
+    ai.status = 'retired';
+    ai.bankruptDay = ai.progress.lastProcessedGameDate;
+    log(m, ai.id, `新しい企業の参加で市場から撤退しました（市場シェア ${(marketShare(m, ai.id) * 100).toFixed(1)}%）`);
+  }
+  const s = exp.state;
+  const day = m.commonMarketDate + 1;
+  const delta = day - (lastCompanyDay(s) + 1);
+  shiftGameDays(s, delta);
+  s.prepSnapshot = null;
+  s.marketDemand = null;
+  s.company.ownerStoreId = s.company.activeStoreId;
+  const idx = m.companies.length;
+  const c: MarketCompany = {
+    id: `c${idx + 1}`,
+    name: cleanName(exp.name),
+    kind: 'player',
+    ownerId,
+    strategy: null,
+    homeArea: nextHomeArea(m),
+    joinedDay: day,
+    status: 'active',
+    bankruptDay: null,
+    state: s,
+    memory: { lastPriceDay: -99 },
+    progress: newProgress(day - 1),
+    openDay: null,
+    lastCommit: null,
+    days: [],
+  };
+  m.companies.push(c);
+  log(m, c.id, `${c.name}が育てた会社で参加しました（資金 ¥${s.money.toLocaleString('ja-JP')}・${s.company.stores.length}店。${day}日目から）`);
+  return { ok: true, company: c };
+}
+
+/** 会社を引退させる（終わった市場・破産した会社。記録は残す。1人が持てる会社の数から外れる） */
+export function retireCompany(m: MarketState, ownerId: string, now: number): { ok: boolean; reason?: string } {
+  const c = m.companies.find((x) => x.kind === 'player' && x.ownerId === ownerId && (x.status === 'active' || x.status === 'bankrupt'));
+  if (!c) return { ok: false, reason: 'この市場に会社がありません' };
+  if (c.status === 'active' && !isEnded(m, now)) return { ok: false, reason: '競争期間中は引退できません（終わってから、または破産したとき）' };
+  if (c.openDay) return { ok: false, reason: '端末で営業中です' };
+  c.status = 'retired';
+  log(m, c.id, `${c.name}は引退しました（記録は残ります）`);
+  return { ok: true };
+}
+
 // ───────────────────────── 古い市場の移行 ─────────────────────────
 
 /**
@@ -1265,13 +1370,15 @@ export interface MarketView {
   mine: { companyId: Id; state: GameState; progress: CompanyProgress; openDay: OpenDay | null; lastCommit: CommitResult | null; days: CompanyDayRecord[] } | null;
   /** 出店先の地域ごとの空いている物件の数 */
   freeSlots: Record<string, number>;
+  /** 競争期間が終わった（0時の同期とランキングはない。営業は続けられる） */
+  ended?: boolean;
   /** 同期の状態（進行中・直近） */
   sync: SyncRun | null;
   lastSync: SyncRun | null;
   pendingPeriods: DateKey[];
 }
 
-export function marketView(m: MarketState, ownerId: string | null): MarketView {
+export function marketView(m: MarketState, ownerId: string | null, now?: number): MarketView {
   const last = m.history[m.history.length - 1];
   const me = ownerId ? playerCompany(m, ownerId) : null;
   const companies = m.companies
@@ -1318,6 +1425,7 @@ export function marketView(m: MarketState, ownerId: string | null): MarketView {
       ? { companyId: me.id, state: me.state, progress: me.progress, openDay: me.openDay, lastCommit: me.lastCommit ? (({ token: _t, ...r }) => r)(me.lastCommit) : null, days: me.days.slice(-30) }
       : null,
     freeSlots: free,
+    ended: now !== undefined ? isEnded(m, now) : undefined,
     sync: m.sync && m.sync.status !== 'done' ? m.sync : null,
     lastSync: m.syncLog[m.syncLog.length - 1] ?? null,
     pendingPeriods: [...m.pendingPeriods],

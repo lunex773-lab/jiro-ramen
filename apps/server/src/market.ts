@@ -15,7 +15,9 @@ import {
   checksum,
   commitDay,
   createMarket,
+  exportCompany,
   finishSync,
+  importCompany,
   joinMarket,
   jstDateKey,
   marketAction,
@@ -26,12 +28,15 @@ import {
   nextSyncAt,
   periodSummary,
   playerCompany,
+  restoreCompany,
+  retireCompany,
   runSync,
   startDay,
   syncPending,
   type Action,
   type ActionResult,
   type CommunitySettings,
+  type ExportedCompany,
   type GameState,
   type MarketCompany,
   type MarketState,
@@ -348,11 +353,39 @@ export class MarketRoom extends DurableObject<Env> {
     const m = this.market;
     if (url.pathname === '/internal/join' && req.method === 'POST') {
       const body = (await req.json()) as { companyName?: unknown };
-      const r = joinMarket(m, playerId, typeof body.companyName === 'string' ? body.companyName : '');
+      const r = joinMarket(m, playerId, typeof body.companyName === 'string' ? body.companyName : '', now);
       if (!r.ok) return json({ error: 'join_refused', message: r.reason ?? '参加できません' }, 409);
       this.markAll();
       this.save();
       return json({ ok: true, companyId: r.company!.id, companyName: r.company!.name });
+    }
+    // 育てた会社を別の市場へ移す（出す・入れる・戻す）と引退（仕様書 6.2。オーナーの判断 15・16）
+    if (url.pathname === '/internal/export' && req.method === 'POST') {
+      const r = exportCompany(m, playerId, now);
+      if (!r.ok) return json({ error: 'export_refused', message: r.reason ?? '移せません' }, 409);
+      this.save();
+      return json({ ok: true, company: r.company });
+    }
+    if (url.pathname === '/internal/import' && req.method === 'POST') {
+      const body = safeJsonParse(await req.text());
+      if (!isObj(body) || !isObj(body.company)) return json({ error: 'bad_request', message: '形式が不正です' }, 400);
+      const r = importCompany(m, playerId, body.company as unknown as ExportedCompany, now);
+      if (!r.ok) return json({ error: 'import_refused', message: r.reason ?? '参加できません' }, 409);
+      this.markAll();
+      this.save();
+      return json({ ok: true, companyId: r.company!.id, companyName: r.company!.name });
+    }
+    if (url.pathname === '/internal/restore' && req.method === 'POST') {
+      const ok = restoreCompany(m, playerId);
+      this.save();
+      return json({ ok });
+    }
+    if (url.pathname === '/internal/retire' && req.method === 'POST') {
+      const before = m.companies.find((x) => x.kind === 'player' && x.ownerId === playerId && (x.status === 'active' || x.status === 'bankrupt'));
+      const r = retireCompany(m, playerId, now);
+      if (!r.ok) return json({ error: 'retire_refused', message: r.reason ?? '引退できません' }, 409);
+      this.save();
+      return json({ ok: true, companyId: before?.id ?? null });
     }
     if (url.pathname === '/internal/view' && req.method === 'GET') {
       return json(this.viewFor(playerId, now));
@@ -429,6 +462,6 @@ export class MarketRoom extends DurableObject<Env> {
 
   viewFor(playerId: string, now: number): MarketView & { clock: MarketClock; code: string; isOwner: boolean; joined: boolean; today: string } {
     const m = this.market!;
-    return { ...marketView(m, playerId), clock: this.clock(now), code: this.meta!.code, isOwner: this.meta!.ownerId === playerId, joined: !!playerCompany(m, playerId), today: jstDateKey(now) };
+    return { ...marketView(m, playerId, now), clock: this.clock(now), code: this.meta!.code, isOwner: this.meta!.ownerId === playerId, joined: !!playerCompany(m, playerId), today: jstDateKey(now) };
   }
 }
