@@ -839,8 +839,15 @@ export class ManageMenu {
   private async saveDateShift(e: Employee, days: number[], sh: ShiftDay | null, mode: 'once' | 'weekly' | 'reset'): Promise<void> {
     const ok = await this.act({ type: 'setDateShift', employeeId: e.id, days, shift: sh, mode });
     if (!ok) return;
-    const what = mode === 'reset' ? 'をくりかえしの予定に戻しました' : mode === 'weekly' ? `の曜日を毎週くりかえす予定にしました` : sh ? 'のシフトを保存しました' : 'を休みにしました';
-    toast(this.root, `${e.profile.name}さんの${days.length}日${what}`, 'good', 1800);
+    // 「1日」は日付と紛れるので、1日なら「N日目」、いくつもなら「N日分」と書く
+    const which = days.length === 1 ? `${days[0]}日目` : `${days.length}日分`;
+    const wds = [...new Set(days.map(weekdayOf))].sort((x, y) => x - y).map((w) => WEEKDAY_LABEL[w]).join('・');
+    const text =
+      mode === 'reset' ? `${e.profile.name}さんの${which}を、くりかえしの予定に戻しました`
+      : mode === 'weekly' ? `${e.profile.name}さんの毎週の${wds}曜を${sh ? this.shiftText(sh) : '休み'}にしました`
+      : sh ? `${e.profile.name}さんの${which}のシフトを保存しました`
+      : `${e.profile.name}さんの${which}を休みにしました`;
+    toast(this.root, text, 'good', 1800);
     // 保存したら選ぶのをやめる（カレンダーで結果を見る）
     this.shiftEdit = { id: e.id, days: [] };
     this.render();
