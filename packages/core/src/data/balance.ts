@@ -77,19 +77,19 @@ export const BALANCE = {
       /** 席1つあたりの1日の提供の上限（人手が足りているとき） */
       seatTurns: 8.2,
       /** 店長が一人で出せる杯数（能力0.65のとき） */
-      leadPoints: 48,
+      leadPoints: 42,
       /** ほかの従業員が増やす杯数（担当ごと。能力0.65のとき） */
-      rolePoints: { cook: 20, server: 22, cleaner: 12, prep: 10 } as Record<string, number>,
+      rolePoints: { cook: 24, server: 28, cleaner: 14, prep: 12 } as Record<string, number>,
       /** 2人目以降の従業員の効き方の減り（人数が増えるほど1人あたりは減る） */
       extraDiminish: 0.08,
       /** 能力の効き方: 倍率 = skillBase + skillSlope × 能力 */
-      skillBase: 0.6,
-      skillSlope: 0.6,
+      skillBase: 0.8,
+      skillSlope: 0.3,
       /** 来店した人のうち、待てずに帰らない割合（席と人手に余裕があっても少しは帰る） */
       joinShare: 0.92,
       /** 1杯あたりに使う仕入れの食材（仕込みの分を含む。細かいシミュレーションの使用量から） */
       usePerBowl: {
-        noodle: 340, pork_raw: 0.19, bones: 120, backfat_raw: 45, moyashi: 280, cabbage: 70, garlic_raw: 12, soy: 90, ichimi: 1.2,
+        noodle: 285, pork_raw: 0.16, bones: 100, backfat_raw: 37, moyashi: 232, cabbage: 58, garlic_raw: 10, soy: 75, ichimi: 1,
       } as Record<string, number>,
       /** 使う量に対する廃棄（ゆですぎ・こぼし・残り）の割合 */
       wasteShare: 0.1,
@@ -100,7 +100,9 @@ export const BALANCE = {
       /** 光熱費 = utilitiesBase + 1杯あたり（設備の使用を含む） */
       utilitiesPerBowl: 38.5,
       /** 修理費（1杯あたり。定期メンテを予約しないと増える） */
-      repairPerBowl: 31,
+      repairPerBowl: 25,
+      /** 客単価の見込みに掛ける倍率（返金・作り直しなど） */
+      ticketFactor: 0.965,
       repairNoMaintenanceMult: 1.8,
       /** 評判: 目標 = base + 店長の能力の効き − 高すぎる値段の効き + 安い値段の効き。毎日 approach の割合だけ近づく */
       repBase: 4.4,

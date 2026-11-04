@@ -68,7 +68,7 @@ export function planManagerDay(s: GameState, entry: StoreEntry): ManagerDayPlan 
   const mgr = entry.managerId ? s.employees.find((e) => e.id === entry.managerId) : undefined;
   const closedReason = s.closedForConstruction > 0 ? '工事・準備のため休業' : !mgr ? '店長がいないため休業' : null;
   const capacity = storeCapacity(s, mgr?.id ?? null);
-  const ticket = expectedTicket(s);
+  const ticket = expectedTicket(s) * M().ticketFactor;
   if (closedReason) return { open: false, closedReason, arrivals: 0, capacity, served: 0, ticket };
   const arrivals = expectedDailyArrivals(s, { events: false });
   const served = Math.floor(Math.min(capacity.total, arrivals * M().joinShare));
