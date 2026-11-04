@@ -11,8 +11,13 @@ import { newTutorial } from './sim/tutorial';
 import { newEvents } from './sim/events';
 import { takePrepSnapshot } from './sim/accident';
 import { newId } from './util';
+import { newCompany } from './sim/company';
 
-export const SCHEMA_VERSION = 1;
+/**
+ * セーブの形の版。1 → 2: 会社（店舗の一覧・会社の日報）を足した（統合進化設計書 v2.1 Phase 2。
+ * 古いセーブは今の店を「会社の1店舗目」として読み込む。save.ts の MIGRATIONS）
+ */
+export const SCHEMA_VERSION = 2;
 
 export interface NewGameOptions {
   seed?: number;
@@ -114,7 +119,9 @@ export function createGame(opts: NewGameOptions = {}): GameState {
     tutorial: opts.tutorial ? newTutorial('basics') : null,
     events: newEvents(seed),
     prepSnapshot: null,
+    company: { activeStoreId: '', stores: [], history: [] },
   };
+  s.company = newCompany(s);
   // JSON で表現できない -Infinity は使わない
   s.career.bestDayProfit = -1e12;
 

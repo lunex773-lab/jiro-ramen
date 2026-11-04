@@ -995,7 +995,7 @@ export interface ShopEvents {
 }
 
 /** 仕込み開始時点の状態の控え。日報・口コミ（営業中は変わらない）と、プレイヤー（接続で変わる）は入れない */
-export type SnapshotState = Omit<GameState, 'prepSnapshot' | 'history' | 'reviews' | 'players'>;
+export type SnapshotState = Omit<GameState, 'prepSnapshot' | 'history' | 'reviews' | 'players' | 'company'>;
 
 export interface PrepSnapshot {
   day: number;
@@ -1092,4 +1092,102 @@ export interface GameState {
   events?: ShopEvents;
   /** その日の仕込み開始時点の控え（爆発事故のリセット用。共同経営では配信しない） */
   prepSnapshot?: PrepSnapshot | null;
+  /**
+   * 会社（統合進化設計書 v2.1 Phase 2）。お金・借入・キャリアは会社のもの（GameState の money などをそのまま使う）。
+   * プレイヤーがいる店の中身は GameState の店の部分（設備・従業員・在庫・評判・日報など）にあり、ほかの店は stores[].snapshot にある
+   */
+  company: CompanyState;
+}
+
+// ───────────────────────── 会社と店舗（Phase 2） ─────────────────────────
+
+/** 店を切り替えるときに入れ替える、店ごとの項目（GameState のキー。一覧は sim/company.ts の STORE_KEYS） */
+export type StoreKey =
+  | 'inventory'
+  | 'deliveries'
+  | 'autoOrder'
+  | 'autoOrderMode'
+  | 'equipment'
+  | 'seats'
+  | 'bowls'
+  | 'dirt'
+  | 'kitchenGrime'
+  | 'lostItems'
+  | 'employees'
+  | 'candidates'
+  | 'customers'
+  | 'orders'
+  | 'queue'
+  | 'insideQueue'
+  | 'arrivalAcc'
+  | 'regularsVisitedToday'
+  | 'reputation'
+  | 'reviews'
+  | 'todayReviews'
+  | 'regulars'
+  | 'prices'
+  | 'pausedMenu'
+  | 'history'
+  | 'closedForConstruction';
+
+
+/** プレイヤーがいない店の中身（店の段階 = 席の数の段階も店ごと） */
+export type StoreSnapshot = Pick<GameState, StoreKey> & { stage: number };
+
+/** 店の方針（店長がこの方針で営業する。Phase 2-4） */
+export interface StorePolicy {
+  /** 定価に対する価格の倍率 */
+  priceMult: number;
+  /** 自動発注 */
+  orderMode: 'manual' | 'sales';
+  /** 1日の修理費の上限（円）。超える故障は翌日に回す */
+  repairCap: number;
+  /** 定期メンテを予約するか */
+  maintenance: boolean;
+}
+
+export interface StoreEntry {
+  id: Id;
+  name: string;
+  /** 物件（data/properties.ts）。1店舗目は 'home' */
+  propertyId: string;
+  /** 開店した日 */
+  openedDay: number;
+  /** 店長（社員の id）。プレイヤーがいる店では空でもよい */
+  managerId: Id | null;
+  policy: StorePolicy;
+  /** プレイヤーがいない店の中身。プレイヤーがいる店（activeStoreId）は null（中身は GameState にある） */
+  snapshot: StoreSnapshot | null;
+}
+
+/** 会社の日報の、店ごとの行 */
+export interface CompanyStoreLine {
+  storeId: Id;
+  name: string;
+  /** プレイヤーがいた店か（いない店は店長の営業の計算） */
+  played: boolean;
+  netSales: number;
+  operatingProfit: number;
+  served: number;
+  customers: number;
+  reputation: number;
+}
+
+/** 会社の日報（店舗の合計。利息・借入の返済は会社のもの） */
+export interface CompanyDayReport {
+  day: number;
+  stores: CompanyStoreLine[];
+  netSales: number;
+  operatingProfit: number;
+  interest: number;
+  finalProfit: number;
+  served: number;
+  cashEnd: number;
+}
+
+export interface CompanyState {
+  activeStoreId: Id;
+  stores: StoreEntry[];
+  /** 会社の日報（直近60日） */
+  history: CompanyDayReport[];
 }

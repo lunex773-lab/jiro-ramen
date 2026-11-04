@@ -8,6 +8,7 @@ import { STAGES } from './data/stages';
 import { SCHEMA_VERSION } from './state';
 import { removePlayer } from './sim/actions';
 import { makeCtx } from './sim/notices';
+import { newCompany } from './sim/company';
 import type { GameState } from './types';
 
 export const SLOT_COUNT = 3;
@@ -131,6 +132,27 @@ export function validateState(s: unknown): string[] {
       break;
     }
   }
+  // 会社（schema 2〜）: 店が1つ以上あり、プレイヤーがいる店は中身を持たず（GameState にある）、ほかの店は中身を持つ
+  const c = s.company;
+  if (!isObj(c) || !isStr(c.activeStoreId) || !isArr(c.stores) || c.stores.length === 0 || !isArr(c.history)) {
+    errs.push('会社のデータが壊れています');
+  } else {
+    const ids = new Set<string>();
+    for (const st of c.stores as unknown[]) {
+      if (!isObj(st) || !isStr(st.id) || !isStr(st.propertyId) || !isObj(st.policy) || ids.has(st.id as string)) {
+        errs.push('店舗のデータが壊れています');
+        break;
+      }
+      ids.add(st.id as string);
+      const active = st.id === c.activeStoreId;
+      const snap = st.snapshot;
+      if (active ? snap !== null : !isObj(snap) || !isArr(snap.equipment) || !isArr(snap.employees) || !isArr(snap.history) || !isNum(snap.stage) || STAGES[snap.stage as number] === undefined) {
+        errs.push('店舗の中身が壊れています');
+        break;
+      }
+    }
+    if (!ids.has(c.activeStoreId as string)) errs.push('プレイヤーがいる店が見つかりません');
+  }
   return errs;
 }
 
@@ -144,6 +166,14 @@ export const MIGRATIONS: Record<number, (s: Record<string, unknown>) => Record<s
     if (career.daysPlayed === undefined) career.daysPlayed = 0;
     s.career = career;
     s.schema = 1;
+    return s;
+  },
+  // 1 → 2: 会社を足す。今の店をそのまま会社の1店舗目にする（店の中身・日報・お金は変えない）
+  1: (s) => {
+    if (!isObj(s.company)) {
+      s.company = newCompany({ shopName: isStr(s.shopName) ? s.shopName : 'ラーメン まし屋', day: isNum(s.day) ? s.day : 1 }) as unknown as Record<string, unknown>;
+    }
+    s.schema = 2;
     return s;
   },
 };
@@ -262,6 +292,20 @@ export const slotKey = (slot: number) => `${PREFIX}slot${slot}`;
 const bakKey = (slot: number) => `${PREFIX}slot${slot}.bak`;
 const tmpKey = (slot: number) => `${PREFIX}slot${slot}.tmp`;
 
+/** 古い形（schema）のまま残す元のセーブのキー */
+export const originalKey = (slot: number, schema: number) => `${PREFIX}slot${slot}.schema${schema}`;
+
+/** セーブの文字列の形の版（読めなければ null） */
+function schemaOfText(text: string): number | null {
+  try {
+    const raw = JSON.parse(text) as { schema?: unknown; state?: { schema?: unknown } };
+    const v = typeof raw.state?.schema === 'number' ? raw.state.schema : raw.schema;
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 function checkSlot(slot: number): void {
   if (!Number.isInteger(slot) || slot < 1 || slot > SLOT_COUNT) throw new Error(`スロット番号が不正です: ${slot}`);
 }
@@ -287,6 +331,9 @@ export function saveToSlot(store: SaveStore, slot: number, s: GameState, now = D
     if (!verify.ok) return { ok: false, error: `書き込み検証に失敗: ${verify.error}` };
     const cur = store.get(slotKey(slot));
     if (cur && prev) store.set(bakKey(slot), cur);
+    // 古い形のセーブを初めて新しい形で上書きするときは、元のデータを別に残す（変換で何かを失っても戻せるように）
+    const oldSchema = cur ? schemaOfText(cur) : null;
+    if (cur && oldSchema !== null && oldSchema < SCHEMA_VERSION && !store.get(originalKey(slot, oldSchema))) store.set(originalKey(slot, oldSchema), cur);
     store.set(slotKey(slot), text);
     store.remove(tmpKey(slot));
   } catch (e) {
@@ -340,6 +387,7 @@ export function deleteSlot(store: SaveStore, slot: number): void {
   store.remove(slotKey(slot));
   store.remove(bakKey(slot));
   store.remove(tmpKey(slot));
+  for (let v = 0; v < SCHEMA_VERSION; v++) store.remove(originalKey(slot, v));
 }
 
 /**

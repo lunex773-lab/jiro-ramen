@@ -15,6 +15,7 @@ export * from './data/stages';
 export * from './data/career';
 export * from './data/names';
 export * from './data/events';
+export * from './data/properties';
 
 export * from './sim/notices';
 export * from './sim/economy';
@@ -37,5 +38,6 @@ export * from './sim/visitors';
 export * from './sim/complaints';
 export * from './sim/accident';
 export * from './sim/commute';
+export * from './sim/company';
 export * from './save';
 export * from './net';

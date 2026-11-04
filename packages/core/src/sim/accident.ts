@@ -34,7 +34,8 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 /** その日の仕込み開始時点の控えを作る（nextDay と新規キャリアの1日目からだけ呼ぶ） */
 export function takePrepSnapshot(s: GameState): void {
-  const { prepSnapshot: _snap, history: _history, reviews: _reviews, players: _players, ...rest } = s;
+  // 会社（ほかの店の中身）は控えに入れない（事故はプレイヤーがいる店だけのこと。控えも軽くなる）
+  const { prepSnapshot: _snap, history: _history, reviews: _reviews, players: _players, company: _company, ...rest } = s;
   s.prepSnapshot = { day: s.day, state: clone(rest) };
 }
 
@@ -255,7 +256,7 @@ export function accidentFainted(s: GameState): boolean {
 /**
  * 事故当日の仕込み開始時点に戻す。
  * 戻すもの: 店・設備・在庫・客と注文・当日の売上と支出・従業員・当日のイベント・時刻と営業日の進行（控えの中身）
- * 戻さないもの: 前日までの日報・口コミ（控えと同じ）、プレイヤーの顔ぶれ、ID の連番、乱数、イベントの発生記録、状態の版番号
+ * 戻さないもの: 前日までの日報・口コミ（控えと同じ）、プレイヤーの顔ぶれ、ID の連番、乱数、イベントの発生記録、状態の版番号、会社（ほかの店）
  */
 export function resetAccident(s: GameState, actorId: Id, accidentId: unknown, ctx: SimCtx): { ok: boolean; reason?: string } {
   const ev = s.events;
@@ -278,6 +279,7 @@ export function resetAccident(s: GameState, actorId: Id, accidentId: unknown, ct
     history: s.history,
     reviews: s.reviews,
     prepSnapshot: snap,
+    company: s.company,
     version: s.version,
     nextId: Math.max(s.nextId, snap.state.nextId),
     rng: s.rng,
