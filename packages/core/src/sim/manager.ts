@@ -30,6 +30,11 @@ function avgSkill(e: Employee): number {
   return (k.speed + k.cooking + k.service + k.movement) / 4;
 }
 
+export interface ManagerDayOptions {
+  /** 来客の倍率（オンライン市場で、同じ地域の競合の店に客を取られる分。1 = 競合なし） */
+  demandMult?: number;
+}
+
 export interface ManagerDayPlan {
   open: boolean;
   /** 休む理由（休むとき） */
@@ -41,15 +46,17 @@ export interface ManagerDayPlan {
   ticket: number;
 }
 
-/** 1日の処理能力（杯）。席の数・店長と従業員の担当と能力・冷蔵庫の容量の小さいほう */
-export function storeCapacity(s: GameState, managerId: string | null): ManagerDayPlan['capacity'] {
+/**
+ * 1日の処理能力（杯）。席の数・店長と従業員の担当と能力・冷蔵庫の容量の小さいほう。
+ * lead は店を回す人（店長の社員、または店主）。null なら人手は0（休業）
+ */
+export function storeCapacity(s: GameState, lead: { id: string | null; skill: number } | null): ManagerDayPlan['capacity'] {
   const m = M();
   const seats = s.seats.filter((x) => x.installed && x.index < STAGES[s.career.stage]!.seats.length).length * m.seatTurns;
-  const mgr = s.employees.find((e) => e.id === managerId);
   let labor = 0;
-  if (mgr) {
-    labor = (m.leadPoints * skillFactor(avgSkill(mgr))) / skillFactor(0.65);
-    const others = s.employees.filter((e) => e.id !== managerId);
+  if (lead) {
+    labor = (m.leadPoints * skillFactor(lead.skill)) / skillFactor(0.65);
+    const others = s.employees.filter((e) => e.id !== lead.id);
     let extra = 0;
     for (const e of others) extra += (m.rolePoints[e.profile.role] ?? 10) * (skillFactor(avgSkill(e)) / skillFactor(0.65));
     labor += extra / (1 + m.extraDiminish * Math.max(0, others.length - 1));
@@ -58,19 +65,29 @@ export function storeCapacity(s: GameState, managerId: string | null): ManagerDa
   return { seats, labor, fridge, total: Math.max(0, Math.min(seats, labor, fridge)) };
 }
 
+/**
+ * その店を回す人: 店長（社員）。店長がいなくても、店主が自分で回す店（オンライン市場の本店など、company.ownerStoreId）は店主
+ */
+export function storeLead(s: GameState, entry: StoreEntry): { id: string | null; skill: number; owner: boolean } | null {
+  const mgr = entry.managerId ? s.employees.find((e) => e.id === entry.managerId) : undefined;
+  if (mgr) return { id: mgr.id, skill: avgSkill(mgr), owner: false };
+  if (s.company?.ownerStoreId === entry.id) return { id: null, skill: M().ownerSkill, owner: true };
+  return null;
+}
+
 /** 方針の価格の倍率を、メニューの値段に反映する */
 function applyPolicyPrices(s: GameState, entry: StoreEntry): void {
   for (const m of Object.values(MENU)) s.prices[m.id] = Math.round((m.defaultPrice * entry.policy.priceMult) / 10) * 10;
 }
 
 /** その日の計画（読むだけ。店の中身が GameState に入っているときに呼ぶ） */
-export function planManagerDay(s: GameState, entry: StoreEntry): ManagerDayPlan {
-  const mgr = entry.managerId ? s.employees.find((e) => e.id === entry.managerId) : undefined;
-  const closedReason = s.closedForConstruction > 0 ? '工事・準備のため休業' : !mgr ? '店長がいないため休業' : null;
-  const capacity = storeCapacity(s, mgr?.id ?? null);
+export function planManagerDay(s: GameState, entry: StoreEntry, opts: ManagerDayOptions = {}): ManagerDayPlan {
+  const lead = storeLead(s, entry);
+  const closedReason = s.closedForConstruction > 0 ? '工事・準備のため休業' : !lead ? '店長がいないため休業' : null;
+  const capacity = storeCapacity(s, lead);
   const ticket = expectedTicket(s) * M().ticketFactor;
   if (closedReason) return { open: false, closedReason, arrivals: 0, capacity, served: 0, ticket };
-  const arrivals = expectedDailyArrivals(s, { events: false });
+  const arrivals = expectedDailyArrivals(s, { events: false }) * (opts.demandMult ?? 1);
   const served = Math.floor(Math.min(capacity.total, arrivals * M().joinShare));
   return { open: true, closedReason: null, arrivals, capacity, served, ticket };
 }
@@ -117,7 +134,7 @@ function payOrAccrue(s: GameState, type: Parameters<typeof cash>[1], amount: num
 }
 
 /** 店の中身が GameState に入っている状態で、その日の店長の営業を計算して日報を作る */
-function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx): DayReport {
+function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, opts: ManagerDayOptions): DayReport {
   const m = M();
   const prop = storeProperty(entry);
   const st = STAGES[s.career.stage]!;
@@ -131,7 +148,7 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx): 
   for (const d of s.deliveries) addLot(s, d.itemId, d.qty, d.unitCost);
   s.deliveries = [];
   expireLots(s, ctx);
-  const plan = planManagerDay(s, entry);
+  const plan = planManagerDay(s, entry, opts);
   let served = 0;
   if (plan.open) {
     s.closedForConstruction = 0;
@@ -178,11 +195,11 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx): 
   payOrAccrue(s, 'utilities', t.utilities, `${name}の光熱費`, key('util'));
   payOrAccrue(s, 'repair', t.repairs, `${name}の修理・メンテ`, key('repair'));
   // 評判: 店長の能力・値段で決まる目標に少しずつ近づく。休んだ日は下がる
-  const mgr = entry.managerId ? s.employees.find((e) => e.id === entry.managerId) : undefined;
-  if (plan.open && mgr) {
+  const lead = storeLead(s, entry);
+  if (plan.open && lead) {
     const pm = entry.policy.priceMult;
     const target = clamp(
-      m.repBase + m.repManagerSlope * (avgSkill(mgr) - 0.65) - m.repHighPricePenalty * Math.max(0, pm - 1.1) + m.repLowPriceBonus * Math.max(0, 1 - pm),
+      m.repBase + m.repManagerSlope * (lead.skill - 0.65) - m.repHighPricePenalty * Math.max(0, pm - 1.1) + m.repLowPriceBonus * Math.max(0, 1 - pm),
       1,
       5,
     );
@@ -212,6 +229,10 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx): 
   };
   s.history.push(report);
   if (s.history.length > 60) s.history.splice(0, s.history.length - 60);
+  // キャリア（会社のもの）: 累計の杯数・1日の最高（目標の解放に使う）
+  s.career.totalServed += served;
+  s.career.bestDayServed = Math.max(s.career.bestDayServed, served);
+  if (served > 0) s.career.bestDayProfit = Math.max(s.career.bestDayProfit, report.operatingProfit);
   return report;
 }
 
@@ -219,10 +240,19 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx): 
  * プレイヤーがいない店のその日を、店長の営業で計算する（日報を店の日報に足し、お金は会社で動かす）。
  * 休んだ店（工事・店長なし）も家賃・維持費・社員の日給を払う
  */
-export function runManagerDay(s: GameState, entry: StoreEntry, day: number, _ctx: SimCtx): DayReport {
+export function runManagerDay(s: GameState, entry: StoreEntry, day: number, _ctx: SimCtx, opts: ManagerDayOptions = {}): DayReport {
   const quiet = makeCtx();
   return withStore(s, entry, () => {
     s.today = emptyDayStats();
-    return runInStore(s, entry, day, quiet);
+    return runInStore(s, entry, day, quiet, opts);
+  });
+}
+
+/** その店が競合なしで迎える来客の見込み（人/日。方針の価格で。休業なら0）。オンライン市場の客の取り合いの計算に使う */
+export function standaloneArrivals(s: GameState, entry: StoreEntry): number {
+  return withStore(s, entry, () => {
+    applyPolicyPrices(s, entry);
+    if (s.closedForConstruction > 0 || !storeLead(s, entry)) return 0;
+    return expectedDailyArrivals(s, { events: false });
   });
 }

@@ -41,5 +41,7 @@ export * from './sim/commute';
 export * from './sim/company';
 export * from './sim/stores';
 export * from './sim/manager';
+export * from './data/market';
+export * from './market';
 export * from './save';
 export * from './net';

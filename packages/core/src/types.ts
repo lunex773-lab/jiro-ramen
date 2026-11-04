@@ -1190,6 +1190,11 @@ export interface CompanyDayReport {
 }
 
 export interface CompanyState {
+  /**
+   * 店長がいなくても店主（プレイヤー）が自分で回す店（オンライン市場の本店）。店長の営業の計算では店主が店長の代わりになる。
+   * ひとりプレイでは使わない（プレイヤーがいる店は細かいシミュレーション）
+   */
+  ownerStoreId?: Id;
   activeStoreId: Id;
   stores: StoreEntry[];
   /** 会社の日報（直近60日） */
