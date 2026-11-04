@@ -187,9 +187,15 @@ function buySeats(s: GameState, ctx: SimCtx): void {
   }
 }
 
+/** 上手なプレイヤーの基本: 自動発注「売れ行きに合わせる」、すべての設備の定期メンテを予約（壊れる前に手入れする） */
 const salesMode = (s: GameState, ctx: SimCtx) => {
   applyAction(s, 'p1', { type: 'setAutoOrderMode', mode: 'sales' }, ctx);
+  bookMaintenance(s, ctx);
 };
+
+function bookMaintenance(s: GameState, ctx: SimCtx): void {
+  for (const e of s.equipment) if (!e.maintenanceBooked && (EQUIPMENT[e.type]?.repairCost ?? 0) > 0) applyAction(s, 'p1', { type: 'maintenance', equipmentId: e.id, on: true }, ctx);
+}
 
 function buyPlaced(s: GameState, ctx: SimCtx, type: string, keep: number): boolean {
   const def = EQUIPMENT[type];
@@ -304,7 +310,8 @@ export const CASES: CasePolicy[] = [
     evening: (s, ctx) => {
       tryExpand(s, ctx, false);
       buySeats(s, ctx);
-      if (s.career.stage >= 1) buyPlaced(s, ctx, 'fridge_l', 60_000);
+      if (s.career.stage >= 1) buyPlaced(s, ctx, 'fridge_l', 30_000);
+      bookMaintenance(s, ctx);
     },
   },
 ];
