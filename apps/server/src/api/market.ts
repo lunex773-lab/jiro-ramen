@@ -100,7 +100,12 @@ export async function createMarketApi(req: Request, env: Env, ctx: ExecutionCont
   const companyName = cleanName(body.companyName);
   if (!companyName) throw new HttpError(400, 'invalid_name', '会社（店）の名前は1〜20文字で入力してください');
   const settings = parseSettings(body.settings);
-  const open = await env.DB.prepare("SELECT COUNT(*) AS n FROM markets WHERE owner_id = ? AND status = 'open'").bind(player.id).first<{ n: number }>();
+  // 競争期間が終わった市場は数えない（そこで営業は続けられるが、新しい市場を作れなくはしない）
+  const open = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM markets m LEFT JOIN communities c ON c.market_id = m.id WHERE m.owner_id = ? AND m.status = 'open' AND (c.ends_at IS NULL OR c.ends_at > ?)",
+  )
+    .bind(player.id, Date.now())
+    .first<{ n: number }>();
   if ((open?.n ?? 0) >= MAX_OPEN_MARKETS_PER_PLAYER) throw new HttpError(409, 'too_many_markets', `作れる市場は${MAX_OPEN_MARKETS_PER_PLAYER}つまでです`);
   await requireCompanySlot(env, player.id);
   const marketId = crypto.randomUUID();
@@ -283,7 +288,7 @@ export async function retireCompanyApi(env: Env, ctx: ExecutionContext, player: 
   if (typeof b.companyId === 'string') {
     await env.DB.prepare("UPDATE market_companies SET status = 'retired', updated_at = ? WHERE market_id = ? AND company_id = ?").bind(Date.now(), marketId, b.companyId).run();
   }
-  ctx.waitUntil(audit(env.DB, { kind: 'market_join', playerId: player.id, detail: { marketId, retired: b.companyId ?? null } }));
+  ctx.waitUntil(audit(env.DB, { kind: 'market_retire', playerId: player.id, detail: { marketId, companyId: b.companyId ?? null } }));
   return json({ ok: true });
 }
 

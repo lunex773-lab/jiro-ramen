@@ -99,3 +99,37 @@ export async function grantGlobalRewards(db: D1Database, today: DateKey, now: nu
   }
   return n;
 }
+
+/** 大会の称号（オーナーの判断 17「上位3社に称号」） */
+export function finalTitle(marketName: string, rank: number): string {
+  return rank === 1 ? `🏆 ${marketName} 優勝` : rank === 2 ? `🥈 ${marketName} 準優勝` : `🥉 ${marketName} 3位`;
+}
+
+/**
+ * 大会が終わったら（競争期間の最後の日の同期のあと）、その市場の累計の総合で上位3社（プレイヤー企業だけ）に称号。
+ * 企業ごとに一つ（reward_key で一意。何度呼んでも二重には渡さない）
+ */
+export async function grantFinalRewards(db: D1Database, marketId: string, marketName: string, now: number): Promise<number> {
+  const rows = await rowsOf(db, "SELECT * FROM rank_agg WHERE scope_key = 'T' AND market_id = ?", marketId);
+  const top = computeRanking(rows, 'community', 'overall').filter((l) => l.rank <= 3 && l.kind === 'player' && l.playerId);
+  if (top.length === 0) return 0;
+  await db.batch(
+    top.map((l) =>
+      db
+        .prepare('INSERT OR IGNORE INTO rewards (reward_key, player_id, market_id, company_id, scope_key, board, metric, rank, title, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(`final:${marketId}:${l.companyId}`, l.playerId, marketId, l.companyId, 'T', 'community', 'final', l.rank, finalTitle(marketName, l.rank), now),
+    ),
+  );
+  return top.length;
+}
+
+/** 大会の称号を渡し忘れた市場（最後の日に誰も遊ばず同期がなかった市場など）を、終わって1日たってから拾う（毎日の定時の処理） */
+export async function grantEndedCommunities(db: D1Database, now: number): Promise<number> {
+  const r = await db
+    .prepare('SELECT m.id, m.name FROM communities c JOIN markets m ON m.id = c.market_id WHERE c.ends_at IS NOT NULL AND c.ends_at <= ? AND c.ends_at > ?')
+    .bind(now - 86_400_000, now - 7 * 86_400_000)
+    .all<{ id: string; name: string }>();
+  let n = 0;
+  for (const m of r.results) n += await grantFinalRewards(db, m.id, m.name, now);
+  return n;
+}

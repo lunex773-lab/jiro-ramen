@@ -44,7 +44,7 @@ import {
 } from '@jiro/core';
 import type { Env } from './env';
 import { RidCache } from './checkpoint';
-import { grantCommunityRewards, rankStatements } from './rank-store';
+import { grantCommunityRewards, grantFinalRewards, rankStatements } from './rank-store';
 import { ensureSchema } from './schema';
 import { isObj, log, safeJsonParse } from './util';
 
@@ -331,6 +331,8 @@ export class MarketRoom extends DurableObject<Env> {
     await db.batch(stmts);
     // その日で週・月・年が終わるなら、コミュニティ内の上位に称号（同じ順位で二度は渡さない）
     await grantCommunityRewards(db, m.id, periodId, now);
+    // 競争期間の最後の日なら、大会の上位3社に称号
+    if (m.settings.endsAt !== null && periodId >= jstDateKey(m.settings.endsAt - 1)) await grantFinalRewards(db, m.id, m.name, now);
   }
 
   override async alarm(): Promise<void> {

@@ -1370,6 +1370,8 @@ export interface MarketView {
   mine: { companyId: Id; state: GameState; progress: CompanyProgress; openDay: OpenDay | null; lastCommit: CommitResult | null; days: CompanyDayRecord[] } | null;
   /** 出店先の地域ごとの空いている物件の数 */
   freeSlots: Record<string, number>;
+  /** 見ている人のこの市場での会社の状態（移った・引退した会社も。参加していなければ null） */
+  myStatus: CompanyStatus | null;
   /** 競争期間が終わった（0時の同期とランキングはない。営業は続けられる） */
   ended?: boolean;
   /** 同期の状態（進行中・直近） */
@@ -1425,6 +1427,7 @@ export function marketView(m: MarketState, ownerId: string | null, now?: number)
       ? { companyId: me.id, state: me.state, progress: me.progress, openDay: me.openDay, lastCommit: me.lastCommit ? (({ token: _t, ...r }) => r)(me.lastCommit) : null, days: me.days.slice(-30) }
       : null,
     freeSlots: free,
+    myStatus: me?.status ?? (ownerId ? ([...m.companies].reverse().find((c) => c.kind === 'player' && c.ownerId === ownerId)?.status ?? null) : null),
     ended: now !== undefined ? isEnded(m, now) : undefined,
     sync: m.sync && m.sync.status !== 'done' ? m.sync : null,
     lastSync: m.syncLog[m.syncLog.length - 1] ?? null,

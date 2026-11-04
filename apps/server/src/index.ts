@@ -5,9 +5,9 @@ import { createAnonymous, gameVersion, profile } from './api/account';
 import { deleteSave, downloadSave, uploadSave } from './api/saves';
 import { connectRoom, createSession, joinSession, leaveSession } from './api/session';
 import { rankingsApi, rewardsApi } from './api/ranking';
-import { grantGlobalRewards } from './rank-store';
+import { grantEndedCommunities, grantGlobalRewards } from './rank-store';
 import { jstDateKey } from '@jiro/core';
-import { actMarketApi, commitDayApi, createMarketApi, joinMarketApi, listMarketsApi, startDayApi, viewMarketApi } from './api/market';
+import { actMarketApi, commitDayApi, createMarketApi, joinMarketApi, listMarketsApi, publicCommunitiesApi, retireCompanyApi, startDayApi, viewMarketApi } from './api/market';
 import { requirePlayer } from './auth';
 import type { Env } from './env';
 import { allowedOrigins, corsHeaders, errorResponse, HttpError, withCors } from './http';
@@ -54,6 +54,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const marketView = /^\/api\/v1\/market\/([^/]+)$/.exec(path);
   const marketAct = /^\/api\/v1\/market\/([^/]+)\/act$/.exec(path);
   const marketDay = /^\/api\/v1\/market\/([^/]+)\/day\/(start|commit)$/.exec(path);
+  const marketRetire = /^\/api\/v1\/market\/([^/]+)\/retire$/.exec(path);
   const rankingPath = path === '/api/v1/rankings' || path === '/api/v1/rewards';
   const known =
     path === '/api/v1/profile' ||
@@ -62,10 +63,12 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     path === '/api/v1/session/join' ||
     path === '/api/v1/session/leave' ||
     path === '/api/v1/markets' ||
+    path === '/api/v1/communities' ||
     saveSlot !== null ||
     marketView !== null ||
     marketAct !== null ||
     marketDay !== null ||
+    marketRetire !== null ||
     rankingPath;
   if (!known) throw new HttpError(404, 'not_found', 'API が見つかりません');
 
@@ -97,6 +100,11 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   }
   // 共通市場（docs/MARKET_RANKING_PLAN.md）
   if (path === '/api/v1/markets' && m === 'GET') return listMarketsApi(env, player);
+  if (path === '/api/v1/communities' && m === 'GET') return publicCommunitiesApi(env);
+  if (marketRetire && m === 'POST') {
+    limit(HTTP_LIMITS.session, player.id);
+    return retireCompanyApi(env, ctx, player, decodeURIComponent(marketRetire[1]!));
+  }
   if (marketView && marketView[1] === 'create' && m === 'POST') {
     limit(HTTP_LIMITS.session, player.id);
     return createMarketApi(req, env, ctx, player);
@@ -146,7 +154,8 @@ export default {
       (async () => {
         await ensureSchema(env.DB);
         const n = await grantGlobalRewards(env.DB, jstDateKey(Date.now()), Date.now());
-        log('info', 'global_rewards', { granted: n });
+        const f = await grantEndedCommunities(env.DB, Date.now());
+        log('info', 'global_rewards', { granted: n, final: f });
       })().catch((e: unknown) => log('error', 'global_rewards_failed', { error: String(e) })),
     );
   },

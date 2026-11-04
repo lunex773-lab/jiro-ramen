@@ -25,6 +25,8 @@ export type AuditKind =
   | 'checkpoint_corrupt'
   | 'market_create'
   | 'market_join'
+  /** 会社の引退（終わった市場・破産した会社） */
+  | 'market_retire'
   /** 端末から届いた1日を受け取らなかった（前日の状態から説明できない）。detail に理由 */
   | 'market_day_rejected'
   /** 受け取ったが上限を超えた・食い違いがあった（順位から外す）。detail に理由 */
