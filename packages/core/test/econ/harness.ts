@@ -197,11 +197,32 @@ function bookMaintenance(s: GameState, ctx: SimCtx): void {
   for (const e of s.equipment) if (!e.maintenanceBooked && (EQUIPMENT[e.type]?.repairCost ?? 0) > 0) applyAction(s, 'p1', { type: 'maintenance', equipmentId: e.id, on: true }, ctx);
 }
 
-function buyPlaced(s: GameState, ctx: SimCtx, type: string, keep: number): boolean {
+function buyPlaced(s: GameState, ctx: SimCtx, type: string, keep: number, upTo = 1): boolean {
   const def = EQUIPMENT[type];
   if (!def || s.money < def.price + keep) return false;
-  if (s.equipment.some((e) => e.type === type)) return false;
+  if (s.equipment.filter((e) => e.type === type).length >= upTo) return false;
   return applyAction(s, 'p1', { type: 'buyEquipment', equipType: type, autoPlace: true }, ctx).ok;
+}
+
+/**
+ * 上手なプレイヤーの拡張: 工事費＋運転資金＋余裕（150,000円）＋仕込みの設備（2台目の煮込み鍋・野菜ゆで釜）の分があるときだけ拡張し、
+ * すぐに仕込みの設備と席をそろえる。業務用冷蔵庫は余裕ができてから
+ */
+function growCarefully(s: GameState, ctx: SimCtx): void {
+  const info = expansionInfo(s);
+  const prepCost = (EQUIPMENT.braise_pot?.price ?? 0) + (EQUIPMENT.veg_boiler?.price ?? 0);
+  if (info.next && info.canExpand && s.money >= info.cost + info.next.minFundsAfter + 150_000 + prepCost) applyAction(s, 'p1', { type: 'expand' }, ctx);
+  if (s.career.stage < 1) return;
+  buyPlaced(s, ctx, 'braise_pot', 30_000, 2);
+  buyPlaced(s, ctx, 'veg_boiler', 30_000, 2);
+  const st = STAGES[s.career.stage]!;
+  for (const seat of s.seats) {
+    if (seat.installed || seat.index >= st.seats.length) continue;
+    if (s.money < 80_000) break;
+    applyAction(s, 'p1', { type: 'buySeat', seatIndex: seat.index }, ctx);
+  }
+  buyPlaced(s, ctx, 'fridge_l', 150_000);
+  bookMaintenance(s, ctx);
 }
 
 export const CASES: CasePolicy[] = [
@@ -301,18 +322,13 @@ export const CASES: CasePolicy[] = [
   },
   {
     id: 'c17_growth_full',
-    name: '17. 14＋拡張のあと業務用冷蔵庫を買う（成長に必要な設備もそろえる）',
+    name: '17. 上手な成長: 調理担当＋余裕をもって拡張＋席・2台目の煮込み鍋・業務用冷蔵庫＋接客担当',
     setup: salesMode,
     morning: (s, ctx) => {
       if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
       else if (s.career.stage >= 1 && s.employees.length < 3) hireCheapest(s, ctx, 'server');
     },
-    evening: (s, ctx) => {
-      tryExpand(s, ctx, false);
-      buySeats(s, ctx);
-      if (s.career.stage >= 1) buyPlaced(s, ctx, 'fridge_l', 30_000);
-      bookMaintenance(s, ctx);
-    },
+    evening: (s, ctx) => growCarefully(s, ctx),
   },
 ];
 
