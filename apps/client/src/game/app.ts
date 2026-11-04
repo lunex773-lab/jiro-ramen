@@ -34,6 +34,8 @@ import { isRotated, isStandalone, lockLandscape } from './orientation';
 import { loadSettings, saveSettings, type Settings } from './settings';
 import { findFocus, interactableBoxes } from './targeting';
 import { openLobby } from '../ui/lobby';
+import { MarketScreen, openMarketLobby } from '../ui/market';
+import type { Api, Auth } from '../net/api';
 import { installRotatedScroll } from '../ui/rotated-scroll';
 import { cloudDownload, cloudUpload } from '../net/cloud';
 
@@ -166,6 +168,7 @@ export class App {
           onSingle: () => this.showSlots(),
           onTutorial: () => this.startTutorialOnly(),
           onMulti: () => this.showLobby(),
+          onMarket: () => this.showMarketLobby(),
           onHelp: () => this.showHelp(() => this.showTitle()),
           onSettings: () => this.showSettings(() => this.showTitle()),
         },
@@ -265,6 +268,19 @@ export class App {
     this.leaveGame();
     const el = openLobby(this, () => this.showTitle());
     this.show(el);
+  }
+
+  /** オンライン市場の入口（作る・招待コードで入る・参加している市場） */
+  showMarketLobby(): void {
+    this.leaveGame();
+    this.show(openMarketLobby(this, () => this.showTitle()));
+  }
+
+  /** オンライン市場の画面（サーバーの市場を読み直しながら経営する） */
+  showMarket(api: Api, auth: Auth, marketId: string): void {
+    this.leaveGame();
+    const screen = new MarketScreen(this.uiLayer, api, auth, marketId, () => this.showMarketLobby());
+    this.show(screen.el);
   }
 
   // ───────────────── ゲーム開始・終了 ─────────────────

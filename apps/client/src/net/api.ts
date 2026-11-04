@@ -1,6 +1,6 @@
 // バックエンド（Cloudflare Workers）の HTTP API クライアント（設計書 18.1）。
 
-import type { SaveFile } from '@jiro/core';
+import type { Action, ActionResult, SaveFile } from '@jiro/core';
 
 const URL_KEY = 'jiro.serverUrl';
 const AUTH_KEY = 'jiro.auth';
@@ -119,6 +119,28 @@ export class Api {
 
   downloadSave(token: string, slot: number): Promise<{ save: SaveFile; revision: number }> {
     return this.req(`/api/v1/save/${slot}`, { token });
+  }
+
+  // ── オンライン市場（Phase 3+4） ──
+
+  createMarket(token: string, name: string, companyName: string): Promise<{ marketId: string; code: string; name: string }> {
+    return this.req('/api/v1/market/create', { method: 'POST', token, body: JSON.stringify({ name, companyName }) });
+  }
+
+  joinMarket(token: string, code: string, companyName: string): Promise<{ marketId: string; companyId: string | null }> {
+    return this.req('/api/v1/market/join', { method: 'POST', token, body: JSON.stringify({ code: code.trim().toUpperCase(), companyName }) });
+  }
+
+  listMarkets(token: string): Promise<{ markets: { marketId: string; code: string; name: string; createdAt: number; isOwner: boolean }[] }> {
+    return this.req('/api/v1/markets', { token });
+  }
+
+  viewMarket<T>(token: string, marketId: string): Promise<T> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}`, { token });
+  }
+
+  actMarket(token: string, marketId: string, cid: string, action: Action): Promise<ActionResult & { duplicate?: boolean }> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/act`, { method: 'POST', token, body: JSON.stringify({ cid, action }) });
   }
 
   wsUrl(roomId: string, joinToken: string): string {

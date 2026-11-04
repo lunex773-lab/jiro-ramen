@@ -970,3 +970,18 @@ input, select { font: inherit; }
 .auto-mode { gap: 6px; align-items: center; margin: 4px 0; font-size: 12px; }
 .auto-mode .mini.on { background: var(--yellow); color: #1a1408; }
 .auto-now { color: var(--muted); font-size: 11px; margin-left: 4px; }
+
+/* オンライン市場（Phase 3+4） */
+.screen.market .screen-inner.wide { max-width: 1100px; }
+.market-head { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; align-items: center; margin-bottom: 10px; }
+.market-head h2 { grid-column: 1 / -1; margin-bottom: 4px; }
+.market-head .market-code { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.market-head .room-code { font-size: 22px; padding: 4px 12px; }
+.market-standings .rank { flex: 0 0 26px; font-weight: 900; color: var(--yellow); font-size: 18px; text-align: center; }
+.market-standings .trow.mine { background: rgba(242, 194, 0, 0.08); border-radius: 8px; padding-left: 6px; }
+.market-standings .trow.mine .tname { color: var(--yellow); }
+.market-standings .trow.gone { opacity: 0.5; }
+.market-mine-col { display: contents; }
+.market-log .trow .tsub { flex: 0 0 64px; }
+.staff-list .trow { padding: 4px 0; }
+.staff-list select, .store-card select { max-width: 60%; }

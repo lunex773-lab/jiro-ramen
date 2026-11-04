@@ -27,6 +27,8 @@ export interface TitleCallbacks {
   /** チュートリアル（営業0日目の練習）だけを遊ぶ。セーブはしない */
   onTutorial(): void;
   onMulti(): void;
+  /** オンライン市場（AI 企業と同じ街で競う。Phase 3+4） */
+  onMarket(): void;
   onHelp(): void;
   onSettings(): void;
 }
@@ -47,6 +49,7 @@ export function titleScreen(cb: TitleCallbacks, version: string): HTMLElement {
       h('button', { class: 'btn big primary', onclick: () => cb.onSingle() }, '🍜 ひとりで経営する'),
       h('button', { class: 'btn', onclick: () => cb.onTutorial() }, '📘 チュートリアル（営業0日目の練習）'),
       h('button', { class: 'btn big', onclick: () => cb.onMulti() }, '👥 オンライン共同経営（最大4人）'),
+      h('button', { class: 'btn big', onclick: () => cb.onMarket() }, '🏙 オンライン市場（AI 企業と競う）'),
       h('div', { class: 'row' }, h('button', { class: 'btn ghost', onclick: () => cb.onHelp() }, '遊び方'), h('button', { class: 'btn ghost', onclick: () => cb.onSettings() }, '設定')),
     ),
     h('div', { class: 'foot' }, `v${version} ・ 店名・人物はすべて架空です`),
