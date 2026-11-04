@@ -217,7 +217,8 @@ export function arrivalRate(s: GameState): number {
   const ticketF = ticketMachines.length === 0 ? 0.6 : 1;
   // SNS バズ・覆面調査員の記事の反響（売上は通常どおり提供したときに計上される）
   const eventF = eventDemandFactor(s);
-  return c.baseRate * repF * timeCurve(x) * priceF * demand * regularF * ticketF * eventF;
+  const stageF = c.stageDemand[s.career.stage] ?? c.stageDemand[c.stageDemand.length - 1] ?? 1;
+  return c.baseRate * repF * timeCurve(x) * priceF * demand * regularF * ticketF * eventF * stageF;
 }
 
 function activeCustomers(s: GameState): number {

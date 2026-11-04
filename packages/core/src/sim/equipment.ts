@@ -89,7 +89,7 @@ export function useEquipment(s: GameState, ctx: SimCtx, e: Equipment, times = 1)
   const def = defOf(e);
   e.uses += times;
   if (def.utilityPerUse > 0) recordPL(s, 'utilities', def.utilityPerUse * times);
-  if (def.wearPerUse > 0) e.condition = clamp(e.condition - def.wearPerUse * times, 0, 100);
+  if (def.wearPerUse > 0) e.condition = clamp(e.condition - def.wearPerUse * BALANCE.equipment.wearMult * times, 0, 100);
   if (e.status === 'repairing') return;
   let st = statusFromCondition(e.condition);
   if (st !== 'broken' && def.failureBase > 0) {
@@ -160,7 +160,7 @@ export function finishRepair(s: GameState, ctx: SimCtx, e: Equipment): void {
 }
 
 export function maintenanceCost(e: Equipment): number {
-  return Math.max(2_000, Math.round(defOf(e).repairCost * 0.2));
+  return Math.max(BALANCE.equipment.maintenanceMin, Math.round(defOf(e).repairCost * BALANCE.equipment.maintenanceRate));
 }
 
 /** 定期メンテを行う状態の目安（これを下回ったら閉店後に実施） */

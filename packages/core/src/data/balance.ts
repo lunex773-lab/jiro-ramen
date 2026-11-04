@@ -13,6 +13,15 @@ export const BALANCE = {
   utilitiesBase: 2_500,
   utilitiesPerBowl: 25,
 
+  /** 設備の摩耗と定期メンテ（統合進化設計書 v2.1 の経済の調整） */
+  equipment: {
+    /** 1回使うごとの摩耗（設備ごとの wearPerUse）に掛ける倍率 */
+    wearMult: 1,
+    /** 定期メンテの費用 = 修理費 × rate（最低 min） */
+    maintenanceRate: 0.2,
+    maintenanceMin: 2_000,
+  },
+
   /** 支払いの猶予日数（これを超えた未払いは期限超過） */
   arrearsGraceDays: 3,
   /** 資金注意の閾値（固定費の何日分） */
@@ -46,6 +55,11 @@ export const BALANCE = {
     eatTimeBase: 22,
     /** 店外行列の長さに対する入店意欲の減衰 */
     balkPerQueue: 0.06,
+    /**
+     * 店の大きさ（拡張の段階）ごとの来客の倍率（統合進化設計書 v2.1 の経済の調整）。
+     * 店が大きいほど目立ち、行列も見えるので人が集まる。拡張すると来客が増え、人を増やして杯数を出せば利益になる
+     */
+    stageDemand: [1, 1, 1, 1] as readonly number[],
     patienceBase: 150,
   },
 

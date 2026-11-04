@@ -184,7 +184,7 @@ function buySeats(s: GameState, ctx: SimCtx): void {
   const st = STAGES[s.career.stage]!;
   for (const seat of s.seats) {
     if (seat.installed || seat.index >= st.seats.length) continue;
-    if (s.money < 150_000) break;
+    if (s.money < 40_000) break;
     applyAction(s, 'p1', { type: 'buySeat', seatIndex: seat.index }, ctx);
   }
 }
@@ -230,8 +230,9 @@ export const CASES: CasePolicy[] = [
       if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
     },
   },
-  { id: 'c3_high_price', name: '3. 高価格（定価の1.3倍）', setup: (s, ctx) => setAllPrices(s, ctx, 1.3) },
-  { id: 'c4_low_price', name: '4. 低価格（定価の0.8倍）', setup: (s, ctx) => setAllPrices(s, ctx, 0.8) },
+  // 価格は毎朝（あとから解放されたメニューも同じ倍率にする）
+  { id: 'c3_high_price', name: '3. 高価格（定価の1.3倍）', morning: (s, ctx) => setAllPrices(s, ctx, 1.3) },
+  { id: 'c4_low_price', name: '4. 低価格（定価の0.8倍）', morning: (s, ctx) => setAllPrices(s, ctx, 0.8) },
   {
     id: 'c5_more_staff',
     name: '5. 従業員を増やす（調理＋接客の2人）',

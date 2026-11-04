@@ -2,7 +2,22 @@
 //   ECON_SIM=1 ECON_DAYS=90 ECON_OUT=/path/out.json npx vitest run test/econ/economy-sim.test.ts
 import { writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { BALANCE, STAGES } from '../../src';
 import { CASES, EQUIPMENT_PRICES, EXPANSION_COSTS, runCase, summarize } from './harness';
+
+/** 調整案を試す: ECON_TUNE='{"equipment.wearMult":0.6,"STAGES.1.constructionCost":450000}' */
+function applyTune(json: string | undefined): void {
+  if (!json) return;
+  const t = JSON.parse(json) as Record<string, unknown>;
+  for (const [path, v] of Object.entries(t)) {
+    const keys = path.split('.');
+    let o: Record<string, unknown> = keys[0] === 'STAGES' ? (STAGES as unknown as Record<string, unknown>) : (BALANCE as unknown as Record<string, unknown>);
+    const rest = keys[0] === 'STAGES' ? keys.slice(1) : keys;
+    for (const k of rest.slice(0, -1)) o = o[k] as Record<string, unknown>;
+    o[rest[rest.length - 1]!] = v;
+  }
+}
+applyTune(process.env.ECON_TUNE);
 
 const ON = process.env.ECON_SIM === '1';
 const DAYS = Number(process.env.ECON_DAYS ?? 90);
@@ -19,7 +34,7 @@ describe.skipIf(!ON)('経済バランスの測定（設計書 v2.1 §4.3）', ()
       out.push({ ...sum, rows, ms: Date.now() - t0 });
       console.log(`[econ] ${c.id} days=${rows.length} ${Math.round((Date.now() - t0) / 1000)}s d8_30.op=${sum.avg.d8_30?.op} cash90=${sum.at.day90?.cash}`);
     }
-    if (process.env.ECON_OUT) writeFileSync(process.env.ECON_OUT, JSON.stringify({ days: DAYS, expansion: EXPANSION_COSTS, equipment: EQUIPMENT_PRICES, cases: out }, null, 1));
+    if (process.env.ECON_OUT) writeFileSync(process.env.ECON_OUT, JSON.stringify({ days: DAYS, tune: process.env.ECON_TUNE ?? null, expansion: EXPANSION_COSTS, equipment: EQUIPMENT_PRICES, cases: out }, null, 1));
     expect(out.length).toBeGreaterThan(0);
   });
 });
