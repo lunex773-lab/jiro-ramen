@@ -41,6 +41,11 @@ export interface StageDef {
   closureDays: number;
   /** 設備移設費（設備1台あたり） */
   relocationPerItem: number;
+  /**
+   * この大きさの店で、売れ行きに合わせて仕入れるのに必要な冷蔵庫の容量の目安（kg）。拡張の案内に出す。
+   * 12席で1日90杯を超えると、麺・豚肉・もやしが冷蔵庫1台（100kg）に入りきらない（経済の測定）。16・22席は未測定の仮の値
+   */
+  fridgeKgNeeded: number;
   description: string;
 }
 
@@ -65,7 +70,7 @@ export const STAGES: StageDef[] = [
     waitSpots: waitRow(7, 3.1, 0.62, 0.62),
     staffSpawn: { x: 0.5, z: 3.0 },
     playerSpawn: { x: 3.0, z: 3.0 },
-    rent: 8_000, constructionCost: 0, minFundsAfter: 0, maxEquipment: 18, closureDays: 0, relocationPerItem: 0,
+    rent: 8_000, constructionCost: 0, minFundsAfter: 0, maxEquipment: 18, closureDays: 0, relocationPerItem: 0, fridgeKgNeeded: 100,
     description: 'カウンター8席の小さな店。最初はほぼ一人で回す。',
   },
   {
@@ -80,8 +85,10 @@ export const STAGES: StageDef[] = [
     waitSpots: waitRow(11, 3.1, 0.62, 0.62),
     staffSpawn: { x: 0.5, z: 3.0 },
     playerSpawn: { x: 3.0, z: 3.0 },
-    rent: 11_000, constructionCost: 600_000, minFundsAfter: 100_000, unlock: 'stage2', maxEquipment: 24, closureDays: 1,
-    relocationPerItem: 3_000,
+    // 工事費 600,000 → 300,000円・運転資金 100,000 → 60,000円・移設 3,000 → 2,000円/台（経済の調整 Phase 1-5）。
+    // 上手に経営すると25日前後で、工事費＋移設＋席＋2台目の冷蔵庫＋運転資金がたまる（オーナーの判断: 約4時間で12席）
+    rent: 11_000, constructionCost: 300_000, minFundsAfter: 60_000, unlock: 'stage2', maxEquipment: 24, closureDays: 1,
+    relocationPerItem: 2_000, fridgeKgNeeded: 200,
     description: '隣の区画を借りてカウンターを12席に延長。厨房も広がる。',
   },
   {
@@ -97,7 +104,7 @@ export const STAGES: StageDef[] = [
     staffSpawn: { x: 0.5, z: 3.0 },
     playerSpawn: { x: 3.0, z: 3.0 },
     rent: 15_000, constructionCost: 1_400_000, minFundsAfter: 200_000, unlock: 'stage3', maxEquipment: 32, closureDays: 1,
-    relocationPerItem: 4_000,
+    relocationPerItem: 4_000, fridgeKgNeeded: 250,
     description: '奥行きを広げた中規模店。厨房に複数の作業列を置ける。',
   },
   {
@@ -113,7 +120,7 @@ export const STAGES: StageDef[] = [
     staffSpawn: { x: 0.5, z: 3.0 },
     playerSpawn: { x: 3.0, z: 3.0 },
     rent: 22_000, constructionCost: 2_800_000, minFundsAfter: 400_000, unlock: 'stage4', maxEquipment: 44, closureDays: 2,
-    relocationPerItem: 5_000,
+    relocationPerItem: 5_000, fridgeKgNeeded: 350,
     description: '22席の大型店。従業員を活かして大量の客をさばく。',
   },
 ];

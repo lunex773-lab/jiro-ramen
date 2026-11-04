@@ -5,6 +5,7 @@ import {
   BOWL_PACK,
   CALLS,
   EQUIPMENT,
+  expansionAdvice,
   expansionInfo,
   fixedCosts,
   fridgeCapacity,
@@ -888,6 +889,7 @@ export class ManageMenu {
   // ───────────────── 店舗（レイアウト・席・拡張） ─────────────────
   private layout(s: GameState): HTMLElement {
     const info = expansionInfo(s);
+    const adv = expansionAdvice(s);
     const st = STAGES[s.career.stage]!;
     const editable = s.phase === 'closed' || s.phase === 'prep';
     return h(
@@ -929,6 +931,22 @@ export class ManageMenu {
               h('div', { class: 'kv' }, h('span', null, '家賃'), h('b', null, `${yenStr(st.rent)} → ${yenStr(info.next.rent)}/日`)),
               h('div', { class: 'kv' }, h('span', null, '工事による休業'), h('b', null, `${info.next.closureDays}日`)),
               h('div', { class: 'kv' }, h('span', null, '工事後に必要な手元資金'), h('b', null, yenStr(info.next.minFundsAfter))),
+              adv
+                ? h(
+                    'div',
+                    { class: 'exp-advice' },
+                    h('p', { class: 'note' }, '拡張したあとに必要になる物の目安（工事の条件ではありません）'),
+                    adv.seats > 0 ? h('div', { class: 'kv' }, h('span', null, `増える席の椅子（${adv.seats}脚）`), h('b', null, yenStr(adv.seatCost))) : null,
+                    h(
+                      'div',
+                      { class: 'kv' },
+                      h('span', null, `冷蔵庫の容量 ${adv.fridgeKg}kg → 目安 ${adv.fridgeKgNeeded}kg`),
+                      h('b', null, adv.fridges > 0 ? `冷蔵庫 ${adv.fridges}台 ${yenStr(adv.fridgeCost)}` : '足りています'),
+                    ),
+                    h('div', { class: 'kv' }, h('span', null, '合計の目安（工事費・移設・席・冷蔵庫・手元資金）'), h('b', { 'data-exp-total': '' }, yenStr(adv.total))),
+                    adv.fridges > 0 ? h('p', { class: 'note' }, '店が大きくなって杯数が増えると、麺・豚肉・もやしが冷蔵庫に入りきらず品切れが増えます') : null,
+                  )
+                : null,
               info.reason ? h('p', { class: 'note bad' }, info.reason) : null,
               this.host.isHost
                 ? h(

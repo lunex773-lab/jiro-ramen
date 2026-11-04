@@ -1,7 +1,7 @@
 // 店舗レイアウト（設計書 11）: グリッド配置＋一部の微調整のハイブリッド方式。
 // 配置変更は閉店後・準備時間のみ。検証済みの変更だけを確定する。
 
-import { EQUIPMENT } from '../data/equipment';
+import { EQUIPMENT, SEAT_PRICE } from '../data/equipment';
 import { CELL, STAGES } from '../data/stages';
 import { accessPoint, equipmentCenter, equipmentRect, seatKitchenPoint, seatPos, stageOf, type Rect } from '../geometry';
 import { buildNavGrid, cellBlocked, cellVisited, floodFill, isNarrowAt } from '../nav';
@@ -9,6 +9,7 @@ import type { Equipment, GameState, Rot, Vec2 } from '../types';
 import { dist } from '../util';
 import { cash, recordPL } from './economy';
 import { MAX_DEPENDENCY_DIST } from './equipment';
+import { fridgeCapacity } from './inventory';
 import { emit, notify, type SimCtx } from './notices';
 
 export const FINE_ADJUST_MAX = 0.24;
@@ -216,6 +217,33 @@ export function expansionInfo(s: GameState): ExpansionInfo {
   else if (s.arrears.length > 0) reason = '未払いがあると工事できません';
   else if (s.money < cost + next.minFundsAfter) reason = `資金が足りません（工事費＋運転資金 ¥${(cost + next.minFundsAfter).toLocaleString('ja-JP')} が必要）`;
   return { next, cost, relocation, canExpand: reason === null, reason };
+}
+
+export interface ExpansionAdvice {
+  /** 増える席の数と椅子の代金 */
+  seats: number;
+  seatCost: number;
+  /** 今の冷蔵庫の容量と、拡張後の目安 */
+  fridgeKg: number;
+  fridgeKgNeeded: number;
+  /** 目安に足りない分を冷蔵庫（100kg）で足したときの台数と代金 */
+  fridges: number;
+  fridgeCost: number;
+  /** 工事費＋移設費＋席＋冷蔵庫＋工事後に必要な手元資金 */
+  total: number;
+}
+
+/** 拡張したあとに必要になる物の目安（経営の画面の案内。拡張の条件ではない） */
+export function expansionAdvice(s: GameState): ExpansionAdvice | null {
+  const info = expansionInfo(s);
+  if (!info.next) return null;
+  const seats = Math.max(0, info.next.seats.length - stageOf(s).seats.length);
+  const seatCost = seats * SEAT_PRICE;
+  const fridgeKg = fridgeCapacity(s);
+  const per = EQUIPMENT.fridge?.capacity ?? 100;
+  const fridges = Math.max(0, Math.ceil((info.next.fridgeKgNeeded - fridgeKg) / per));
+  const fridgeCost = fridges * (EQUIPMENT.fridge?.price ?? 0);
+  return { seats, seatCost, fridgeKg, fridgeKgNeeded: info.next.fridgeKgNeeded, fridges, fridgeCost, total: info.cost + seatCost + fridgeCost + info.next.minFundsAfter };
 }
 
 export function expand(s: GameState, ctx: SimCtx): { ok: boolean; reason?: string } {

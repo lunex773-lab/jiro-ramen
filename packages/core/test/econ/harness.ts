@@ -9,6 +9,7 @@ import {
   expansionInfo,
   MENU,
   refreshCandidates,
+  SEAT_PRICE,
   STAGES,
   step,
   type DayReport,
@@ -219,23 +220,27 @@ function buyPlaced(s: GameState, ctx: SimCtx, type: string, keep: number, upTo =
 }
 
 /**
- * 上手なプレイヤーの拡張: 工事費＋運転資金＋余裕（150,000円）＋仕込みの設備（2台目の煮込み鍋・野菜ゆで釜）の分があるときだけ拡張し、
- * すぐに仕込みの設備と席をそろえる。業務用冷蔵庫は余裕ができてから
+ * 上手なプレイヤーの拡張: 工事費＋設備の移設＋増える席＋2台目の冷蔵庫＋運転資金がたまったら拡張し、
+ * すぐに席と冷蔵庫をそろえる（12席で1日90杯を超えると、麺・豚肉・もやしが冷蔵庫1台（100kg）に入りきらない）。
+ * 2台目の煮込み鍋・野菜ゆで釜は、拡張のあとの利益で買う
  */
 function growCarefully(s: GameState, ctx: SimCtx): void {
   const info = expansionInfo(s);
-  const prepCost = (EQUIPMENT.braise_pot?.price ?? 0) + (EQUIPMENT.veg_boiler?.price ?? 0);
-  if (info.next && info.canExpand && s.money >= info.cost + info.next.minFundsAfter + 150_000 + prepCost) applyAction(s, 'p1', { type: 'expand' }, ctx);
+  if (info.next && info.canExpand) {
+    const seats = (info.next.seats.length - STAGES[s.career.stage]!.seats.length) * SEAT_PRICE;
+    const fridge = s.equipment.filter((e) => EQUIPMENT[e.type]?.role === 'fridge').length < 2 ? (EQUIPMENT.fridge?.price ?? 0) : 0;
+    if (s.money >= info.cost + info.next.minFundsAfter + seats + fridge) applyAction(s, 'p1', { type: 'expand' }, ctx);
+  }
   if (s.career.stage < 1) return;
-  buyPlaced(s, ctx, 'braise_pot', 30_000, 2);
-  buyPlaced(s, ctx, 'veg_boiler', 30_000, 2);
   const st = STAGES[s.career.stage]!;
   for (const seat of s.seats) {
     if (seat.installed || seat.index >= st.seats.length) continue;
-    if (s.money < 80_000) break;
+    if (s.money < SEAT_PRICE + 20_000) break;
     applyAction(s, 'p1', { type: 'buySeat', seatIndex: seat.index }, ctx);
   }
-  buyPlaced(s, ctx, 'fridge_l', 150_000);
+  buyPlaced(s, ctx, 'fridge', 20_000, 2);
+  buyPlaced(s, ctx, 'braise_pot', 100_000, 2);
+  buyPlaced(s, ctx, 'veg_boiler', 100_000, 2);
   bookMaintenance(s, ctx);
 }
 

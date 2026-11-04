@@ -15,11 +15,14 @@ export const BALANCE = {
 
   /** 設備の摩耗と定期メンテ（統合進化設計書 v2.1 の経済の調整） */
   equipment: {
-    /** 1回使うごとの摩耗（設備ごとの wearPerUse）に掛ける倍率 */
-    wearMult: 1,
-    /** 定期メンテの費用 = 修理費 × rate（最低 min） */
-    maintenanceRate: 0.2,
-    maintenanceMin: 2_000,
+    /**
+     * 1回使うごとの摩耗（設備ごとの wearPerUse）に掛ける倍率。
+     * 1 → 0.6（拡張して杯数が増えると2〜3日に1回故障し、修理代が純売上の約9%になっていた。経済の調整 Phase 1-5）
+     */
+    wearMult: 0.6,
+    /** 定期メンテの費用 = 修理費 × rate（最低 min）。0.2・2,000円 → 0.15・1,000円（予約したほうが得になるように） */
+    maintenanceRate: 0.15,
+    maintenanceMin: 1_000,
   },
 
   /** 「売れ行きに合わせる」自動発注 */
@@ -109,9 +112,10 @@ export const BALANCE = {
     balkPerQueue: 0.06,
     /**
      * 店の大きさ（拡張の段階）ごとの来客の倍率（統合進化設計書 v2.1 の経済の調整）。
-     * 店が大きいほど目立ち、行列も見えるので人が集まる。拡張すると来客が増え、人を増やして杯数を出せば利益になる
+     * 店が大きいほど目立ち、行列も見えるので人が集まる。拡張すると来客が増え、人を増やして杯数を出せば利益になる。
+     * 席の数の増え方（8 → 12 → 16 → 22席）に合わせた（12席は 1.5 倍。16・22席は未測定）
      */
-    stageDemand: [1, 1, 1, 1] as readonly number[],
+    stageDemand: [1, 1.5, 1.95, 2.7] as readonly number[],
     patienceBase: 150,
   },
 
@@ -178,8 +182,9 @@ export const BALANCE = {
   staff: {
     /** 採用の候補のうち、調理担当の候補を仕込み担当にする割合（仕込み担当はオーナーの判断で追加） */
     prepRoleShare: 0.35,
-    wageMin: 6_000,
-    wageMax: 10_000,
+    /** 日給の範囲。6,000〜10,000円 → 5,000〜8,500円（調理担当を1人雇うと利益が増えるように。経済の調整 Phase 1-5） */
+    wageMin: 5_000,
+    wageMax: 8_500,
     hireFeeMin: 10_000,
     hireFeeMax: 25_000,
     candidatesPerDay: 4,
