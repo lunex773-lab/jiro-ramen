@@ -12,6 +12,7 @@ import { EQUIPMENT } from './data/equipment';
 import { STAGES } from './data/stages';
 import { validateState } from './save';
 import { storeReport } from './sim/company';
+import { adFactor } from './sim/ads';
 import { expectedDailyArrivals, priceDemandFactor } from './sim/customers';
 import { finalProfit, netSales, operatingProfit } from './sim/economy';
 import type { DayReport, Employee, GameState, StoreEntry, Txn } from './types';
@@ -232,7 +233,7 @@ export function verifyCommit(prev: GameState, next: GameState, ticket: VerifyTic
   }
   const active = reports.find((x) => x.entry.id === next.company.activeStoreId && x.r.managed === undefined);
   if (active) {
-    const bound = arrivalBound(prev, next, ticket.demand[active.entry.id] ?? 1);
+    const bound = arrivalBound(prev, next, ticket.demand[active.entry.id] ?? 1, active.r.ads ?? 0);
     const came = active.r.customers + active.r.balked;
     if (came > bound) flags.push(`来客（${came}人）が見込みの上限（${Math.round(bound)}人）を超える`);
   }
@@ -243,8 +244,9 @@ export function verifyCommit(prev: GameState, next: GameState, ticket: VerifyTic
  * プレイヤーがいる店の、その日の来客（入った客＋帰った客）の上限。
  * 同じ式（arrivalRate を営業時間で積分。イベントの効果を入れる）で、値段を下げた分・評判が上がった分の余裕を足す
  */
-export function arrivalBound(prev: GameState, next: GameState, demand: number): number {
-  const base = expectedDailyArrivals(prev, { events: true });
+export function arrivalBound(prev: GameState, next: GameState, demand: number, ads = 0): number {
+  // その日に払った広告費の分も入れる（開店の前の状態では、まだ払っていない）
+  const base = expectedDailyArrivals(prev, { events: true }) * adFactor(ads);
   const priceUp = Math.max(1, priceDemandFactor(next) / Math.max(0.05, priceDemandFactor(prev)));
   return base * priceUp * Math.max(0, demand) * V().arrivalMult + V().arrivalSlack;
 }

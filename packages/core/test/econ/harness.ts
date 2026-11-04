@@ -153,7 +153,7 @@ export function runCase(policy: CasePolicy, days: number, seed = 777): { rows: D
 
 // ───────────────── 経営のしかた（設計書 §4.3 の10ケース） ─────────────────
 
-function hireCheapest(s: GameState, ctx: SimCtx, role?: EmployeeRole): boolean {
+export function hireCheapest(s: GameState, ctx: SimCtx, role?: EmployeeRole): boolean {
   if (!s.career.unlocked.includes('hiring')) return false;
   if (s.candidates.length === 0) refreshCandidates(s);
   const list = s.candidates.filter((c) => !role || c.profile.role === role).sort((a, b) => a.profile.wage - b.profile.wage);
@@ -203,7 +203,7 @@ function buySeats(s: GameState, ctx: SimCtx): void {
 }
 
 /** 上手なプレイヤーの基本: 自動発注「売れ行きに合わせる」、すべての設備の定期メンテを予約（壊れる前に手入れする） */
-const salesMode = (s: GameState, ctx: SimCtx) => {
+export const salesMode = (s: GameState, ctx: SimCtx) => {
   applyAction(s, 'p1', { type: 'setAutoOrderMode', mode: 'sales' }, ctx);
   bookMaintenance(s, ctx);
 };
@@ -224,7 +224,17 @@ function buyPlaced(s: GameState, ctx: SimCtx, type: string, keep: number, upTo =
  * すぐに席と冷蔵庫をそろえる（12席で1日90杯を超えると、麺・豚肉・もやしが冷蔵庫1台（100kg）に入りきらない）。
  * 2台目の煮込み鍋・野菜ゆで釜は、拡張のあとの利益で買う
  */
-function growCarefully(s: GameState, ctx: SimCtx): void {
+/**
+ * 雇った人が誰も来ない日（希望シフトの外・採用の2日後まで・休み）は、短期バイトの調理担当を1人呼ぶ
+ * （Phase 3-4。オーナーの判断「短期バイトに意義を持たせる」。上手な経営のしかたの一つ）
+ */
+export function coverWithTemp(s: GameState, ctx: SimCtx): void {
+  if (!s.career.unlocked.includes('hiring')) return;
+  const working = s.employees.filter((e) => e.profile.name !== 'bot-cook' && !e.profile.temp && e.att?.shift);
+  if (working.length === 0) applyAction(s, 'p1', { type: 'hireTemp', role: 'cook' }, ctx);
+}
+
+export function growCarefully(s: GameState, ctx: SimCtx): void {
   const info = expansionInfo(s);
   if (info.next && info.canExpand) {
     const seats = (info.next.seats.length - STAGES[s.career.stage]!.seats.length) * SEAT_PRICE;
@@ -341,11 +351,12 @@ export const CASES: CasePolicy[] = [
   },
   {
     id: 'c17_growth_full',
-    name: '17. 上手な成長: 調理担当＋余裕をもって拡張＋席・2台目の煮込み鍋・業務用冷蔵庫＋接客担当',
+    name: '17. 上手な成長: 調理担当＋余裕をもって拡張＋席・2台目の煮込み鍋・業務用冷蔵庫＋接客担当（従業員が来ない日は短期バイト）',
     setup: salesMode,
     morning: (s, ctx) => {
       if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
       else if (s.career.stage >= 1 && s.employees.length < 3) hireCheapest(s, ctx, 'server');
+      coverWithTemp(s, ctx);
     },
     evening: (s, ctx) => growCarefully(s, ctx),
   },

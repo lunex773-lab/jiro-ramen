@@ -128,6 +128,8 @@ export function setRestDays(s: GameState, ctx: SimCtx, employeeId: string, days:
 
 /** その日のシフト（日にちごとの予定があればそれ、なければ曜日ごとのくりかえし） */
 export function shiftFor(e: Employee, day: number): ShiftDay | null {
+  // 通常の採用は、採用の2日後から出勤できる（それまでは手続き・研修で来ない）
+  if (e.availableFrom !== undefined && day < e.availableFrom) return null;
   if (isPartTime(e) && e.dateShifts && Object.prototype.hasOwnProperty.call(e.dateShifts, String(day))) return e.dateShifts[String(day)] ?? null;
   return shiftsOf(e)[weekdayOf(day)] ?? null;
 }
@@ -268,6 +270,7 @@ export function promotionInfo(e: Employee, s: GameState): { checks: PromotionChe
 
 function promoteProblem(s: GameState, e: Employee): string | null {
   if (!isPartTime(e)) return 'すでに社員です';
+  if (e.profile.temp) return '短期バイトは社員にできません（今日だけ来る人です）';
   if (s.phase === 'open' || s.phase === 'closing') return '営業中は昇格できません';
   return null;
 }
@@ -291,7 +294,7 @@ export function attendanceText(e: Employee, s: GameState): string {
   const hours = sh ? `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start)}〜${shiftTimeText(sh.end)}` : '';
   switch (a.status) {
     case 'off':
-      return '今日は休み';
+      return e.availableFrom !== undefined && s.day < e.availableFrom ? `${e.availableFrom}日目から出勤（採用の手続き中）` : '今日は休み';
     case 'absent':
       return '当日欠勤';
     case 'closed':
@@ -908,6 +911,7 @@ export function setDateShift(s: GameState, ctx: SimCtx, employeeId: string, days
   const nums = list as number[];
   if (nums.some((d) => d < s.day)) return { ok: false, reason: '過ぎた日のシフトは変えられません' };
   if (nums.some((d) => d > last)) return { ok: false, reason: `シフトは${ST.calendarDays}日先まで決められます` };
+  if (e.availableFrom !== undefined && nums.some((d) => d < e.availableFrom!)) return { ok: false, reason: `${e.availableFrom}日目から出勤できます（採用の手続き中）` };
   let sh: ShiftDay | null = null;
   if (mode !== 'reset' && shift) {
     sh = { start: shift.start, end: shift.end, breakAt: shift.breakLen > 0 ? shift.breakAt : 0, breakLen: shift.breakLen, fromPrep: shift.fromPrep };

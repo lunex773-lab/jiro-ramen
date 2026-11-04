@@ -9,12 +9,13 @@ import { STAGES } from '../data/stages';
 import type { DayReport, GameState } from '../types';
 import { clamp, newId } from '../util';
 import { closeLostItems } from './customers';
-import { recordCompanyDay } from './company';
+import { activeStore, recordCompanyDay } from './company';
+import { payAds } from './ads';
 import { runAbsentStores } from './stores';
 import { cash, emptyDayStats, finalProfit, foldIntoLastReport, netSales, operatingProfit, recordPL, totalDebt } from './economy';
 import { finishRepair, resaleValue, runMaintenance, upkeepTotal, useEquipment } from './equipment';
 import { dropHand } from './interact';
-import { morningRollCall, refreshCandidates, wagesDue } from './employees';
+import { morningRollCall, refreshCandidates, releaseTemps, wagesDue } from './employees';
 import { closeStaffDay, expectedWages } from './staff';
 import { expireLots, receiveDeliveries, runAutoOrder, STOCKOUT_SOURCE } from './inventory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
@@ -28,6 +29,8 @@ export function openShop(s: GameState, ctx: SimCtx): { ok: boolean; reason?: str
   s.phase = 'open';
   s.openT = 0;
   s.arrivalAcc = 0.6;
+  // その日の広告費（店の方針。払えなければ出さない）
+  if (s.company && !s.tutorial) payAds(s, activeStore(s), s.day);
   // その日のイベントの抽選（覆面調査員・爆発事故は開店のときに1日1回だけ）
   onOpenShopEvents(s);
   drawAccident(s);
@@ -146,6 +149,8 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
   const st = STAGES[s.career.stage]!;
   const wages = wagesDue(s);
   closeStaffDay(s);
+  // 短期バイトはその日だけ（給与は wages に入っている）
+  releaseTemps(s);
   recordPL(s, 'rent', st.rent);
   payOrAccrue(s, 'rent', st.rent, `家賃（${s.day}日目）`, key('rent'));
   recordPL(s, 'wages', wages);

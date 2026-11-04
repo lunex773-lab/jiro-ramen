@@ -3,6 +3,7 @@
 // 途中退店（abandoned）、クレーム（complaint）を含む。各遷移の条件はこのファイルに明示する。
 
 import { BALANCE } from '../data/balance';
+import { adFactor } from './ads';
 import { calendarDemand } from './calendar';
 import { CALL_KEYS, MENU, MENU_IDS } from '../data/menu';
 import { LOST_ITEM_KINDS, REVIEW_BAD, REVIEW_GOOD, SURNAMES } from '../data/names';
@@ -250,7 +251,9 @@ export function arrivalRate(s: GameState, opts: { events?: boolean } = {}): numb
   const stageF = c.stageDemand[s.career.stage] ?? c.stageDemand[c.stageDemand.length - 1] ?? 1;
   // 曜日・季節（平均は1。練習の日は1）
   const calF = s.tutorial ? 1 : calendarDemand(s.day);
-  return c.baseRate * repF * timeCurve(x) * priceF * demand * regularF * ticketF * eventF * stageF * propF * calF;
+  // その日に払った広告費（オーナーの判断 14）
+  const adF = adFactor(s.today?.ads ?? 0);
+  return c.baseRate * repF * timeCurve(x) * priceF * demand * regularF * ticketF * eventF * stageF * propF * calF * adF;
 }
 
 /** 共通市場の客の取り合いの倍率（プレイヤーがいる店。市場の外では 1） */

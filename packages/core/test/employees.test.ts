@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, buildTasks, dailyWageOf, expectedPay, refreshCandidates, ROLE_LABEL, step, TASK_KINDS } from '../src';
+import { applyAction, BALANCE, buildTasks, dailyWageOf, expectedPay, refreshCandidates, ROLE_LABEL, step, TASK_KINDS } from '../src';
 import { addBot, newGame, runDay } from './helpers';
 
 describe('従業員', () => {
@@ -52,10 +52,12 @@ describe('従業員', () => {
     applyAction(s, 'p1', { type: 'openShop' }, ctx);
     expect(applyAction(s, 'p1', { type: 'fire', employeeId: emp.id }, ctx).ok).toBe(false);
     runDay(s, ctx);
-    // アルバイトとして採用され、初めのシフト（毎日・仕込みから閉店まで）どおりに働いた分の給与（時給 × 時間）
+    // アルバイトとして採用され、採用の2日後から出勤する（その日の給与はない）。1日分の給与（時給 × 仕込みから閉店まで）は候補の日給の目安と同じ
     expect(emp.profile.employment).toBe('part');
-    expect(s.history[0]!.wages).toBe(expectedPay(emp, s.day));
-    expect(Math.abs(expectedPay(emp, s.day) - cand.profile.wage)).toBeLessThanOrEqual(50);
+    expect(emp.availableFrom).toBe(s.day + BALANCE.staff.hireDelayDays);
+    expect(s.history[0]!.wages).toBe(0);
+    expect(expectedPay(emp, s.day)).toBe(0);
+    expect(Math.abs(dailyWageOf(emp) - cand.profile.wage)).toBeLessThanOrEqual(50);
     const m2 = s.money;
     expect(applyAction(s, 'p1', { type: 'fire', employeeId: emp.id }, ctx).ok).toBe(true);
     expect(s.money).toBe(m2 - dailyWageOf(emp));

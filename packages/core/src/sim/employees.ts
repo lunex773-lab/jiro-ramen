@@ -46,7 +46,7 @@ import { unpermittedFilming } from './media';
 import { accidentPanic } from './accident';
 import { moveAlong, staffRoute, walkSpeed } from './walk';
 import { updateCommute } from './commute';
-import { attendHireDay, checkQuits, dailyWageOf, initNewHire, isPartTime, isSlacking, rollCall, rollPostpone, wagesDueToday } from './staff';
+import { attendHireDay, checkQuits, dailyWageOf, fullDayShift, initNewHire, isPartTime, isSlacking, rollCall, rollPostpone, wagesDueToday } from './staff';
 
 export const ROLE_LABEL: Record<EmployeeRole, string> = {
   cook: '調理担当',
@@ -255,8 +255,10 @@ export function hire(s: GameState, ctx: SimCtx, candidateId: string): { ok: bool
   if (!cash(s, 'hire', -c.profile.hireFee, `${c.profile.name}さんを採用`, `hire:${c.id}`)) return { ok: false, reason: '採用費が足りません' };
   recordPL(s, 'hiring', c.profile.hireFee);
   const e = makeEmployee(s, c);
-  // アルバイトとして採用（初めのシフトは毎日・仕込みから閉店まで。経営メニューで変えられる）
+  // アルバイトとして採用（初めのシフトは希望の曜日・仕込みから閉店まで。経営メニューで変えられる）
   initNewHire(e);
+  // 通常の採用は、採用の2日後から出勤できる（すぐに人手が要るときは短期バイト。チュートリアルの練習はすぐ）
+  if (!s.tutorial) e.availableFrom = s.day + BALANCE.staff.hireDelayDays;
   // 準備時間中に雇った場合は当日から勤務（当日分の給与が発生）
   attendHireDay(s, e);
   s.employees.push(e);
@@ -264,6 +266,63 @@ export function hire(s: GameState, ctx: SimCtx, candidateId: string): { ok: bool
   emit(ctx, { type: 'hire', text: e.profile.name });
   notify(s, ctx, `hire:${e.id}`, 'good', `${e.profile.name}さん（${ROLE_LABEL[e.profile.role]}・アルバイト）を採用しました`);
   return { ok: true };
+}
+
+/** 今日雇った短期バイトの数 */
+export function tempsToday(s: GameState): number {
+  return s.employees.filter((e) => e.profile.temp).length;
+}
+
+/** 短期バイトの時給（候補の日給の平均の時給 × wageMult） */
+export function tempHourly(): number {
+  const st = BALANCE.staff;
+  return Math.round((((st.wageMin + st.wageMax) / 2 / st.employment.fullShiftHours) * st.temp.wageMult) / 10) * 10;
+}
+
+/**
+ * 短期バイトを呼ぶ（共通市場の仕様書 4.3「人員不足時の短期バイト」。オーナーの判断 14「控えめ」）。
+ * 仕込みの間だけ。その日すぐ来て、閉店の精算のあと辞める。採用費なし・時給は通常の1.5倍・能力は新人並み。1日2人まで
+ */
+export function hireTemp(s: GameState, ctx: SimCtx, role: EmployeeRole): { ok: boolean; reason?: string } {
+  const st = BALANCE.staff;
+  if (!s.career.unlocked.includes('hiring')) return { ok: false, reason: '採用はまだ解放されていません' };
+  if (s.phase !== 'prep') return { ok: false, reason: '短期バイトは開店前（仕込みの間）に呼べます' };
+  if (!(role in ROLE_LABEL)) return { ok: false, reason: '担当が正しくありません' };
+  if (tempsToday(s) >= st.temp.maxPerDay) return { ok: false, reason: `短期バイトは1日${st.temp.maxPerDay}人までです` };
+  if (s.employees.length >= 12) return { ok: false, reason: 'これ以上雇えません' };
+  const id = newId(s, 'temp');
+  const h = (k: string) => (hashString(`${s.seed}:${id}:${k}`) % 1000) / 1000;
+  const sk = (k: string) => st.temp.skillFrom + (st.temp.skillTo - st.temp.skillFrom) * h(k);
+  const hourly = tempHourly();
+  const profile: EmployeeProfile = {
+    name: `${SURNAMES[hashString(`${id}:s`) % SURNAMES.length]} ${GIVEN_NAMES[hashString(`${id}:g`) % GIVEN_NAMES.length]}`,
+    role,
+    skills: { speed: sk('speed'), cooking: sk('cooking'), service: sk('service'), hygiene: sk('hygiene'), movement: sk('movement') },
+    wage: Math.round(hourly * st.employment.fullShiftHours),
+    hireFee: 0,
+    experience: 0,
+    employment: 'part',
+    hourly,
+    diligence: 0.8,
+    patience: 0.6,
+    temp: true,
+    look: hashString(`${s.seed}:${id}:look`) % 1_000_000,
+  };
+  const e = makeEmployee(s, { id, profile });
+  // 今日だけ・仕込みから閉店まで
+  e.shifts = Array.from({ length: 7 }, () => null);
+  e.dateShifts = { [String(s.day)]: fullDayShift() };
+  attendHireDay(s, e);
+  s.employees.push(e);
+  emit(ctx, { type: 'hire', text: e.profile.name });
+  notify(s, ctx, `temp:${e.id}`, 'good', `短期バイトの${e.profile.name}さん（${ROLE_LABEL[role]}）が今日だけ来ます（時給 ¥${hourly.toLocaleString('ja-JP')}）`);
+  return { ok: true };
+}
+
+/** 閉店の精算のあと、短期バイトは辞める（その日の給与は払い済み） */
+export function releaseTemps(s: GameState): void {
+  if (!s.employees.some((e) => e.profile.temp)) return;
+  s.employees = s.employees.filter((e) => !e.profile.temp);
 }
 
 /** 解雇（解雇手当 = 日給 × severanceDays） */

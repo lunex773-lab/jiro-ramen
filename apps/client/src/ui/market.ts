@@ -5,6 +5,8 @@
 // 画面は数秒ごとにサーバーから市場の今を読み直す（市場の権威はサーバー。操作は cid つきで送る）。
 
 import {
+  adBudgetOf,
+  adFactor,
   AI_STRATEGY_LABEL,
   BALANCE,
   expansionAdvice,
@@ -426,6 +428,16 @@ export class MarketScreen {
           'select',
           { 'data-price': entry.id, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { priceMult: Number((ev.target as HTMLSelectElement).value) } }) },
           [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3].map((m) => h('option', { value: String(m), selected: Math.abs(m - entry.policy.priceMult) < 1e-6 }, m === 1 ? '定価' : `定価の${Math.round(m * 100)}%`)),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'kv' },
+        h('span', null, '広告'),
+        h(
+          'select',
+          { 'data-ads': entry.id, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { adBudget: Number((ev.target as HTMLSelectElement).value) } }) },
+          BALANCE.ads.choices.map((v) => h('option', { value: String(v), selected: v === adBudgetOf(entry) }, v === 0 ? '出さない' : `1日${yenStr(v)}（来客 +${Math.round((adFactor(v) - 1) * 100)}%）`)),
         ),
       ),
       h(

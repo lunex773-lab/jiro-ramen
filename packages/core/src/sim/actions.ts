@@ -10,7 +10,7 @@ import type { EmployeeRole, EventKind, GameState, Id, Rot, ShiftDay, StorePolicy
 import { dist, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipment';
-import { fire, hire, setPriority, setRole } from './employees';
+import { fire, hire, hireTemp, setPriority, setRole } from './employees';
 import { nextDay, openShop, payArrears, takeLoan, declareBankruptcy, updateFinanceWarnings } from './day';
 import { cancelWork, dropHand, getActor, interact, type Args } from './interact';
 import { placeOrder } from './inventory';
@@ -47,6 +47,8 @@ export type Action =
   | { type: 'setPriority'; employeeId: Id; kind: string; value: number }
   /** アルバイトの曜日ごとのシフト（weekday: 月=0 … 日=6、shift: null でその曜日は休み） */
   | { type: 'setShift'; employeeId: Id; weekday: number; shift: ShiftDay | null }
+  /** 短期バイトを呼ぶ（開店前。その日だけ来る） */
+  | { type: 'hireTemp'; role: EmployeeRole }
   /** 社員の休みの曜日（月=0 … 日=6。空なら毎日出勤） */
   | { type: 'setRestDays'; employeeId: Id; days: number[] }
   /** 自動発注のしかた（manual: 目安の量まで / sales: 売れ行きに合わせる） */
@@ -268,6 +270,8 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return setPriority(s, a.employeeId, a.kind, a.value) ? { ok: true } : fail('変更できません');
     case 'setShift':
       return setShift(s, ctx, a.employeeId, a.weekday, a.shift);
+    case 'hireTemp':
+      return hireTemp(s, ctx, a.role);
     case 'setRestDays':
       return setRestDays(s, ctx, a.employeeId, a.days);
     case 'setAutoOrderMode':

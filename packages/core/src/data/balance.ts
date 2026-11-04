@@ -133,6 +133,12 @@ export const BALANCE = {
     seasonPeakDoy: 289,
   },
 
+  /**
+   * 広告（オーナーの判断 14「控えめ」）。来客 × (1 + max × (1 − exp(−その日の広告費 ÷ k)))。
+   * 1日3,000円で約+8%、どれだけ出しても+20%まで（効きは段々弱まる）。広告費は開店のとき（1日単位の計算では営業の前）に払い、払えなければその日は出さない
+   */
+  ads: { max: 0.2, k: 5873, choices: [0, 1000, 2000, 3000, 5000, 8000] as readonly number[] },
+
   market: {
     /** コミュニティの企業の数の上限（プレイヤー＋AI）の既定と、作る人が選べる範囲（オーナーの判断: 2〜6社） */
     maxCompanies: 6,
@@ -460,6 +466,13 @@ export const BALANCE = {
      * 希望外の日に毎日入れ続けると約0.28まで下がる（1日に約1.7%で辞める）。週2日なら約0.62（遅刻・欠勤 約1.3倍）
      */
     morale: { base: 0.75, approach: 0.15, offWishPenalty: 0.07, fatiguePenalty: 0.03, attendanceMult: 1.5, quitBelow: 0.35, quitPerDay: 0.25 },
+    /** 通常の採用は、採用の何日後から出勤できるか（オーナーの判断 14 の補足「短期バイトに意義を持たせる」） */
+    hireDelayDays: 2,
+    /**
+     * 短期バイト（オーナーの判断 14「控えめ」）: その日すぐ来る・その日だけ。時給は通常（候補の日給の平均）の wageMult 倍・採用費なし・能力は新人並み。
+     * 1日に maxPerDay 人まで
+     */
+    temp: { wageMult: 1.5, skillFrom: 0.3, skillTo: 0.45, maxPerDay: 2 },
     /** 希望シフト: アルバイトが出られる曜日の数（採用の候補のときに決まる） */
     wishDaysMin: 3,
     wishDaysMax: 6,

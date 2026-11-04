@@ -103,10 +103,12 @@ describe('雇用形態と採用', () => {
       if (wish[i]) expect(x && x.fromPrep && x.start === 0 && x.end === 240).toBe(true);
       else expect(x).toBeNull();
     });
-    // 仕込み中に雇ったので、今日が希望の曜日なら今日から働く
-    const today = isWishDay(e, weekdayOf(s.day));
-    expect(e.presentToday).toBe(today);
-    expect(!!e.att?.prepWorked).toBe(today);
+    // 通常の採用は、採用の2日後から出勤する（仕込み中に雇っても今日は来ない。オーナーの判断 14 の補足）
+    expect(e.availableFrom).toBe(s.day + BALANCE.staff.hireDelayDays);
+    expect(e.presentToday).toBe(false);
+    expect(!!e.att?.prepWorked).toBe(false);
+    const d2 = s.day + BALANCE.staff.hireDelayDays;
+    expect(shiftFor(e, d2) !== null).toBe(isWishDay(e, weekdayOf(d2)));
   });
 
   it('採用の候補には見た目の番号があり、採用したあとも変わらない（同じ種・同じ手順なら同じ番号）', () => {

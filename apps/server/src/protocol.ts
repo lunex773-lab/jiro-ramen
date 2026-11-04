@@ -12,7 +12,7 @@ export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 
 export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
-  'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire',
+  'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
   'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
   'accidentReset', 'openStore', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy',
 ] as const satisfies readonly ActionType[];
@@ -74,10 +74,10 @@ function isArgs(v: unknown): boolean {
 function isPolicy(v: unknown): boolean {
   if (!isObj(v)) return false;
   const keys = Object.keys(v);
-  if (keys.length === 0 || keys.length > 4) return false;
+  if (keys.length === 0 || keys.length > 5) return false;
   for (const k of keys) {
     const x = v[k];
-    if (k === 'priceMult' || k === 'repairCap') {
+    if (k === 'priceMult' || k === 'repairCap' || k === 'adBudget') {
       if (!isNum(x)) return false;
     } else if (k === 'orderMode') {
       if (x !== 'manual' && x !== 'sales') return false;
@@ -109,6 +109,7 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   seatOffset: { seatIndex: isIntIn(0, 1000), x: isSmall, z: isSmall },
   buyBowls: {},
   hire: { candidateId: isId },
+  hireTemp: { role: isRole },
   fire: { employeeId: isId },
   setRole: { employeeId: isId, role: isRole },
   setPriority: { employeeId: isId, kind: isId, value: isNum },

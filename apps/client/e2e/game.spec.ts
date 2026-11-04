@@ -518,7 +518,8 @@ test('従業員: アルバイトとして採用し、カレンダーで日にち
   const card = body.locator('.emp[data-emp]').first();
   await expect(card).toContainText('アルバイト');
   await expect(card.locator('.emp-look')).toHaveText(candLook);
-  await expect(card).toContainText('勤務中（仕込み〜15:00）');
+  // 通常の採用は、採用の2日後（3日目）から出勤する
+  await expect(card).toContainText('3日目から出勤');
   await expect(body).toContainText('今日（1日目・月曜）の出勤');
   // シフト: 4週間のカレンダー（日にちごと＋毎週のくりかえし）
   await card.getByRole('button', { name: '📅 シフト' }).click();
@@ -527,30 +528,31 @@ test('従業員: アルバイトとして採用し、カレンダーで日にち
   await expect(cal.locator('.cal-day[data-day]')).toHaveCount(28);
   await expect(cal.locator('.cal-head')).toHaveCount(7);
   await expect(day(1)).toContainText('今日');
-  // 2日目（火曜）だけ 12:00〜14:00（13:00 から30分休憩）にする
-  await day(2).click();
-  await expect(day(2)).toHaveClass(/on/);
+  await expect(day(2)).toContainText('手続き中');
+  // 9日目（火曜）だけ 12:00〜14:00（13:00 から30分休憩）にする
+  await day(9).click();
+  await expect(day(9)).toHaveClass(/on/);
   const edit = card.locator('.shift-edit');
-  await expect(edit).toContainText('選んだ日: 2日目（火）');
+  await expect(edit).toContainText('選んだ日: 9日目（火）');
   await edit.locator('label', { hasText: '出勤' }).locator('select').selectOption('60');
   await edit.locator('label', { hasText: '退勤' }).locator('select').selectOption('180');
   await edit.locator('label', { hasText: /^休憩/ }).first().locator('select').selectOption('30');
   await edit.locator('label', { hasText: '休憩の開始' }).locator('select').selectOption('120');
   await expect(edit).toContainText('1日の給与の目安 ¥3,000（1.5時間）');
   await edit.locator('[data-save="once"]').click();
-  await expect(day(2)).toContainText('12:00〜14:00（休憩30分）');
-  await expect(day(2)).toContainText('この日だけ');
-  // 次の週の火曜（9日目）はくりかえしのまま
-  await expect(day(9)).toContainText('仕込み〜15:00');
+  await expect(day(9)).toContainText('12:00〜14:00（休憩30分）');
+  await expect(day(9)).toContainText('この日だけ');
+  // 次の週の火曜（16日目）はくりかえしのまま
+  await expect(day(16)).toContainText('仕込み〜15:00');
   await shot(page, '40-staff-shift');
-  // 3日目と4日目をまとめて選んで休みにする
-  await day(3).click();
-  await day(4).click();
-  await expect(edit).toContainText('3日目（水）・4日目（木）');
+  // 10日目と11日目をまとめて選んで休みにする
+  await day(10).click();
+  await day(11).click();
+  await expect(edit).toContainText('10日目（水）・11日目（木）');
   await edit.getByRole('button', { name: '休みにする' }).click();
   await edit.locator('[data-save="once"]').click();
-  await expect(day(3)).toContainText('休み');
-  await expect(day(4)).toContainText('休み');
+  await expect(day(10)).toContainText('休み');
+  await expect(day(11)).toContainText('休み');
   // 曜日の見出し「金」で金曜（5・12・19・26日目）をまとめて選び、毎週くりかえす 12:00〜13:00 にする
   await cal.locator('.cal-head', { hasText: '金' }).click();
   for (const d of [5, 12, 19, 26]) await expect(day(d)).toHaveClass(/on/);
@@ -559,11 +561,11 @@ test('従業員: アルバイトとして採用し、カレンダーで日にち
   await edit.locator('[data-save="weekly"]').click();
   for (const d of [5, 12, 19, 26]) await expect(day(d)).toContainText('12:00〜13:00');
   await expect(card.locator('.cal-repeat')).toContainText('金 12:00〜13:00');
-  // 2日目をくりかえしの予定に戻す
-  await day(2).click();
+  // 9日目をくりかえしの予定に戻す
+  await day(9).click();
   await edit.locator('[data-save="reset"]').click();
-  await expect(day(2)).toContainText('仕込み〜15:00');
-  await expect(day(2)).not.toContainText('この日だけ');
+  await expect(day(9)).toContainText('仕込み〜15:00');
+  await expect(day(9)).not.toContainText('この日だけ');
   await shot(page, '40b-staff-calendar');
   // 記録（まだ何も起きていない）
   await card.getByRole('button', { name: '📝 記録' }).click();
@@ -601,9 +603,10 @@ test('従業員は店の外から歩いて入り、「おはようございま�
   });
   await page.locator('.chip.menu').click();
   await page.getByRole('button', { name: '従業員', exact: true }).click();
-  await page.locator('.manage-body').getByRole('button', { name: '採用する' }).click();
+  // 通常の採用は2日後から来るので、今日すぐ来る短期バイトを呼ぶ
+  await page.locator('.manage-body [data-temp="cook"]').click();
   await press(page.locator('.manage .close'));
-  // 採用した人は店の外（歩道）から歩いて来る
+  // 呼んだ人は店の外（歩道）から歩いて来る
   const emp = () => page.evaluate(() => {
     const e = (window as unknown as CW).__jiro.host.state.employees[0];
     return { x: e.pos.x, z: e.pos.z, present: e.presentToday, commute: e.commute ? { kind: e.commute.kind, phase: e.commute.phase } : null, say: e.say ? e.say.text : null };

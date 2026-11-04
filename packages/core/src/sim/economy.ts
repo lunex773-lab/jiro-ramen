@@ -11,7 +11,7 @@ import { newId, yen } from '../util';
 export function emptyDayStats(): DayStats {
   return {
     sales: 0, refunds: 0, cogs: 0, waste: 0, wages: 0, rent: 0, upkeep: 0, utilities: 0, repairs: 0,
-    hiring: 0, interest: 0, purchases: 0, capex: 0,
+    hiring: 0, ads: 0, interest: 0, purchases: 0, capex: 0,
     served: 0, customers: 0, lost: 0, balked: 0, totalSeatWait: 0, totalQueueWait: 0,
     satisfactionSum: 0, satisfactionCount: 0, mistakes: 0, stockouts: 0, complaints: 0, breakdowns: 0, remakes: 0,
     wasteItems: {},
@@ -37,7 +37,7 @@ export function netSales(d: DayStats): number {
  * 利息は営業外なので含めない（以前は含めていた。古い日報の operatingProfit は利息を引いた値）
  */
 export function operatingProfit(d: DayStats): number {
-  return netSales(d) - d.cogs - d.waste - d.wages - d.rent - d.upkeep - d.utilities - d.repairs - d.hiring;
+  return netSales(d) - d.cogs - d.waste - d.wages - d.rent - d.upkeep - d.utilities - d.repairs - d.hiring - (d.ads ?? 0);
 }
 
 /** 最終利益 = 営業利益 − 利息 */
@@ -53,7 +53,7 @@ export function reportFinalProfit(r: { finalProfit?: number; operatingProfit: nu
 }
 
 /** 損益と現金の項目（閉店後の支払いを日報に足すときに使う） */
-const STAT_MONEY: readonly (keyof DayStats)[] = ['sales', 'refunds', 'cogs', 'waste', 'wages', 'rent', 'upkeep', 'utilities', 'repairs', 'hiring', 'interest', 'purchases', 'capex'];
+const STAT_MONEY: readonly (keyof DayStats)[] = ['sales', 'refunds', 'cogs', 'waste', 'wages', 'rent', 'upkeep', 'utilities', 'repairs', 'hiring', 'ads', 'interest', 'purchases', 'capex'];
 
 /**
  * 閉店の精算のあとに動いたお金（夜の自動発注・閉店後の採用・設備・拡張・椅子・仕入れなど）を、その日の日報に足す。
@@ -63,8 +63,8 @@ export function foldIntoLastReport(s: GameState): void {
   const r = s.history[s.history.length - 1];
   if (!r || r.day !== s.day) return;
   for (const k of STAT_MONEY) {
-    const delta = (s.today[k] as number) - (r[k] as number);
-    if (delta !== 0) (r as unknown as Record<string, number>)[k] = (r[k] as number) + delta;
+    const delta = ((s.today[k] as number | undefined) ?? 0) - ((r[k] as number | undefined) ?? 0);
+    if (delta !== 0) (r as unknown as Record<string, number>)[k] = ((r[k] as number | undefined) ?? 0) + delta;
   }
   r.operatingProfit = operatingProfit(r);
   r.finalProfit = finalProfit(r);
@@ -104,11 +104,11 @@ export function cash(
   return true;
 }
 
-export type PLField = 'sales' | 'refunds' | 'cogs' | 'waste' | 'wages' | 'rent' | 'upkeep' | 'utilities' | 'repairs' | 'hiring' | 'interest' | 'purchases' | 'capex';
+export type PLField = 'sales' | 'refunds' | 'cogs' | 'waste' | 'wages' | 'rent' | 'upkeep' | 'utilities' | 'repairs' | 'hiring' | 'ads' | 'interest' | 'purchases' | 'capex';
 
 /** 損益に計上する（現金は動かさない） */
 export function recordPL(s: GameState, field: PLField, amount: number): void {
-  s.today[field] = yen(s.today[field] + amount);
+  s.today[field] = yen((s.today[field] ?? 0) + amount);
 }
 
 /** 支払い（現金・P/L 両方）。資金不足なら false */

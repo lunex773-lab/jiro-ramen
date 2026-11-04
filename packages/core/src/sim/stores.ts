@@ -274,6 +274,7 @@ export function transferEmployee(s: GameState, ctx: SimCtx, employeeId: Id, toSt
   if (!to || !to.snapshot) return { ok: false, reason: '異動先の店が見つかりません' };
   const e = s.employees.find((x) => x.id === employeeId);
   if (!e) return { ok: false, reason: 'この店の従業員ではありません' };
+  if (e.profile.temp) return { ok: false, reason: '短期バイトは異動できません（今日だけ来る人です）' };
   if (asManager && e.profile.employment !== 'full') return { ok: false, reason: '店長は社員から選びます' };
   const cur = activeStore(s);
   s.employees = s.employees.filter((x) => x.id !== employeeId);
@@ -294,6 +295,7 @@ export function setStorePolicy(s: GameState, storeId: Id, p: Partial<StorePolicy
   if (next.orderMode !== 'manual' && next.orderMode !== 'sales') return { ok: false, reason: '発注の方針が不正です' };
   if (!(next.repairCap >= 0 && next.repairCap <= 500_000)) return { ok: false, reason: '修理費の上限が不正です' };
   if (typeof next.maintenance !== 'boolean') return { ok: false, reason: '定期メンテの指定が不正です' };
+  if (next.adBudget !== undefined && !(Number.isFinite(next.adBudget) && next.adBudget >= 0 && next.adBudget <= 20_000)) return { ok: false, reason: '広告費は1日0〜20,000円です' };
   entry.policy = next;
   return { ok: true };
 }

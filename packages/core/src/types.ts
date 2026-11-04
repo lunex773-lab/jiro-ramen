@@ -244,6 +244,8 @@ export interface EmployeeProfile {
    * 古いセーブ・社員にはない → 毎日出られる
    */
   wishDays?: boolean[];
+  /** 短期バイト（その日だけ来る。精算のあと辞める） */
+  temp?: boolean;
 }
 
 /**
@@ -320,6 +322,8 @@ export interface Employee extends ActorBase {
   commute?: Commute | null;
   /** 疲れ（0〜1）。働いた日にたまり、休みの日に回復する（オーナーの判断 12）。古い状態にはない → 0 */
   fatigue?: number;
+  /** この日から出勤できる（通常の採用は採用の2日後から。オーナーの判断 14 の補足）。古い状態にはない → いつでも */
+  availableFrom?: number;
   /** 満足度（0〜1）。希望外の日の勤務・疲れで下がり、ふだんは基準へ戻る。低いと遅刻・欠勤が増え、辞めることがある。古い状態にはない → 基準 */
   morale?: number;
 }
@@ -668,7 +672,9 @@ export type TxnType =
   | 'arrearsPay'
   | 'relocation'
   /** 出店（物件の初期費用） */
-  | 'store';
+  | 'store'
+  /** 広告費（共通市場の仕様書 4.3。オーナーの判断 14） */
+  | 'advertising';
 
 export interface Txn {
   id: Id;
@@ -692,6 +698,8 @@ export interface DayStats {
   utilities: number;
   repairs: number;
   hiring: number;
+  /** 広告費（古い日報にはない → 0） */
+  ads?: number;
   interest: number;
   purchases: number;
   capex: number;
@@ -1162,6 +1170,8 @@ export interface StorePolicy {
   repairCap: number;
   /** 定期メンテを予約するか */
   maintenance: boolean;
+  /** 1日の広告費（円。開店のときに払う。古いデータにはない → 0） */
+  adBudget?: number;
 }
 
 export interface StoreEntry {

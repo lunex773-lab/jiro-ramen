@@ -16,6 +16,7 @@ import { cash, emptyDayStats, finalProfit, netSales, operatingProfit } from './e
 import { upkeepTotal } from './equipment';
 import { addLot, consume, expireLots, fridgeCapacity, stockOf } from './inventory';
 import { makeCtx, type SimCtx } from './notices';
+import { payAds, withPlannedAds } from './ads';
 import { endOfDayWellbeing, expectedPay, fatigueSpeed, shiftFor } from './staff';
 
 const M = () => BALANCE.company.model;
@@ -151,6 +152,8 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
   for (const d of s.deliveries) addLot(s, d.itemId, d.qty, d.unitCost);
   s.deliveries = [];
   expireLots(s, ctx);
+  // その日の広告費（営業する日だけ。払えなければ出さない）。来客の見込みに入る
+  if (s.closedForConstruction <= 0 && storeLead(s, entry)) payAds(s, entry, day);
   const plan = planManagerDay(s, entry, opts);
   let served = 0;
   if (plan.open) {
@@ -262,6 +265,7 @@ export function standaloneArrivals(s: GameState, entry: StoreEntry): number {
   return withStore(s, entry, () => {
     applyPolicyPrices(s, entry);
     if (s.closedForConstruction > 0 || !storeLead(s, entry)) return 0;
-    return expectedDailyArrivals(s, { events: false });
+    // 方針の広告費を払ったとみなす（客の取り合いにも効く）
+    return withPlannedAds(s, entry, () => expectedDailyArrivals(s, { events: false }));
   });
 }

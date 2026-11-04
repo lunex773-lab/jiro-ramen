@@ -19,6 +19,7 @@ import { hashString } from './util';
 import { lastCompanyDay, verifyCommit } from './verify';
 import { applyAction, type Action, type ActionResult } from './sim/actions';
 import { activeStore, recordCompanyDay, storeReport, withStore } from './sim/company';
+import { withPlannedAds } from './sim/ads';
 import { expectedDailyArrivals } from './sim/customers';
 import { bankruptcyCheck, checkGoals, declareBankruptcy, loanAvailable, payArrears, startNextDay, takeLoan } from './sim/day';
 import { cash, finalProfit, totalDebt } from './sim/economy';
@@ -405,7 +406,7 @@ export function storeAttractiveness(s: GameState, entry: StoreEntry, manual: boo
   const isActive = entry.id === s.company.activeStoreId;
   if (isActive && manual) {
     if (s.closedForConstruction > 0) return 0;
-    return expectedDailyArrivals(s, { events: false });
+    return withPlannedAds(s, entry, () => expectedDailyArrivals(s, { events: false }));
   }
   if (!isActive) return standaloneArrivals(s, entry);
   const keep = { ...s.prices };

@@ -33,6 +33,9 @@ import {
   EMPLOYMENT_LABEL,
   WEEKDAY_LABEL,
   attendanceText,
+  adBudgetOf,
+  adFactor,
+  tempHourly,
   fatigueSpeed,
   fatigueText,
   isWishDay,
@@ -345,6 +348,16 @@ export class ManageMenu {
           { class: 'kv' },
           h('span', null, '定期メンテ'),
           h('input', { type: 'checkbox', checked: pol.maintenance, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { maintenance: (ev.target as HTMLInputElement).checked } }) }),
+        ),
+        h(
+          'div',
+          { class: 'kv' },
+          h('span', null, '1日の広告費'),
+          h(
+            'select',
+            { 'data-policy-ads': entry.id, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { adBudget: Number((ev.target as HTMLSelectElement).value) } }) },
+            BALANCE.ads.choices.map((v) => h('option', { value: String(v), selected: v === adBudgetOf(entry) }, v === 0 ? '出さない' : yenStr(v))),
+          ),
         ),
         h(
           'div',
@@ -665,6 +678,7 @@ export class ManageMenu {
           );
         }),
       ),
+      this.adsCard(s),
       h(
         'section',
         { class: 'card wide' },
@@ -672,6 +686,29 @@ export class ManageMenu {
         h('p', { class: 'note' }, '客は食券を出したあと、麺がゆで上がる頃に「ニンニク入れますか？」と聞かれてコールします。コールを聞いてから盛り付けましょう。'),
         Object.values(CALLS).map((c) => h('div', { class: 'kv' }, h('span', null, c.name), h('b', null, c.levels.map((l) => l.label).join(' / ')))),
       ),
+    );
+  }
+
+  /** 広告（店ごとの1日の広告費。開店のときに払う。オーナーの判断 14「控えめ」） */
+  private adsCard(s: GameState): HTMLElement {
+    const entry = activeStore(s);
+    const cur = adBudgetOf(entry);
+    return h(
+      'section',
+      { class: 'card wide ads-card' },
+      h('h4', null, '広告'),
+      h('p', { class: 'note' }, `1日の広告費を決めると、開店のときに払い、その日の来客が増えます（1日¥3,000で約+8%、どれだけ出しても+${Math.round(BALANCE.ads.max * 100)}%まで。効きは段々弱まります）。お金が足りない日は出しません。`),
+      h(
+        'div',
+        { class: 'kv' },
+        h('span', null, '1日の広告費'),
+        h(
+          'select',
+          { 'data-ad-budget': entry.id, disabled: !this.host.isHost, onchange: (ev: Event) => void this.act({ type: 'setStorePolicy', storeId: entry.id, policy: { adBudget: Number((ev.target as HTMLSelectElement).value) } }) },
+          BALANCE.ads.choices.map((v) => h('option', { value: String(v), selected: v === cur }, v === 0 ? '出さない' : `${yenStr(v)}（来客 +${Math.round((adFactor(v) - 1) * 100)}%）`)),
+        ),
+      ),
+      (s.today.ads ?? 0) > 0 ? h('p', { class: 'note good' }, `今日は ${yenStr(s.today.ads ?? 0)} の広告を出しています`) : null,
     );
   }
 
@@ -775,7 +812,7 @@ export class ManageMenu {
             'section',
             { class: 'card wide' },
             h('h4', null, '採用候補（毎朝入れ替わります）'),
-            h('p', { class: 'note' }, '採用はアルバイトから（時給・シフト制）。採用は閉店後か仕込み時間にできます。採用費はその場で、給与は働いた時間ぶんを閉店後の精算で支払います。真面目さや我慢強さは数字では分かりません。働きぶりは勤務の記録で確かめましょう。'),
+            h('p', { class: 'note' }, `採用はアルバイトから（時給・シフト制）。採用は閉店後か仕込み時間にできます。手続きと研修があるので、出勤できるのは採用の${BALANCE.staff.hireDelayDays}日後からです。採用費はその場で、給与は働いた時間ぶんを閉店後の精算で支払います。アルバイトには出られる曜日（希望シフト）があります。真面目さや我慢強さは数字では分かりません。働きぶりは勤務の記録で確かめましょう。`),
             s.candidates.length === 0 ? h('p', { class: 'note' }, '今日の候補者はいません。') : null,
             s.candidates.map((c) =>
               h(
@@ -784,7 +821,7 @@ export class ManageMenu {
                 h(
                   'div',
                   { class: 'trow' },
-                  h('div', { class: 'tname' }, c.profile.name, h('small', null, `${ROLE_LABEL[c.profile.role]}・アルバイト・時給${yenStr(c.profile.hourly ?? Math.round(c.profile.wage / BALANCE.staff.employment.fullShiftHours / 10) * 10)}・採用費${yenStr(c.profile.hireFee)}`)),
+                  h('div', { class: 'tname' }, c.profile.name, h('small', null, `${ROLE_LABEL[c.profile.role]}・アルバイト・時給${yenStr(c.profile.hourly ?? Math.round(c.profile.wage / BALANCE.staff.employment.fullShiftHours / 10) * 10)}・採用費${yenStr(c.profile.hireFee)}${c.profile.wishDays ? `・出られる曜日 ${WEEKDAY_LABEL.filter((_, i) => c.profile.wishDays![i]).join('')}` : ''}`)),
                   h('button', { class: 'mini', onclick: () => this.act({ type: 'hire', candidateId: c.id }) }, '採用する'),
                 ),
                 lookLine(lookSeedOf(c)),
@@ -793,6 +830,26 @@ export class ManageMenu {
             ),
           )
         : null,
+      hiring ? this.tempCard(s) : null,
+    );
+  }
+
+  /** 短期バイト（今日だけ。オーナーの判断 14） */
+  private tempCard(s: GameState): HTMLElement {
+    const max = BALANCE.staff.temp.maxPerDay;
+    const used = s.employees.filter((e) => e.profile.temp).length;
+    const can = s.phase === 'prep' && used < max && this.host.isHost;
+    return h(
+      'section',
+      { class: 'card wide temp-card' },
+      h('h4', null, `短期バイト（今日だけ・1日${max}人まで）`),
+      h('p', { class: 'note' }, `開店前（仕込みの間）に呼ぶと、すぐ来て今日だけ働きます。採用費はかからず、時給は通常の${BALANCE.staff.temp.wageMult}倍（${yenStr(tempHourly())}）、能力は新人並みです。人が足りない日に使います。`),
+      h(
+        'div',
+        { class: 'tbtns' },
+        (['cook', 'server', 'cleaner'] as EmployeeRole[]).map((r) => h('button', { class: 'mini', 'data-temp': r, disabled: !can, onclick: () => this.act({ type: 'hireTemp', role: r }) }, `${ROLE_LABEL[r]}を呼ぶ`)),
+      ),
+      s.phase !== 'prep' ? h('p', { class: 'note' }, '開店前（仕込みの間）に呼べます') : used >= max ? h('p', { class: 'note' }, `今日はもう${max}人呼んでいます`) : null,
     );
   }
 
@@ -970,6 +1027,10 @@ export class ManageMenu {
       const beyond = d > lastDay;
       if (past || beyond) {
         cells.push(h('div', { class: 'cal-day past' }, h('b', null, `${d}日目`)));
+        continue;
+      }
+      if (e.availableFrom !== undefined && d < e.availableFrom) {
+        cells.push(h('button', { class: `cal-day pending ${d === s.day ? 'today' : ''}`, 'data-day': String(d), disabled: true }, h('b', null, `${d}日目${d === s.day ? '・今日' : ''}`), h('small', null, '手続き中')));
         continue;
       }
       const sh = shiftFor(e, d);
