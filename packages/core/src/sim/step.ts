@@ -58,7 +58,8 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
   updateAttendance(s, dt, ctx);
   updateEmployees(s, dt, ctx);
 
-  if (s.phase === 'open') {
+  // 火事の間は新しいお客さんは来ない（店の中の人は騒ぐが残る）
+  if (s.phase === 'open' && !s.events?.accident) {
     updateArrivals(s, dt, ctx);
     spawnLostItemOwners(s, ctx);
   }

@@ -947,8 +947,26 @@ test('爆発事故: 設定には起こすボタンがない。開発用の欄（
   await advance('s.openT = Math.max(s.openT, 2.95)');
   await expect(page.locator('.acc-warn')).toBeVisible({ timeout: 20_000 });
   await shot(page, '31-warning');
+  // 発火から15秒（以前の3倍）。その間に火は設備から設備へ燃え移り、炎が増える
+  type FireW = { __jiro: { world: { scene: { getObjectByName(n: string): unknown; traverse(f: (o: { name: string }) => void): void } }; host: { state: { events: { accident: { stage: string; t: number; burning: { id: string }[] } } } } } };
+  const flames = () => page.evaluate(() => {
+    let n = 0;
+    (window as unknown as FireW).__jiro.world.scene.traverse((o) => {
+      if (o.name.startsWith('flame:')) n += 1;
+    });
+    return n;
+  });
+  await advance('s.events.accident.t = 2');
+  await expect.poll(flames, { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
+  const f1 = await flames();
+  await advance('s.events.accident.t = 10');
+  await page.waitForFunction(() => (window as unknown as FireW).__jiro.host.state.events.accident.burning.length >= 4, null, { timeout: 20_000 });
+  await expect.poll(flames, { timeout: 20_000 }).toBeGreaterThan(f1 + 1);
+  expect(await page.evaluate(() => (window as unknown as FireW).__jiro.host.state.events.accident.stage)).toBe('warning');
+  await page.waitForTimeout(800);
+  await shot(page, '31a-fire-spreading');
   // 予兆が終わると爆発 → 暗転 →「数時間後」→ 目覚め
-  await advance('s.events.accident.t = 4.95');
+  await advance('s.events.accident.t = 14.95');
   await page.waitForFunction(() => (window as unknown as { __jiro: { host: { state: { events: { accident: { stage: string } | null } } } } }).__jiro.host.state.events.accident?.stage === 'destroyed', null, { timeout: 20_000 });
   await advance('s.events.accident.t = 1.2');
   await page.waitForTimeout(800);
@@ -972,6 +990,16 @@ test('爆発事故: 設定には起こすボタンがない。開発用の欄（
   await page.waitForTimeout(1500);
   const b = await jiroState(page);
   expect({ t: b.t, money: b.money, phase: b.phase }).toEqual({ t: a.t, money: a.money, phase: 'open' });
+  // 店内はぐちゃぐちゃ（落ちた天井・板・かけら・ガラス・焦げ跡などが散らばる）。燃え残りの火もある
+  const wreck = await page.evaluate(() => {
+    const names: string[] = [];
+    (window as unknown as FireW).__jiro.world.scene.traverse((o) => {
+      if (o.name.startsWith('wreck:')) names.push(o.name);
+    });
+    return names;
+  });
+  expect(wreck.length).toBeGreaterThanOrEqual(8);
+  expect(await flames()).toBeGreaterThanOrEqual(1);
   await shot(page, '32-aftermath');
   // 焼け跡を歩ける（PC は W キー）
   if (!test.info().project.use.hasTouch) {

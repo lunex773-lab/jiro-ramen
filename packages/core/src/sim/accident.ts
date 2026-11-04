@@ -17,11 +17,13 @@
 import { BALANCE } from '../data/balance';
 import { STAGES } from '../data/stages';
 import { equipmentCenter } from '../geometry';
-import type { GameState, Id, ShopEvents } from '../types';
-import { newId, randRange } from '../util';
+import { FIRE_LINES } from '../data/events';
+import type { AccidentState, GameState, Id, ShopEvents } from '../types';
+import { dist, newId, randRange } from '../util';
 import { defOf } from './equipment';
 import { ensureEvents, evRand, noteDraw, noteFire, takeForced } from './events';
 import { dropHand } from './interact';
+import { eventSayTime, sayEvent } from './customers';
 import { emit, notify, type SimCtx } from './notices';
 
 const X = BALANCE.events.explosion;
@@ -113,10 +115,11 @@ function startWarning(s: GameState, ctx: SimCtx, ev: ShopEvents): void {
   const plan = ev.accidentPlan;
   if (!plan) return;
   const src = accidentSource(s);
-  ev.accident = { id: plan.id, day: s.day, stage: 'warning', t: 0, sourceId: src.id, pos: src.pos };
+  ev.accident = { id: plan.id, day: s.day, stage: 'warning', t: 0, sourceId: src.id, pos: src.pos, burning: src.id ? [{ id: src.id, at: 0 }] : [], panicked: {} };
+  ev.accident.nextSpread = nextSpreadAt(s, ev.accident);
   ev.accidentPlan = null;
   noteFire(s, 'explosion', takeForced(s, 'explosion'));
-  notify(s, ctx, 'accident', 'danger', '⚠ ガスのにおいがする…寸胴の様子がおかしい！');
+  notify(s, ctx, 'accident', 'danger', '🔥 寸胴から火が出た！ガスのにおいがする…');
   emit(ctx, { type: 'accidentWarning', targetId: src.id ?? undefined, pos: src.pos });
 }
 
@@ -146,8 +149,93 @@ export function updateAccident(s: GameState, dt: number, ctx: SimCtx): void {
   const acc = ev.accident;
   if (acc?.stage === 'warning') {
     acc.t += dt;
+    spreadFire(s, ctx, acc);
+    panic(s, acc);
     if (acc.t >= X.warningSec) blast(s, ctx, ev);
   }
+}
+
+/** 燃える設備（置いてあって大きさのあるもの） */
+function flammable(s: GameState) {
+  return s.equipment.filter((e) => e.placed && defOf(e).w > 0);
+}
+
+/** 次の1台に燃え移る予兆の経過秒（すべて燃えていれば Infinity） */
+function nextSpreadAt(s: GameState, acc: AccidentState): number {
+  const total = flammable(s).length;
+  const lit = acc.burning?.length ?? 0;
+  if (lit >= total) return Infinity;
+  const first = acc.sourceId ? 1 : 0;
+  const k = lit - first + 1;
+  const n = Math.max(1, total - first);
+  return X.warningSec * X.spreadEndFrac * Math.pow(k / n, 1 / X.spreadPower);
+}
+
+/**
+ * 火が設備から設備へ燃え移る（乱数を使わず、燃えている設備にいちばん近い設備から）。
+ * 初めはゆっくり、だんだん速く燃え広がり、爆発の少し前には店の設備のすべてに火が回る
+ */
+function spreadFire(s: GameState, ctx: SimCtx, acc: AccidentState): void {
+  const burning = (acc.burning ??= []);
+  acc.nextSpread ??= nextSpreadAt(s, acc);
+  while (acc.t >= acc.nextSpread) {
+    const at = acc.nextSpread;
+    const on = new Set(burning.map((b) => b.id));
+    const lit = s.equipment.filter((e) => on.has(e.id));
+    const from = lit.length > 0 ? lit.map((e) => equipmentCenter(e)) : [acc.pos];
+    let best: { id: Id; d: number } | null = null;
+    for (const e of flammable(s)) {
+      if (on.has(e.id)) continue;
+      const c = equipmentCenter(e);
+      const d = Math.min(...from.map((p) => dist(p, c)));
+      if (!best || d < best.d - 1e-9 || (Math.abs(d - best.d) < 1e-9 && e.id < best.id)) best = { id: e.id, d };
+    }
+    if (!best) {
+      acc.nextSpread = Infinity;
+      return;
+    }
+    burning.push({ id: best.id, at });
+    acc.nextSpread = nextSpreadAt(s, acc);
+    if (burning.length >= 4 && !acc.panicked?.['notice:spread']) {
+      (acc.panicked ??= {})['notice:spread'] = 1;
+      notify(s, ctx, 'accident', 'danger', '🔥 火がほかの設備に燃え移っている！');
+    }
+  }
+}
+
+/** 火に気づいたお客さんと従業員が騒ぐ（立ち上がって火の方を見る・セリフ。店からは出ない） */
+function panic(s: GameState, acc: AccidentState): void {
+  if (acc.t < X.noticeSec) return;
+  const said = (acc.panicked ??= {});
+  const late = acc.t >= X.warningSec * 0.55;
+  const window = Math.max(1, X.warningSec * 0.5);
+  const people: { id: Id; kind: 'customer' | 'staff' }[] = [
+    ...s.customers.filter((c) => c.pos.z >= 0.05).map((c) => ({ id: c.id, kind: 'customer' as const })),
+    ...s.employees.filter((e) => e.presentToday).map((e) => ({ id: e.id, kind: 'staff' as const })),
+  ];
+  people.forEach((p, i) => {
+    const n = said[p.id] ?? 0;
+    if (n >= 2) return;
+    // 気づく時刻を人ごとにずらす（いっせいに話さない）
+    const at = X.noticeSec + ((i * 0.9) % window) + (n === 1 ? X.warningSec * 0.45 : 0);
+    if (acc.t < at || (n === 1 && !late)) return;
+    said[p.id] = n + 1;
+    const pool = p.kind === 'customer' ? (n === 0 ? FIRE_LINES.customer : FIRE_LINES.customerLate) : n === 0 ? FIRE_LINES.staff : FIRE_LINES.staffLate;
+    const line = pool[Math.floor(evRand(s) * pool.length) % pool.length]!;
+    if (p.kind === 'customer') {
+      const c = s.customers.find((x) => x.id === p.id);
+      if (c) sayEvent(c, s, line, 2.5);
+    } else {
+      const e = s.employees.find((x) => x.id === p.id);
+      if (e) e.say = { text: line, until: s.t + eventSayTime(line, 2.5) };
+    }
+  });
+}
+
+/** 火に気づいて騒いでいる間（従業員は新しい仕事を始めない。画面では立ち上がって火の方を見る） */
+export function accidentPanic(s: GameState): boolean {
+  const acc = s.events?.accident;
+  return !!acc && acc.stage === 'warning' && acc.t >= X.noticeSec;
 }
 
 /** 壊滅している間の step: 事故の経過時間だけを進める（売上・客・従業員・在庫は変えない） */

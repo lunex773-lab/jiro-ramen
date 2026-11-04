@@ -4,6 +4,7 @@ import {
   applyAction,
   BALANCE,
   canonicalJson,
+  EQUIPMENT,
   drawAccident,
   listVerbs,
   makeSaveFile,
@@ -226,5 +227,87 @@ describe('爆発事故とリセット', () => {
     applyAction(s, 'p1', { type: 'accidentReset', accidentId: s.events!.accident!.id }, ctx);
     expect(s.players.map((p) => p.id)).toEqual(['p1', 'p2']);
     expect(s.players[1]!.pos).not.toEqual({ x: 3, z: 3 });
+  });
+});
+
+describe('発火から爆発までの火事（オーナーの指示: 3倍の時間・燃え移る・騒ぐが店に残る・消せない）', () => {
+  /** 2日目の営業中に発火させる（予兆が始まったところ） */
+  function ignite(seed: number) {
+    const { s, ctx } = day2(seed);
+    expect(applyAction(s, 'p1', { type: 'openShop' }, ctx).ok).toBe(true);
+    // 店にお客さんが入るまで進める
+    for (let i = 0; i < 3000 && !s.customers.some((c) => c.pos.z > 0.5); i++) step(s, 0.1, ctx);
+    expect(applyAction(s, 'p1', { type: 'debugEvent', kind: 'explosion' }, ctx).ok).toBe(true);
+    for (let i = 0; i < 50 && s.events?.accident?.stage !== 'warning'; i++) step(s, 0.1, ctx);
+    expect(s.events!.accident!.stage).toBe('warning');
+    return { s, ctx };
+  }
+
+  it('発火から15秒で爆発する（以前の3倍）。その間は爆発しない', () => {
+    expect(X.warningSec).toBe(15);
+    const { s, ctx } = ignite(5);
+    const acc = () => s.events!.accident!;
+    while (acc().t < X.warningSec - 0.3) step(s, 0.1, ctx);
+    expect(acc().stage).toBe('warning');
+    run(s, ctx, 0.6);
+    expect(acc().stage).toBe('destroyed');
+  });
+
+  it('火は発火した設備から近い設備へ順に燃え移り、時間とともに速く広がる。同じ店なら同じ順', () => {
+    const a = ignite(5);
+    const b = ignite(5);
+    const placed = a.s.equipment.filter((e) => e.placed && (EQUIPMENT[e.type]?.w ?? 0) > 0).length;
+    const at = (t: number) => {
+      const acc = a.s.events!.accident!;
+      while (acc.t < t) step(a.s, 0.1, a.ctx);
+      return acc.burning!.length;
+    };
+    expect(a.s.events!.accident!.burning!.map((x) => x.id)).toEqual([a.s.events!.accident!.sourceId]);
+    const n3 = at(3);
+    const n8 = at(8);
+    const n14 = at(14.5);
+    expect(n3).toBeGreaterThanOrEqual(1);
+    expect(n8).toBeGreaterThan(n3 + 1);
+    expect(n14).toBeGreaterThan(n8);
+    // 爆発の少し前には店の設備のすべてに火が回る
+    expect(n14).toBe(placed);
+    // 同じ設備は1回だけ・置いてある設備だけ
+    const ids = a.s.events!.accident!.burning!.map((x) => x.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) expect(a.s.equipment.find((e) => e.id === id)?.placed).toBe(true);
+    // 燃え移る間隔はだんだん短く（1回に燃え移る台数が増える）
+    const times = a.s.events!.accident!.burning!.map((x) => x.at);
+    const early = times.filter((t) => t > 0 && t < 5).length;
+    const lateN = times.filter((t) => t >= 10 && t < 15).length;
+    expect(lateN).toBeGreaterThan(early);
+    // 乱数を使わないので同じ店なら同じ順
+    while (b.s.events!.accident!.t < 14.5) step(b.s, 0.1, b.ctx);
+    expect(b.s.events!.accident!.burning).toEqual(a.s.events!.accident!.burning);
+  });
+
+  it('お客さんと従業員は火に気づいて騒ぐが、店の中に残る。新しいお客さんは来ない。火を消す操作はない', () => {
+    const { s, ctx } = ignite(7);
+    const inside0 = s.customers.filter((c) => c.pos.z >= 0.05).map((c) => c.id).sort();
+    expect(inside0.length).toBeGreaterThan(0);
+    const total0 = s.customers.length;
+    let said = 0;
+    let staffSaid = 0;
+    while (s.events!.accident!.stage === 'warning') {
+      step(s, 0.1, ctx);
+      said = Math.max(said, s.customers.filter((c) => c.sayEvent && c.sayUntil > s.t && c.pos.z >= 0.05).length);
+      if (s.employees.some((e) => e.say && e.say.until > s.t)) staffSaid += 1;
+    }
+    expect(said).toBeGreaterThan(0);
+    expect(staffSaid).toBeGreaterThan(0);
+    // 店の中にいた人は全員、爆発のときも店の中にいる
+    const inside1 = s.customers.filter((c) => c.pos.z >= 0.05).map((c) => c.id).sort();
+    for (const id of inside0) expect(inside1).toContain(id);
+    // 新しく来た人はいない（行列にいた人はそのまま）
+    expect(s.customers.length).toBeLessThanOrEqual(total0);
+    // 火を消す・止める操作はない（どの設備の操作一覧にも出ない）
+    for (const e of s.equipment) {
+      const verbs = listVerbs(s, 'p1', e.id).map((v) => v.verb);
+      expect(verbs.some((v) => /extinguish|fire|消火/.test(v))).toBe(false);
+    }
   });
 });

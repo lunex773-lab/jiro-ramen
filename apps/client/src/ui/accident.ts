@@ -43,7 +43,7 @@ const between = (t: number, a: number, b: number) => smooth((t - a) / Math.max(1
  */
 export function accidentView(acc: AccidentState | null | undefined, faintSec = BALANCE.events.explosion.faintSec): AccidentView {
   if (!acc) return NONE;
-  if (acc.stage === 'warning') return { ...NONE, warning: true, shake: 0.004 + Math.min(1, acc.t / 5) * 0.01 };
+  if (acc.stage === 'warning') return { ...NONE, warning: true, shake: 0.003 + Math.pow(Math.min(1, acc.t / BALANCE.events.explosion.warningSec), 1.5) * 0.018 };
   const k = faintSec / 9;
   const t = acc.t;
   const fall = between(t, 0.3 * k, 2.2 * k);

@@ -428,8 +428,12 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
   });
 
   let ticketBusy = s.customers.some((c) => c.state === 'ticket');
+  // 爆発事故の前の火事に気づいたら、店の中のお客さんは手を止めて火の方を見る（騒ぐが店からは出ない。オーナー回答）
+  const acc = s.events?.accident;
+  const frozen = !!acc && acc.stage === 'warning' && acc.t >= BALANCE.events.explosion.noticeSec;
 
   for (const c of s.customers) {
+    if (frozen && c.pos.z >= 0.05) continue;
     c.stateTime += dt;
     switch (c.state) {
       case 'arriving': {

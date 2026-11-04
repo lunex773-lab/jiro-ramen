@@ -2,7 +2,8 @@
 
 import * as THREE from 'three';
 import { ResolutionGovernor } from './resolution';
-import { Aftermath, hash01 } from './aftermath';
+import { Aftermath, hash01, type FireSpot } from './aftermath';
+import { equipmentWreck, lingeringFires } from './wreck';
 import { eatenContents, eatenStep, eatMotion, eatProgress } from './eat-motion';
 import { createSteam } from './models/fx';
 import { layoutBubbles, type BubbleBox } from '../ui/bubble-layout';
@@ -12,6 +13,7 @@ import { lookSeedOf } from './staff-look';
 
 import {
   CELL,
+  BALANCE,
   EQUIPMENT,
   equipmentCenter,
   seatCounterPoint,
@@ -86,7 +88,7 @@ export class World {
   private filmPhones = new Map<string, THREE.Object3D>();
   private shellName = '';
   private lights: THREE.Light[] = [];
-  private equip = new Map<string, { model: EquipmentModel; type: string }>();
+  private equip = new Map<string, { model: EquipmentModel; type: string; top?: number }>();
   private stools = new Map<string, THREE.Object3D>();
   private stoolKey = '';
   private chars = new Map<string, CharEntry>();
@@ -361,11 +363,28 @@ export class World {
         this.scene.add(entry.model.group);
       }
       const c = equipmentCenter(e);
-      entry.model.group.position.set(c.x, 0, c.z);
-      entry.model.group.rotation.y = -e.rot * (Math.PI / 2);
-      // 焼け跡では設備が少し傾き、壊れたように見せる
-      entry.model.group.rotation.z = this.burned ? (hash01(e.id, 1) - 0.5) * 0.22 : 0;
-      entry.model.group.rotation.x = this.burned ? (hash01(e.id, 2) - 0.5) * 0.1 : 0;
+      const acc = this.accident;
+      if (this.burned && acc) {
+        // 焼け跡: 爆心から離れる向きに押され、大きく傾き、いくつかは横倒し
+        const wr = equipmentWreck(e.id, c, acc.pos, acc.id);
+        const half = (Math.min(def.w, def.d) * CELL) / 2;
+        entry.model.group.position.set(c.x + wr.dx, wr.toppled ? half * 0.55 : 0, c.z + wr.dz);
+        entry.model.group.rotation.set(wr.rx, -e.rot * (Math.PI / 2) + wr.ry, wr.rz);
+      } else {
+        entry.model.group.position.set(c.x, 0, c.z);
+        entry.model.group.rotation.set(0, -e.rot * (Math.PI / 2), 0);
+        if (entry.top === undefined) {
+          // 炎を出す高さ（設備の上面。湯気などの演出と、高い棚・換気扇は除いて作業台の高さくらいまで）
+          entry.model.group.updateMatrixWorld(true);
+          const box = new THREE.Box3();
+          entry.model.group.traverse((o) => {
+            const m = o as THREE.Mesh;
+            if (!m.isMesh || !(m.material instanceof THREE.MeshStandardMaterial) || m.material.transparent) return;
+            box.expandByObject(m);
+          });
+          entry.top = Number.isFinite(box.max.y) ? Math.max(0.3, Math.min(1.25, box.max.y)) : 0.95;
+        }
+      }
       entry.model.update(e, s, t, dt);
     }
     for (const [id, entry] of this.equip) {
@@ -388,6 +407,7 @@ export class World {
       const o = createStool();
       const p = seatPos(s, seat);
       o.position.set(p.x, 0, p.z);
+      o.userData.base = { x: p.x, z: p.z };
       this.scene.add(o);
       this.stools.set(seat.id, o);
     }
@@ -460,6 +480,17 @@ export class World {
         c.model.update('down', t, dt);
         continue;
       }
+      // 火事に気づいたら、店の中の客は立ち上がって火の方を見る（店からは出ない）
+      const panic = this.panicAt(cu.pos);
+      if (panic !== null) {
+        const seat = seated && cu.seatId ? s.seats.find((x) => x.id === cu.seatId) : undefined;
+        const p = seat ? seatPos(s, seat) : cu.pos;
+        this.placeChar(c, p.x, p.z, panic, dt, smooth);
+        c.model.setHeld(null);
+        c.model.setEat(null);
+        c.model.update('stand', t, dt);
+        continue;
+      }
       if (seated && cu.seatId) {
         const seat = s.seats.find((x) => x.id === cu.seatId);
         const p = seat ? seatPos(s, seat) : cu.pos;
@@ -508,7 +539,8 @@ export class World {
         c.model.update('down', t, dt);
         continue;
       }
-      this.placeChar(c, e.pos.x, e.pos.z, e.ai.state === 'working' || e.work ? e.yaw : null, dt, smooth);
+      const panicE = e.work ? null : this.panicAt(e.pos);
+      this.placeChar(c, e.pos.x, e.pos.z, panicE ?? (e.ai.state === 'working' || e.work ? e.yaw : null), dt, smooth);
       // サボっている従業員はスマホを見ている
       c.model.setHeld(e.ai.state === 'slacking' && e.hand.kind === 'none' ? 'phone' : heldKind(e.hand));
       const pose: CharacterPose = e.work ? 'work' : c.moving > 0 ? (e.hand.kind !== 'none' ? 'carry' : 'walk') : 'stand';
@@ -735,25 +767,73 @@ export class World {
   private updateAccident(s: GameState, t: number, dt: number): void {
     const acc = this.accident;
     const burned = acc?.stage === 'destroyed';
+    const st = stageOf(s);
+    const bounds = { w: st.w * CELL, d: st.d * CELL };
     if (burned && !this.after.burned) {
-      const st = stageOf(s);
-      this.after.enter([this.hemi, this.sun, ...this.lights], { w: st.w * CELL, d: st.d * CELL }, acc.pos);
+      this.after.enter([this.hemi, this.sun, ...this.lights], bounds, acc.pos, acc.id);
     } else if (!burned && this.after.burned) {
       this.after.exit();
     }
     this.burned = burned;
     this.after.setWarning(acc?.stage === 'warning', acc?.pos ?? null, t);
+    // 燃え広がる火（予兆の間はすべて、爆発のあとは燃え残りだけ小さく）
+    if (acc && (acc.stage === 'warning' || burned)) {
+      const list = acc.burning ?? [];
+      const ids = burned ? lingeringFires(list.map((b) => b.id)) : list.map((b) => b.id);
+      const spots: FireSpot[] = [];
+      for (const id of ids) {
+        const e = s.equipment.find((x) => x.id === id);
+        const def = e ? EQUIPMENT[e.type] : undefined;
+        if (!e || !def) continue;
+        const c = equipmentCenter(e);
+        const entry = this.equip.get(id);
+        const b = list.find((x) => x.id === id);
+        let x = c.x;
+        let z = c.z;
+        if (burned) {
+          const wr = equipmentWreck(e.id, c, acc.pos, acc.id);
+          x += wr.dx;
+          z += wr.dz;
+        }
+        spots.push({ id, x, z, top: burned ? 0.35 : (entry?.top ?? 0.95), w: def.w * CELL, d: def.d * CELL, age: burned ? 99 : acc.t - (b?.at ?? 0), scale: burned ? 0.55 : 1 });
+      }
+      this.after.setFires(spots, t);
+      if (acc.stage === 'warning') this.after.setSmoke(Math.pow(Math.min(1, acc.t / BALANCE.events.explosion.warningSec), 1.3) * 0.85, bounds);
+    } else if (!this.after.burned) {
+      this.after.setFires([], t);
+    }
     if (acc?.stage === 'warning') this.after.tickWarning(dt);
     this.after.update(t, dt, burned ? acc.pos : null);
   }
 
+  /** 火事に気づいて騒いでいる人が見る向き（店の中にいて騒いでいる間だけ。なければ null） */
+  private panicAt(pos: { x: number; z: number }): number | null {
+    const acc = this.accident;
+    if (!acc || acc.stage !== 'warning' || acc.t < BALANCE.events.explosion.noticeSec || pos.z < 0.05) return null;
+    return Math.atan2(acc.pos.x - pos.x, acc.pos.z - pos.z);
+  }
+
   /** 焼け跡では椅子を倒す（戻ったら起こす） */
   private tipStools(): void {
+    const acc = this.accident;
     for (const [id, o] of this.stools) {
       const want = this.burned ? (hash01(id, 3) > 0.5 ? 1 : -1) * 1.45 : 0;
       if (o.rotation.z === want) continue;
       o.rotation.z = want;
       o.position.y = this.burned ? 0.17 : 0;
+      // 焼け跡では椅子が爆心から離れる向きに飛ばされて散らばる
+      const base = o.userData.base as { x: number; z: number } | undefined;
+      if (!base) continue;
+      if (this.burned && acc) {
+        const wr = equipmentWreck(id, base, acc.pos, acc.id);
+        o.position.x = base.x + wr.dx * 1.6;
+        o.position.z = Math.max(0.15, base.z + wr.dz * 1.6);
+        o.rotation.y = wr.ry * 2;
+      } else {
+        o.position.x = base.x;
+        o.position.z = base.z;
+        o.rotation.y = 0;
+      }
     }
   }
 

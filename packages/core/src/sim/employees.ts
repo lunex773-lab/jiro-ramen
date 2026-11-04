@@ -42,6 +42,7 @@ import { emit, notify, type SimCtx } from './notices';
 import { complaintVerbFor } from './complaints';
 import { evRand } from './events';
 import { unpermittedFilming } from './media';
+import { accidentPanic } from './accident';
 import { attendHireDay, dailyWageOf, initNewHire, isPartTime, isSlacking, rollCall, rollPostpone, wagesDueToday } from './staff';
 
 export const ROLE_LABEL: Record<EmployeeRole, string> = {
@@ -551,6 +552,15 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
   for (const e of s.employees) {
     // 出勤前・休憩中・退勤後・欠勤（状態は staff.ts の出勤の処理が決める）
     if (!e.presentToday) continue;
+    // 火事に気づいたら仕事の手を止めて火の方を見る（店からは出ない）
+    if (accidentPanic(s) && !e.work) {
+      const acc = s.events!.accident!;
+      releaseTask(e);
+      e.ai.state = 'idle';
+      e.ai.note = '火事に驚いている';
+      e.yaw = Math.atan2(acc.pos.x - e.pos.x, acc.pos.z - e.pos.z);
+      continue;
+    }
     // サボっている間は仕事を選ばない（作業の途中では始まらない）
     if (isSlacking(e, s)) {
       e.ai.state = 'slacking';

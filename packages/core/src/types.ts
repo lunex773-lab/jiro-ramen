@@ -906,6 +906,12 @@ export interface AccidentState {
   /** 異常を起こした設備 */
   sourceId: Id | null;
   pos: Vec2;
+  /** 燃えている設備と、燃え始めた時刻（予兆の経過秒）。燃え移った順。古い状態にはない */
+  burning?: { id: Id; at: number }[];
+  /** 次に燃え移る予兆の経過秒 */
+  nextSpread?: number;
+  /** 騒いだ回数（人の ID ごと。同じ人が何度も同じことを言わない） */
+  panicked?: Record<Id, number>;
 }
 
 export interface ShopEvents {
