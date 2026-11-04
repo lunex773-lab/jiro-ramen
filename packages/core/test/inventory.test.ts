@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { addLot, applyAction, consume, expireLots, placeOrder, receiveDeliveries, stockOf } from '../src';
-import { eqByType, newGame, run, standAt } from './helpers';
+import { addLot, applyAction, consume, expireLots, fridgeCapacity, fridgeUsage, nextDay, pendingOf, placeOrder, receiveDeliveries, runAutoOrder, stockOf } from '../src';
+import { addSoloBot, eqByType, newGame, run, runDay, standAt } from './helpers';
 
 describe('在庫', () => {
   it('在庫以上は消費できず、失敗しても在庫は変わらない', () => {
@@ -83,5 +83,38 @@ describe('在庫', () => {
     const lot = s.inventory.find((l) => l.itemId === 'garlic')!;
     expect(lot.qty).toBe(500);
     expect(lot.unitCost).toBeCloseTo(1.0, 5);
+  });
+});
+
+describe('自動発注と冷蔵庫の容量（統合進化設計書 v2.1 の測定で見つけた問題）', () => {
+  it('目安が冷蔵庫に入りきらないときは比例して減らし、残りが少ない食材（もやし）も入る。知らせが出る', () => {
+    const { s, ctx } = newGame(41);
+    for (const [itemId, qty] of Object.entries(s.autoOrder)) applyAction(s, 'p1', { type: 'setAutoOrder', itemId, qty: qty * 4 }, ctx);
+    // もやしを使い切った状態にする
+    s.inventory = s.inventory.filter((l) => l.itemId !== 'moyashi');
+    runAutoOrder(s, ctx);
+    expect(fridgeUsage(s, true)).toBeLessThanOrEqual(fridgeCapacity(s) + 1e-6);
+    expect(pendingOf(s, 'moyashi')).toBeGreaterThan(0);
+    expect(s.notices.some((n) => n.code === 'autoorder:fridge')).toBe(true);
+  });
+
+  it('自動発注を3倍にしても店は回り続ける（以前は止まった）。ただし廃棄が増えて損をする', () => {
+    const play = (mult: number) => {
+      const { s, ctx } = newGame(42);
+      addSoloBot(s);
+      for (const [itemId, qty] of Object.entries(s.autoOrder)) applyAction(s, 'p1', { type: 'setAutoOrder', itemId, qty: Math.round(qty * mult) }, ctx);
+      for (let d = 0; d < 10; d++) {
+        applyAction(s, 'p1', { type: 'openShop' }, ctx);
+        runDay(s, ctx);
+        nextDay(s, ctx);
+      }
+      return s.history;
+    };
+    const base = play(1);
+    const over = play(3);
+    const served = (h: typeof base) => h.slice(3).reduce((a, r) => a + r.served, 0) / (h.length - 3);
+    const waste = (h: typeof base) => h.reduce((a, r) => a + r.waste, 0);
+    expect(served(over)).toBeGreaterThan(20);
+    expect(waste(over)).toBeGreaterThan(waste(base));
   });
 });

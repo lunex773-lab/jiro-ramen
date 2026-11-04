@@ -7,7 +7,7 @@ import { INGREDIENTS } from '../data/ingredients';
 import type { GameState, Lot } from '../types';
 import { clamp01, newId } from '../util';
 import { cash, recordPL } from './economy';
-import { emit, notify, type SimCtx } from './notices';
+import { clearNotice, emit, notify, type SimCtx } from './notices';
 
 export function stockOf(s: GameState, itemId: string): number {
   let q = 0;
@@ -228,17 +228,78 @@ export function receiveDeliveries(s: GameState, ctx: SimCtx, morning: boolean): 
   s.deliveries = remaining;
 }
 
-/** 自動発注（閉店後の翌朝便）。目標在庫に足りない分をパック単位で発注 */
+/**
+ * 自動発注（閉店後の翌朝便）。目標在庫に足りない分をパック単位で発注する。
+ * 冷蔵の食材が冷蔵庫に入りきらないときは、足りない分を比例して減らし、残りが少ない食材から先に入れる
+ * （以前は表の順に発注していたため、麺・豚・ガラで冷蔵庫が埋まり、もやしが入らずヤサイが作れなくなって店が止まった。
+ * 統合進化設計書 v2.1 の経済の測定で発見）
+ */
 export function runAutoOrder(s: GameState, ctx: SimCtx): void {
+  type Need = { itemId: string; packs: number; full: number; kgPerPack: number; coverage: number; fridge: boolean };
+  const needs: Need[] = [];
   for (const [itemId, target] of Object.entries(s.autoOrder)) {
     const def = INGREDIENTS[itemId];
     if (!def || !def.purchasable || target <= 0) continue;
+    if (def.unlock && !s.career.unlocked.includes(def.unlock)) continue;
     const have = stockOf(s, itemId) + pendingOf(s, itemId);
     if (have >= target) continue;
     const packs = Math.ceil((target - have) / def.packQty);
-    const r = placeOrder(s, ctx, itemId, packs, false);
-    if (!r.ok) notify(s, ctx, `autoorder:${itemId}`, 'warn', `自動発注できません: ${def.name}（${r.reason}）`);
+    needs.push({
+      itemId,
+      packs,
+      full: packs,
+      kgPerPack: def.packQty * def.kgPerUnit,
+      coverage: have / target,
+      fridge: def.storage === 'fridge' && def.kgPerUnit > 0,
+    });
   }
+  // 冷蔵庫に入る量に合わせる（冷凍できる食材は冷凍庫の分も使えるが、まずは冷蔵庫に入る量で配分する）
+  const fridgeNeeds = needs.filter((n) => n.fridge);
+  const wantKg = fridgeNeeds.reduce((a, n) => a + n.packs * n.kgPerPack, 0);
+  const avail = Math.max(0, fridgeCapacity(s) - fridgeUsage(s, true));
+  const reduced: string[] = [];
+  if (wantKg > avail + 1e-6 && fridgeNeeds.length > 0) {
+    const k = avail / wantKg;
+    let left = avail;
+    // 比例して減らす
+    for (const n of fridgeNeeds) {
+      const p = Math.floor(n.packs * k);
+      if (p < n.packs) reduced.push(n.itemId);
+      n.packs = p;
+      left -= p * n.kgPerPack;
+    }
+    // 余った容量は、残りが少ない食材から1パックずつ
+    const order = [...fridgeNeeds].sort((a, b) => a.coverage - b.coverage || a.kgPerPack - b.kgPerPack);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const n of order) {
+        if (n.kgPerPack <= left + 1e-6 && n.packs < n.full) {
+          n.packs += 1;
+          left -= n.kgPerPack;
+          added = true;
+        }
+      }
+    }
+  }
+  // 残りが少ない食材から先に発注する（資金が足りないときも必要な物を先に）
+  needs.sort((a, b) => a.coverage - b.coverage);
+  for (const n of needs) {
+    if (n.packs <= 0) continue;
+    const def = INGREDIENTS[n.itemId]!;
+    const r = placeOrder(s, ctx, n.itemId, Math.min(50, n.packs), false);
+    if (!r.ok) notify(s, ctx, `autoorder:${n.itemId}`, 'warn', `自動発注できません: ${def.name}（${r.reason}）`);
+    else clearNotice(s, `autoorder:${n.itemId}`);
+  }
+  if (reduced.length > 0) {
+    notify(
+      s,
+      ctx,
+      'autoorder:fridge',
+      'warn',
+      `冷蔵庫に入りきらないため、自動発注を減らしました（${reduced.map((id) => INGREDIENTS[id]?.name ?? id).join('・')}）。冷蔵庫を増やすか、自動発注の量を見直してください`,
+    );
+  } else clearNotice(s, 'autoorder:fridge');
 }
 
 export function hasWorkingFridge(s: GameState): boolean {
