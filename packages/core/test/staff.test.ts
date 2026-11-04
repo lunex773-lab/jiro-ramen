@@ -21,7 +21,9 @@ import {
   respondToComplaint,
   rollCall,
   SEC_PER_MIN,
+  shiftFor,
   shiftsOf,
+  hasDateShift,
   staffSummary,
   startComplaint,
   updateAttendance,
@@ -223,6 +225,84 @@ describe('シフト', () => {
   it('シフトの変更・昇格はホストだけの操作', () => {
     expect(isHostOnly('setShift')).toBe(true);
     expect(isHostOnly('promote')).toBe(true);
+  });
+});
+
+describe('カレンダーで日にちごとのシフト（オーナー回答「日にちごと＋くりかえしも使える」）', () => {
+  const wk = shift(60, 180, { breakAt: 120, breakLen: 30 });
+  const once = (s: GameState, ctx: SimCtx, id: string, days: number[], sh: ShiftDay | null, mode: 'once' | 'weekly' | 'reset' = 'once') =>
+    applyAction(s, 'p1', { type: 'setDateShift', employeeId: id, days, shift: sh, mode }, ctx);
+
+  it('選んだ日だけの予定は、曜日ごとのくりかえしより優先する。ほかの日はくりかえしのまま', () => {
+    const { s, ctx } = newGame(21);
+    const e = partTimer(s, 1, 1);
+    s.day = 3;
+    expect(once(s, ctx, e.id, [5, 6], wk).ok).toBe(true);
+    expect(once(s, ctx, e.id, [8], null).ok).toBe(true);
+    expect(shiftFor(e, 5)).toEqual(wk);
+    expect(shiftFor(e, 6)).toEqual(wk);
+    expect(shiftFor(e, 8)).toBeNull();
+    expect(hasDateShift(e, 5)).toBe(true);
+    // 選ばなかった日・1週間後の同じ曜日はくりかえし（採用したときは毎日・仕込みから閉店まで）
+    expect(shiftFor(e, 7)).toEqual(shiftsOf(e)[weekdayOf(7)]);
+    expect(shiftFor(e, 12)).toEqual(shiftsOf(e)[weekdayOf(12)]);
+    expect(hasDateShift(e, 12)).toBe(false);
+    // 給与の見込みもその日の予定から
+    expect(expectedPay(e, 5)).toBe(Math.round((hourlyOf(e) * 1.5) / 10) * 10);
+    expect(expectedPay(e, 8)).toBe(0);
+  });
+
+  it('毎週くりかえすと、選んだ日の曜日のくりかえしになる（選んだ日の「その日だけ」は消える）。くりかえしに戻すこともできる', () => {
+    const { s, ctx } = newGame(22);
+    const e = partTimer(s, 1, 1);
+    s.day = 1;
+    expect(once(s, ctx, e.id, [3], null).ok).toBe(true);
+    expect(once(s, ctx, e.id, [3, 4], wk, 'weekly').ok).toBe(true);
+    expect(shiftsOf(e)[weekdayOf(3)]).toEqual(wk);
+    expect(shiftsOf(e)[weekdayOf(4)]).toEqual(wk);
+    expect(hasDateShift(e, 3)).toBe(false);
+    expect(shiftFor(e, 3 + 7)).toEqual(wk);
+    expect(shiftFor(e, 4 + 14)).toEqual(wk);
+    // 1日だけ休みにして、くりかえしに戻す
+    expect(once(s, ctx, e.id, [10], null).ok).toBe(true);
+    expect(shiftFor(e, 10)).toBeNull();
+    expect(once(s, ctx, e.id, [10], null, 'reset').ok).toBe(true);
+    expect(shiftFor(e, 10)).toEqual(wk);
+    expect(e.dateShifts).toBeUndefined();
+  });
+
+  it('過ぎた日・4週間より先・正しくない時刻・社員は受け付けない。過ぎた日の予定は朝に消える', () => {
+    const { s, ctx } = newGame(23);
+    const e = partTimer(s, 1, 1);
+    s.day = 5;
+    expect(once(s, ctx, e.id, [4], wk).ok).toBe(false);
+    expect(once(s, ctx, e.id, [5 + BALANCE.staff.calendarDays], wk).ok).toBe(false);
+    expect(once(s, ctx, e.id, [5 + BALANCE.staff.calendarDays - 1], wk).ok).toBe(true);
+    expect(once(s, ctx, e.id, [6], shift(60, 75)).ok).toBe(false);
+    expect(once(s, ctx, e.id, [], wk).ok).toBe(false);
+    expect(once(s, ctx, e.id, [6], wk).ok).toBe(true);
+    // 過ぎた日の予定は、その日を過ぎた朝の出勤確認で消える
+    s.day = 7;
+    s.phase = 'prep';
+    rollCall(s, ctx);
+    expect(Object.keys(e.dateShifts ?? {})).toEqual([String(5 + BALANCE.staff.calendarDays - 1)]);
+    // 社員は毎日・全時間（日にちごとの予定はない）
+    e.profile.employment = 'full';
+    expect(once(s, ctx, e.id, [8], wk).ok).toBe(false);
+    // ホストだけの操作
+    expect(isHostOnly('setDateShift')).toBe(true);
+  });
+
+  it('日にちごとの予定どおりに出勤・退勤する（くりかえしでは休みの曜日でも、その日に入れた予定で来る）', () => {
+    const { s, ctx } = newGame(24);
+    const e = partTimer(s, 1, 1);
+    s.day = 2;
+    expect(applyAction(s, 'p1', { type: 'setShift', employeeId: e.id, weekday: weekdayOf(3), shift: null }, ctx).ok).toBe(true);
+    expect(once(s, ctx, e.id, [3], shift(60, 120)).ok).toBe(true);
+    s.day = 3;
+    attendanceDay(s, ctx);
+    expect(e.att!.arrived).toBe(true);
+    expect(payDue(e, s)).toBe(Math.round(hourlyOf(e) / 10) * 10);
   });
 });
 

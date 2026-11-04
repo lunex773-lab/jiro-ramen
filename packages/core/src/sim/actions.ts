@@ -20,7 +20,7 @@ import { currentTutorialStep, inBasicsTutorial, tutorialAction, updateTutorial, 
 import { accidentHalted, EVENT_KINDS } from './events';
 import { accidentFainted, resetAccident } from './accident';
 import { forceEvent } from './visitors';
-import { promote, setShift } from './staff';
+import { promote, setDateShift, setShift, type DateShiftMode } from './staff';
 import { answerRequest } from './media';
 
 export type Action =
@@ -46,6 +46,8 @@ export type Action =
   | { type: 'setPriority'; employeeId: Id; kind: string; value: number }
   /** アルバイトの曜日ごとのシフト（weekday: 月=0 … 日=6、shift: null でその曜日は休み） */
   | { type: 'setShift'; employeeId: Id; weekday: number; shift: ShiftDay | null }
+  /** カレンダーで日にちを選んでシフトを決める（once: その日だけ / weekly: 毎週くりかえす / reset: くりかえしに戻す） */
+  | { type: 'setDateShift'; employeeId: Id; days: number[]; shift: ShiftDay | null; mode: DateShiftMode }
   /** アルバイトを社員にする */
   | { type: 'promote'; employeeId: Id }
   /** ホストへの確認（YouTuber の撮影の許可・テレビ取材）に答える */
@@ -250,6 +252,8 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return setPriority(s, a.employeeId, a.kind, a.value) ? { ok: true } : fail('変更できません');
     case 'setShift':
       return setShift(s, ctx, a.employeeId, a.weekday, a.shift);
+    case 'setDateShift':
+      return setDateShift(s, ctx, a.employeeId, a.days, a.shift, a.mode);
     case 'promote':
       return promote(s, ctx, a.employeeId);
     case 'answerRequest':

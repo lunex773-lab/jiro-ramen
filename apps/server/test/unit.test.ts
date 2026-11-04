@@ -90,6 +90,16 @@ describe('メッセージ検証', () => {
     expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, end: 999 } })).toBeNull();
     expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, extra: 1 } })).toBeNull();
     expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1 })).toBeNull();
+    // カレンダー: 日にちの一覧（28日分まで）・その日だけ／毎週くりかえす／くりかえしに戻す
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3, 4, 10], shift: sh, mode: 'once' })).toEqual({ type: 'setDateShift', employeeId: 'e1', days: [3, 4, 10], shift: sh, mode: 'once' });
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: null, mode: 'weekly' })).not.toBeNull();
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: null, mode: 'reset' })).not.toBeNull();
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [], shift: sh, mode: 'once' })).toBeNull();
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: Array.from({ length: 29 }, (_, i) => i + 1), shift: sh, mode: 'once' })).toBeNull();
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [1.5], shift: sh, mode: 'once' })).toBeNull();
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: ['3'], shift: sh, mode: 'once' })).toBeNull();
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: sh, mode: 'always' })).toBeNull();
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: { ...sh, end: 999 }, mode: 'once' })).toBeNull();
     expect(parseAction({ type: 'promote', employeeId: 'e1' })).toEqual({ type: 'promote', employeeId: 'e1' });
     expect(parseAction({ type: 'answerRequest', requestId: 'rq1', accept: false })).toEqual({ type: 'answerRequest', requestId: 'rq1', accept: false });
     expect(parseAction({ type: 'answerRequest', requestId: 'rq1', accept: 'yes' })).toBeNull();

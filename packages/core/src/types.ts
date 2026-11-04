@@ -285,6 +285,11 @@ export interface Employee extends ActorBase {
   tasksDone: number;
   /** 曜日（月=0 … 日=6）ごとのシフト。アルバイトだけが使う（ない曜日は休み）。古いセーブにはない → 毎日・全時間 */
   shifts?: (ShiftDay | null)[];
+  /**
+   * 日にちごとのシフト（アルバイト。キーは営業日の番号。null はその日は休み）。曜日ごとのシフト（くりかえし）より優先する。
+   * 過ぎた日は消す。古い状態にはない
+   */
+  dateShifts?: Record<string, ShiftDay | null>;
   /** その日の出勤の状況 */
   att?: Attendance;
   /** 勤務の記録 */

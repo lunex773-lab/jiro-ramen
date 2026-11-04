@@ -13,7 +13,7 @@ export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire',
-  'fire', 'setRole', 'setPriority', 'setShift', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
+  'fire', 'setRole', 'setPriority', 'setShift', 'setDateShift', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
   'accidentReset',
 ] as const satisfies readonly ActionType[];
 
@@ -58,6 +58,10 @@ function isShift(v: unknown): boolean {
   const m = isIntIn(0, 240);
   return m(v.start) && m(v.end) && m(v.breakAt) && isIntIn(0, 60)(v.breakLen) && isBool(v.fromPrep);
 }
+/** カレンダーで選んだ日にち（営業日の番号。28日分まで） */
+function isDayList(v: unknown): boolean {
+  return Array.isArray(v) && v.length >= 1 && v.length <= 28 && v.every(isIntIn(1, 1_000_000));
+}
 function isArgs(v: unknown): boolean {
   if (v === undefined || v === null) return true;
   if (!isObj(v)) return false;
@@ -91,6 +95,7 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   setRole: { employeeId: isId, role: isRole },
   setPriority: { employeeId: isId, kind: isId, value: isNum },
   setShift: { employeeId: isId, weekday: isIntIn(0, 6), shift: isShift },
+  setDateShift: { employeeId: isId, days: isDayList, shift: isShift, mode: (v: unknown) => v === 'once' || v === 'weekly' || v === 'reset' },
   promote: { employeeId: isId },
   answerRequest: { requestId: isId, accept: isBool },
   expand: {},

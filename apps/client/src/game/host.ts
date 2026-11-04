@@ -77,9 +77,22 @@ export class LocalHost implements GameHost {
   }
 
   tick(dtReal: number): void {
-    const dt = Math.min(0.25, dtReal) * this.speed;
-    step(this.state, dt, this.ctx);
+    // 爆発事故（発火してから焼け跡のあいだ）は倍速をやめて等速にする（オーナーの指示: 15秒の火事をそのまま体験してから爆発する）。
+    // 発火がフレームの途中で始まっても倍速で進みすぎないよう、細かく区切って進める
+    let real = Math.min(0.25, dtReal);
+    while (real > 1e-9) {
+      if (this.state.events?.accident) this.speed = 1;
+      const r = Math.min(real, 0.05);
+      step(this.state, r * this.speed, this.ctx);
+      real -= r;
+    }
+    if (this.state.events?.accident) this.speed = 1;
     this.flush();
+  }
+
+  /** 倍速にできるか（爆発事故の間はできない） */
+  get speedLocked(): boolean {
+    return !!this.state.events?.accident;
   }
 
   onEvents(cb: (ev: GameEvent[]) => void): () => void {

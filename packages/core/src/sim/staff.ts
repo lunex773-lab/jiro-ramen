@@ -72,8 +72,22 @@ export function shiftsOf(e: Employee): (ShiftDay | null)[] {
   return Array.from({ length: 7 }, (_, i) => e.shifts![i] ?? null);
 }
 
+/** その日のシフト（日にちごとの予定があればそれ、なければ曜日ごとのくりかえし） */
 export function shiftFor(e: Employee, day: number): ShiftDay | null {
+  if (isPartTime(e) && e.dateShifts && Object.prototype.hasOwnProperty.call(e.dateShifts, String(day))) return e.dateShifts[String(day)] ?? null;
   return shiftsOf(e)[weekdayOf(day)] ?? null;
+}
+
+/** その日が日にちごとの予定か（くりかえしと違う予定を入れた日） */
+export function hasDateShift(e: Employee, day: number): boolean {
+  return isPartTime(e) && !!e.dateShifts && Object.prototype.hasOwnProperty.call(e.dateShifts, String(day));
+}
+
+/** 過ぎた日の日にちごとの予定を消す */
+export function pruneDateShifts(e: Employee, today: number): void {
+  if (!e.dateShifts) return;
+  for (const k of Object.keys(e.dateShifts)) if (Number(k) < today) delete e.dateShifts[k];
+  if (Object.keys(e.dateShifts).length === 0) delete e.dateShifts;
 }
 
 /** シフトの形を確かめる。正しければ null */
@@ -366,6 +380,7 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
   // 仕込みから来る人は、歩道から順に歩いて来る（遠くから来る人ほど遅れて着く）
   let order = 0;
   for (const e of s.employees) {
+    pruneDateShifts(e, s.day);
     e.pos = { x: st.staffSpawn.x + 0.2, z: st.staffSpawn.z + 0.2 };
     e.hand = { kind: 'none' };
     e.work = null;
@@ -753,10 +768,58 @@ export function setShift(s: GameState, ctx: SimCtx, employeeId: string, weekday:
     const bad = shiftProblem(sh);
     if (bad) return { ok: false, reason: bad };
   }
+  const before = shiftFor(e, s.day);
   const list = shiftsOf(e);
   list[weekday] = sh;
   e.shifts = list;
-  if (weekday === weekdayOf(s.day)) reapplyToday(s, e, ctx);
+  if (weekday === weekdayOf(s.day) && JSON.stringify(before) !== JSON.stringify(shiftFor(e, s.day))) reapplyToday(s, e, ctx);
+  return { ok: true };
+}
+
+export type DateShiftMode = 'once' | 'weekly' | 'reset';
+
+/**
+ * 日にちを選んでシフトを決める（カレンダー。オーナー回答「日にちごと＋くりかえしも使える」）。
+ *   once:   選んだ日だけ（shift が null なら休み）。曜日ごとのくりかえしより優先する
+ *   weekly: 選んだ日の曜日のくりかえしにする（選んだ日の「その日だけ」の予定は消して、くりかえしに合わせる）
+ *   reset:  選んだ日を、くりかえしの予定に戻す
+ * 選べるのは今日から calendarDays 日先まで（過ぎた日は変えられない）
+ */
+export function setDateShift(s: GameState, ctx: SimCtx, employeeId: string, days: unknown, shift: ShiftDay | null, mode: DateShiftMode): { ok: boolean; reason?: string } {
+  const e = s.employees.find((x) => x.id === employeeId);
+  if (!e) return { ok: false, reason: '従業員が見つかりません' };
+  if (!isPartTime(e)) return { ok: false, reason: '社員は毎日、仕込みから閉店まで勤務します' };
+  if (mode !== 'once' && mode !== 'weekly' && mode !== 'reset') return { ok: false, reason: '保存のしかたが正しくありません' };
+  const last = s.day + ST.calendarDays - 1;
+  if (!Array.isArray(days) || days.length === 0 || days.length > ST.calendarDays) return { ok: false, reason: '日にちを選んでください' };
+  const list = [...new Set(days as unknown[])];
+  if (!list.every((d) => typeof d === 'number' && Number.isInteger(d))) return { ok: false, reason: '日にちが正しくありません' };
+  const nums = list as number[];
+  if (nums.some((d) => d < s.day)) return { ok: false, reason: '過ぎた日のシフトは変えられません' };
+  if (nums.some((d) => d > last)) return { ok: false, reason: `シフトは${ST.calendarDays}日先まで決められます` };
+  let sh: ShiftDay | null = null;
+  if (mode !== 'reset' && shift) {
+    sh = { start: shift.start, end: shift.end, breakAt: shift.breakLen > 0 ? shift.breakAt : 0, breakLen: shift.breakLen, fromPrep: shift.fromPrep };
+    const bad = shiftProblem(sh);
+    if (bad) return { ok: false, reason: bad };
+  }
+  pruneDateShifts(e, s.day);
+  const before = shiftFor(e, s.day);
+  const map = (e.dateShifts ??= {});
+  if (mode === 'once') {
+    for (const d of nums) map[String(d)] = sh ? { ...sh } : null;
+  } else {
+    if (mode === 'weekly') {
+      const week = shiftsOf(e);
+      for (const wd of new Set(nums.map(weekdayOf))) week[wd] = sh ? { ...sh } : null;
+      e.shifts = week;
+    }
+    for (const d of nums) delete map[String(d)];
+  }
+  if (Object.keys(map).length === 0) delete e.dateShifts;
+  // 今日の予定が変わったら、すぐに反映する
+  const after = shiftFor(e, s.day);
+  if (JSON.stringify(before) !== JSON.stringify(after)) reapplyToday(s, e, ctx);
   return { ok: true };
 }
 

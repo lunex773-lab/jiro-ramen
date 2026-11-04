@@ -43,6 +43,8 @@ import {
   shiftPaidHours,
   shiftProblem,
   shiftsOf,
+  shiftFor,
+  hasDateShift,
   shiftTimeText,
   staffLog,
   staffSummary,
@@ -98,8 +100,8 @@ export class ManageMenu {
   private timer: number | null = null;
   /** 開いている従業員の欄（シフト・記録・担当設定） */
   private empPanel: { id: string; kind: 'shift' | 'record' | 'prio' } | null = null;
-  /** シフトの編集中の内容（保存するまで状態は変えない。自動更新で消えないようここに持つ） */
-  private shiftEdit: { id: string; weekday: number; draft?: ShiftDay | null } | null = null;
+  /** シフトのカレンダーで選んでいる日と編集中の内容（保存するまで状態は変えない。自動更新で消えないようここに持つ） */
+  private shiftEdit: { id: string; days: number[]; draft?: ShiftDay | null } | null = null;
   private tabButtons = new Map<ManageTab, HTMLElement>();
   /** 押している最中は自動更新しない（押した要素が差し替わるとタップが外れる） */
   private pressing = false;
@@ -682,111 +684,166 @@ export class ManageMenu {
     return `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start)}〜${shiftTimeText(sh.end)}${b}`;
   }
 
-  /** シフトの欄: 曜日ごとの予定と、選んだ曜日の編集（アルバイト）。社員は毎日・全時間 */
+  /**
+   * シフトの欄: 4週間のカレンダー（アルバイト。オーナー回答「日にちごと＋くりかえしも使える」）。
+   * 日にちを押して選び（いくつでも）、時間を決めて「この日だけ」か「毎週くりかえす」で保存する。社員は毎日・全時間
+   */
   private shiftPanel(s: GameState, e: Employee): HTMLElement {
-    const today = weekdayOf(s.day);
     if (!isPartTime(e)) {
       return h('div', { class: 'prio' }, h('p', { class: 'note' }, `社員は毎日、仕込みから閉店まで勤務します（日給 ${yenStr(e.profile.wage)}）。遅刻・欠勤が少なく安定します。`));
     }
-    const list = shiftsOf(e);
+    const N = BALANCE.staff.calendarDays;
+    const first = s.day - weekdayOf(s.day);
+    const lastDay = s.day + N - 1;
     const ed = this.shiftEdit?.id === e.id ? this.shiftEdit : null;
-    const sel = ed ? ed.weekday : today;
-    const draft: ShiftDay | null = ed && ed.draft !== undefined ? ed.draft : list[sel] ?? null;
-    const step = BALANCE.staff.shiftStepMin;
-    const close = (BALANCE.closeHour - BALANCE.openHour) * 60;
-    const setDraft = (d: ShiftDay | null) => {
-      this.shiftEdit = { id: e.id, weekday: sel, draft: d };
+    const sel = new Set((ed?.days ?? []).filter((d) => d >= s.day && d <= lastDay));
+    // 選ぶ日を変えても、編集中の時間はそのまま（選ぶのをやめたら消す）
+    const setSel = (days: number[]) => {
+      const list = [...new Set(days)].sort((x, y) => x - y);
+      this.shiftEdit = { id: e.id, days: list, draft: list.length > 0 ? ed?.draft : undefined };
       this.render();
     };
-    const pick = (wdi: number) => {
-      this.shiftEdit = { id: e.id, weekday: wdi };
-      this.render();
+    const toggle = (d: number) => setSel(sel.has(d) ? [...sel].filter((x) => x !== d) : [...sel, d]);
+    // 曜日の見出しを押すと、その曜日（今日から4週間）をまとめて選ぶ・外す
+    const pickWeekday = (wd: number) => {
+      const days: number[] = [];
+      for (let d = s.day; d <= lastDay; d++) if (weekdayOf(d) === wd) days.push(d);
+      const all = days.every((d) => sel.has(d));
+      setSel(all ? [...sel].filter((d) => !days.includes(d)) : [...sel, ...days]);
     };
-    const week = h(
-      'div',
-      { class: 'week', 'data-guest-ok': '1' },
-      WEEKDAY_LABEL.map((w, i) =>
+    const cells: HTMLElement[] = [];
+    const weeks = Math.ceil((lastDay - first + 1) / 7);
+    for (let i = 0; i < weeks * 7; i++) {
+      const d = first + i;
+      const past = d < s.day;
+      const beyond = d > lastDay;
+      if (past || beyond) {
+        cells.push(h('div', { class: 'cal-day past' }, h('b', null, `${d}日目`)));
+        continue;
+      }
+      const sh = shiftFor(e, d);
+      const own = hasDateShift(e, d);
+      cells.push(
         h(
           'button',
-          { class: `wday ${i === sel ? 'on' : ''} ${i === today ? 'today' : ''} ${list[i] ? '' : 'off'}`, onclick: () => pick(i) },
-          h('b', null, `${w}${i === today ? '（今日）' : ''}`),
-          h('small', null, this.shiftText(list[i] ?? null)),
+          {
+            class: `cal-day ${sel.has(d) ? 'on' : ''} ${d === s.day ? 'today' : ''} ${sh ? 'work' : 'off'} ${own ? 'own' : ''}`,
+            'data-day': String(d),
+            onclick: () => toggle(d),
+          },
+          h('b', null, `${d}日目${d === s.day ? '・今日' : ''}`),
+          h('small', null, this.shiftText(sh)),
+          own ? h('i', { class: 'cal-own', title: 'この日だけの予定' }, 'この日だけ') : null,
         ),
-      ),
-    );
-    const opt = (v: number, label: string, cur: number) => h('option', { value: String(v), selected: v === cur }, label);
-    let editor: HTMLElement;
-    if (!draft) {
-      editor = h(
-        'div',
-        { class: 'shift-edit' },
-        h('p', { class: 'note' }, `${WEEKDAY_LABEL[sel]}曜は休みです。`),
-        h('button', { class: 'mini', onclick: () => setDraft({ start: 0, end: close, breakAt: 0, breakLen: 0, fromPrep: true }) }, 'この曜日に勤務を入れる'),
       );
+    }
+    const cal = h(
+      'div',
+      { class: 'cal', 'data-guest-ok': '1' },
+      WEEKDAY_LABEL.map((w, i) => h('button', { class: 'cal-head', onclick: () => pickWeekday(i), title: `${w}曜をまとめて選ぶ` }, w)),
+      cells,
+    );
+    const week = shiftsOf(e);
+    const repeat = h(
+      'p',
+      { class: 'note cal-repeat' },
+      '毎週のくりかえし: ',
+      WEEKDAY_LABEL.map((w, i) => h('span', { class: week[i] ? '' : 'off' }, `${w} ${this.shiftText(week[i] ?? null)}`)),
+    );
+    const picked = [...sel];
+    let editor: HTMLElement;
+    if (picked.length === 0) {
+      editor = h('p', { class: 'note' }, '日にちを押して選びます（いくつでも選べます。曜日の見出しを押すとその曜日をまとめて選べます）。');
     } else {
-      const starts: HTMLElement[] = [h('option', { value: 'prep', selected: draft.fromPrep }, '仕込みから')];
-      for (let m = 0; m < close; m += step) starts.push(opt(m, shiftTimeText(m), draft.fromPrep ? -1 : draft.start));
-      const ends: HTMLElement[] = [];
-      for (let m = draft.start + step; m <= close; m += step) ends.push(opt(m, shiftTimeText(m), draft.end));
-      const breaks: HTMLElement[] = [opt(0, 'なし', draft.breakLen), opt(30, '30分', draft.breakLen), opt(60, '60分', draft.breakLen)];
-      const breakAts: HTMLElement[] = [];
-      for (let m = draft.start + step; m + draft.breakLen < draft.end; m += step) breakAts.push(opt(m, `${shiftTimeText(m)}から`, draft.breakAt));
-      const problem = shiftProblem(draft);
-      const hours = shiftPaidHours(draft);
-      const fixBreak = (d: ShiftDay): ShiftDay => {
-        if (d.breakLen <= 0) return { ...d, breakAt: 0, breakLen: 0 };
-        let at = d.breakAt;
-        if (at <= d.start || at + d.breakLen >= d.end) at = d.start + Math.max(step, Math.floor((d.end - d.start - d.breakLen) / 2 / step) * step);
-        return { ...d, breakAt: at };
+      const step = BALANCE.staff.shiftStepMin;
+      const close = (BALANCE.closeHour - BALANCE.openHour) * 60;
+      const base = shiftFor(e, picked[0]!);
+      const draft: ShiftDay | null = ed && ed.draft !== undefined ? ed.draft : base;
+      const setDraft = (d: ShiftDay | null) => {
+        this.shiftEdit = { id: e.id, days: picked, draft: d };
+        this.render();
       };
+      const wds = [...new Set(picked.map(weekdayOf))].sort((x, y) => x - y);
+      const label = picked.length <= 4 ? picked.map((d) => `${d}日目（${WEEKDAY_LABEL[weekdayOf(d)]}）`).join('・') : `${picked.length}日（${picked[0]}日目〜${picked[picked.length - 1]}日目）`;
+      const anyOwn = picked.some((d) => hasDateShift(e, d));
+      const opt = (v: number, text: string, cur: number) => h('option', { value: String(v), selected: v === cur }, text);
+      const controls: (HTMLElement | null)[] = [];
+      let problem: string | null = null;
+      let summary = '休み';
+      if (draft) {
+        const starts: HTMLElement[] = [h('option', { value: 'prep', selected: draft.fromPrep }, '仕込みから')];
+        for (let m = 0; m < close; m += step) starts.push(opt(m, shiftTimeText(m), draft.fromPrep ? -1 : draft.start));
+        const ends: HTMLElement[] = [];
+        for (let m = draft.start + step; m <= close; m += step) ends.push(opt(m, shiftTimeText(m), draft.end));
+        const breaks: HTMLElement[] = [opt(0, 'なし', draft.breakLen), opt(30, '30分', draft.breakLen), opt(60, '60分', draft.breakLen)];
+        const breakAts: HTMLElement[] = [];
+        for (let m = draft.start + step; m + draft.breakLen < draft.end; m += step) breakAts.push(opt(m, `${shiftTimeText(m)}から`, draft.breakAt));
+        const fixBreak = (d: ShiftDay): ShiftDay => {
+          if (d.breakLen <= 0) return { ...d, breakAt: 0, breakLen: 0 };
+          let at = d.breakAt;
+          if (at <= d.start || at + d.breakLen >= d.end) at = d.start + Math.max(step, Math.floor((d.end - d.start - d.breakLen) / 2 / step) * step);
+          return { ...d, breakAt: at };
+        };
+        controls.push(
+          h(
+            'div',
+            { class: 'shift-row' },
+            h('label', null, '出勤', h('select', {
+              class: 'select',
+              onchange: (ev: Event) => {
+                const v = (ev.target as HTMLSelectElement).value;
+                const start = v === 'prep' ? 0 : Number(v);
+                setDraft(fixBreak({ ...draft, start, fromPrep: v === 'prep', end: Math.max(draft.end, start + step) }));
+              },
+            }, starts)),
+            h('label', null, '退勤', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, end: Number((ev.target as HTMLSelectElement).value) })) }, ends)),
+            h('label', null, '休憩', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, breakLen: Number((ev.target as HTMLSelectElement).value) })) }, breaks)),
+            draft.breakLen > 0 && breakAts.length > 0 ? h('label', null, '休憩の開始', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, breakAt: Number((ev.target as HTMLSelectElement).value) })) }, breakAts)) : null,
+          ),
+        );
+        problem = shiftProblem(draft);
+        const hours = shiftPaidHours(draft);
+        summary = `${this.shiftText(draft)}・1日の給与の目安 ${yenStr(Math.round((hourlyOf(e) * hours) / 10) * 10)}（${hours}時間）`;
+      }
       editor = h(
         'div',
         { class: 'shift-edit' },
-        h(
-          'div',
-          { class: 'shift-row' },
-          h('label', null, '出勤', h('select', {
-            class: 'select',
-            onchange: (ev: Event) => {
-              const v = (ev.target as HTMLSelectElement).value;
-              const start = v === 'prep' ? 0 : Number(v);
-              setDraft(fixBreak({ ...draft, start, fromPrep: v === 'prep', end: Math.max(draft.end, start + step) }));
-            },
-          }, starts)),
-          h('label', null, '退勤', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, end: Number((ev.target as HTMLSelectElement).value) })) }, ends)),
-          h('label', null, '休憩', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, breakLen: Number((ev.target as HTMLSelectElement).value) })) }, breaks)),
-          draft.breakLen > 0 && breakAts.length > 0 ? h('label', null, '休憩の開始', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, breakAt: Number((ev.target as HTMLSelectElement).value) })) }, breakAts)) : null,
-        ),
-        h('p', { class: `note ${problem ? 'bad' : ''}` }, problem ?? `${WEEKDAY_LABEL[sel]}曜: ${this.shiftText(draft)}・給与の目安 ${yenStr(Math.round((hourlyOf(e) * hours) / 10) * 10)}（${hours}時間）`),
+        h('p', { class: 'cal-picked' }, `選んだ日: ${label}`),
+        draft
+          ? h('button', { class: 'mini ghost', onclick: () => setDraft(null) }, '休みにする')
+          : h('button', { class: 'mini', onclick: () => setDraft(base ?? { start: 0, end: close, breakAt: 0, breakLen: 0, fromPrep: true }) }, '勤務を入れる'),
+        ...controls,
+        h('p', { class: `note ${problem ? 'bad' : ''}` }, problem ?? summary),
         h(
           'div',
           { class: 'tbtns' },
-          h('button', { class: 'mini', disabled: !!problem, onclick: () => void this.saveShift(e, sel, [sel], draft) }, '保存'),
-          h('button', { class: 'mini ghost', disabled: !!problem, onclick: () => void this.saveShift(e, sel, [0, 1, 2, 3, 4, 5, 6].filter((i) => list[i] !== null || i === sel), draft) }, '勤務の曜日すべてに同じ時間'),
-          h('button', { class: 'mini danger', onclick: () => void this.saveShift(e, sel, [sel], null) }, 'この曜日を休みにする'),
+          h('button', { class: 'mini', 'data-save': 'once', disabled: !!problem, onclick: () => void this.saveDateShift(e, picked, draft, 'once') }, draft ? 'この日だけ保存' : 'この日だけ休みにする'),
+          h('button', { class: 'mini ghost', 'data-save': 'weekly', disabled: !!problem, onclick: () => void this.saveDateShift(e, picked, draft, 'weekly') }, `毎週くりかえす（${wds.map((w) => WEEKDAY_LABEL[w]).join('・')}）`),
+          anyOwn ? h('button', { class: 'mini ghost', 'data-save': 'reset', onclick: () => void this.saveDateShift(e, picked, null, 'reset') }, 'くりかえしに戻す') : null,
+          h('button', { class: 'mini ghost', 'data-guest-ok': '1', onclick: () => setSel([]) }, '選ぶのをやめる'),
         ),
       );
     }
-    const weekPay = list.reduce((a, x) => a + Math.round((hourlyOf(e) * shiftPaidHours(x)) / 10) * 10, 0);
+    let total = 0;
+    for (let d = s.day; d <= lastDay; d++) total += expectedPay(e, d);
     return h(
       'div',
       { class: 'prio shift' },
-      week,
+      cal,
+      repeat,
       editor,
-      h('p', { class: 'note' }, `1週間の給与の目安 ${yenStr(weekPay)}・今日の見込み ${yenStr(expectedPay(e, s.day))}。今日の予定を変えるとすぐに反映します（休みの人に勤務を入れると呼び出し、着くまで少しかかります）。`),
+      h('p', { class: 'note' }, `${N}日間の給与の目安 ${yenStr(total)}・今日の見込み ${yenStr(expectedPay(e, s.day))}。今日の予定を変えるとすぐに反映します（休みの人に勤務を入れると呼び出し、着くまで少しかかります）。`),
     );
   }
 
-  private async saveShift(e: Employee, sel: number, weekdays: number[], sh: ShiftDay | null): Promise<void> {
-    let ok = true;
-    for (const weekday of weekdays) ok = (await this.act({ type: 'setShift', employeeId: e.id, weekday, shift: sh })) && ok;
-    if (ok) {
-      const wd = weekdays.length === 1 ? `${WEEKDAY_LABEL[weekdays[0]!]}曜` : `${weekdays.length}つの曜日`;
-      toast(this.root, sh ? `${e.profile.name}さんの${wd}のシフトを保存しました` : `${e.profile.name}さんの${wd}を休みにしました`, 'good', 1600);
-      // 保存した曜日を選んだまま（編集中の内容は消す）
-      this.shiftEdit = { id: e.id, weekday: sel };
-      this.render();
-    }
+  private async saveDateShift(e: Employee, days: number[], sh: ShiftDay | null, mode: 'once' | 'weekly' | 'reset'): Promise<void> {
+    const ok = await this.act({ type: 'setDateShift', employeeId: e.id, days, shift: sh, mode });
+    if (!ok) return;
+    const what = mode === 'reset' ? 'をくりかえしの予定に戻しました' : mode === 'weekly' ? `の曜日を毎週くりかえす予定にしました` : sh ? 'のシフトを保存しました' : 'を休みにしました';
+    toast(this.root, `${e.profile.name}さんの${days.length}日${what}`, 'good', 1800);
+    // 保存したら選ぶのをやめる（カレンダーで結果を見る）
+    this.shiftEdit = { id: e.id, days: [] };
+    this.render();
   }
 
   /** 社員への昇格（参考情報を見て、プレイヤーが決める） */

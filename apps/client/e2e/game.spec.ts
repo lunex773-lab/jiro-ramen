@@ -491,7 +491,7 @@ async function openSettings(page: Page) {
 type JiroState = { t: number; day: number; money: number; phase: string; players: { pos: { x: number; z: number } }[]; events?: { accident: unknown; buzz: unknown } };
 const jiroState = (page: Page) => page.evaluate(() => (window as unknown as { __jiro: { host: { state: JiroState } } }).__jiro.host.state);
 
-test('従業員: アルバイトとして採用し、曜日ごとのシフトを決め、記録を見て社員にできる（勤怠・辛抱の数値は出ない）', async ({ page }) => {
+test('従業員: アルバイトとして採用し、カレンダーで日にちごと・毎週のシフトを決め、記録を見て社員にできる（勤怠・辛抱の数値は出ない）', async ({ page }) => {
   await startNewGame(page);
   // 採用を解放し、候補者を1人入れる（隠しパラメータの値は画面に出てはいけない）
   await page.evaluate(() => {
@@ -520,24 +520,51 @@ test('従業員: アルバイトとして採用し、曜日ごとのシフトを
   await expect(card.locator('.emp-look')).toHaveText(candLook);
   await expect(card).toContainText('勤務中（仕込み〜15:00）');
   await expect(body).toContainText('今日（1日目・月曜）の出勤');
-  // シフト: 火曜を 12:00〜14:00（13:00 から30分休憩）にする
+  // シフト: 4週間のカレンダー（日にちごと＋毎週のくりかえし）
   await card.getByRole('button', { name: '📅 シフト' }).click();
-  const week = card.locator('.week .wday');
-  await expect(week).toHaveCount(7);
-  await week.nth(1).click();
+  const cal = card.locator('.cal');
+  const day = (d: number) => cal.locator(`.cal-day[data-day="${d}"]`);
+  await expect(cal.locator('.cal-day[data-day]')).toHaveCount(28);
+  await expect(cal.locator('.cal-head')).toHaveCount(7);
+  await expect(day(1)).toContainText('今日');
+  // 2日目（火曜）だけ 12:00〜14:00（13:00 から30分休憩）にする
+  await day(2).click();
+  await expect(day(2)).toHaveClass(/on/);
   const edit = card.locator('.shift-edit');
+  await expect(edit).toContainText('選んだ日: 2日目（火）');
   await edit.locator('label', { hasText: '出勤' }).locator('select').selectOption('60');
   await edit.locator('label', { hasText: '退勤' }).locator('select').selectOption('180');
   await edit.locator('label', { hasText: /^休憩/ }).first().locator('select').selectOption('30');
   await edit.locator('label', { hasText: '休憩の開始' }).locator('select').selectOption('120');
-  await expect(edit).toContainText('給与の目安 ¥3,000（1.5時間）');
-  await edit.getByRole('button', { name: '保存' }).click();
-  await expect(week.nth(1)).toContainText('12:00〜14:00（休憩30分）');
+  await expect(edit).toContainText('1日の給与の目安 ¥3,000（1.5時間）');
+  await edit.locator('[data-save="once"]').click();
+  await expect(day(2)).toContainText('12:00〜14:00（休憩30分）');
+  await expect(day(2)).toContainText('この日だけ');
+  // 次の週の火曜（9日目）はくりかえしのまま
+  await expect(day(9)).toContainText('仕込み〜15:00');
   await shot(page, '40-staff-shift');
-  // 水曜を休みにする
-  await week.nth(2).click();
-  await card.locator('.shift-edit').getByRole('button', { name: 'この曜日を休みにする' }).click();
-  await expect(week.nth(2)).toContainText('休み');
+  // 3日目と4日目をまとめて選んで休みにする
+  await day(3).click();
+  await day(4).click();
+  await expect(edit).toContainText('3日目（水）・4日目（木）');
+  await edit.getByRole('button', { name: '休みにする' }).click();
+  await edit.locator('[data-save="once"]').click();
+  await expect(day(3)).toContainText('休み');
+  await expect(day(4)).toContainText('休み');
+  // 曜日の見出し「金」で金曜（5・12・19・26日目）をまとめて選び、毎週くりかえす 12:00〜13:00 にする
+  await cal.locator('.cal-head', { hasText: '金' }).click();
+  for (const d of [5, 12, 19, 26]) await expect(day(d)).toHaveClass(/on/);
+  await edit.locator('label', { hasText: '出勤' }).locator('select').selectOption('60');
+  await edit.locator('label', { hasText: '退勤' }).locator('select').selectOption('120');
+  await edit.locator('[data-save="weekly"]').click();
+  for (const d of [5, 12, 19, 26]) await expect(day(d)).toContainText('12:00〜13:00');
+  await expect(card.locator('.cal-repeat')).toContainText('金 12:00〜13:00');
+  // 2日目をくりかえしの予定に戻す
+  await day(2).click();
+  await edit.locator('[data-save="reset"]').click();
+  await expect(day(2)).toContainText('仕込み〜15:00');
+  await expect(day(2)).not.toContainText('この日だけ');
+  await shot(page, '40b-staff-calendar');
   // 記録（まだ何も起きていない）
   await card.getByRole('button', { name: '📝 記録' }).click();
   await expect(card).toContainText('まだ勤務の記録がありません');
@@ -1013,6 +1040,11 @@ test('爆発事故: 設定には起こすボタンがない。開発用の欄（
   // 開発用の欄から起こす → 仕込み中なので開店の3秒後に起きる
   await forceEvent(page, 'explosion');
   await page.getByRole('button', { name: /開店する/ }).click();
+  // 倍速にしておく（発火したら強制的に等速に戻る）
+  const speedChip = page.locator('button[title="ゲーム速度"], button[title="事故の間は倍速にできません"]');
+  await press(speedChip);
+  await press(speedChip);
+  await expect(speedChip).toHaveText('×3');
   // ヘッドレスの描画は遅く（1〜2fps）ゲーム内の時間がなかなか進まないので、待つ代わりに時刻を進める（各段階の時間の進み方は core のテストで確認）
   const advance = (expr: string) =>
     page.evaluate((code) => {
@@ -1021,6 +1053,10 @@ test('爆発事故: 設定には起こすボタンがない。開発用の欄（
     }, expr);
   await advance('s.openT = Math.max(s.openT, 2.95)');
   await expect(page.locator('.acc-warn')).toBeVisible({ timeout: 20_000 });
+  // 発火したら倍速をやめ、事故の間は倍速にできない（15秒の火事をそのまま見せる）
+  await expect(speedChip).toHaveText('×1');
+  await expect(speedChip).toBeDisabled();
+  expect(await page.evaluate(() => (window as unknown as { __jiro: { host: { speed: number } } }).__jiro.host.speed)).toBe(1);
   await shot(page, '31-warning');
   // 発火から15秒（以前の3倍）。その間に火は設備から設備へ燃え移り、炎が増える
   type FireW = { __jiro: { world: { scene: { getObjectByName(n: string): unknown; traverse(f: (o: { name: string }) => void): void } }; host: { state: { events: { accident: { stage: string; t: number; burning: { id: string }[] } } } } } };

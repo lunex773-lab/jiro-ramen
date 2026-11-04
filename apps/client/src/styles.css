@@ -624,13 +624,21 @@ input, select { font: inherit; }
 .emp-btns { padding: 2px 0 4px; }
 .emp-summary { margin: 0 0 6px; font-size: 12px; }
 .staff-today { margin: 0 0 6px; }
-.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 8px; }
-.wday { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: #1a1511; color: inherit; font: inherit; }
-.wday b { font-size: 12px; }
-.wday small { font-size: 10px; color: var(--muted); line-height: 1.2; text-align: center; word-break: keep-all; overflow-wrap: anywhere; }
-.wday.off small { color: #7f756a; }
-.wday.today { border-color: var(--yellow); }
-.wday.on { background: #3a2f14; border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow) inset; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; margin-bottom: 6px; }
+.cal-head { padding: 2px 0; border: none; background: none; color: var(--muted); font: inherit; font-size: 11px; font-weight: 700; }
+.cal-day { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 3px 1px; min-height: 46px; border-radius: 7px; border: 1px solid var(--line); background: #1a1511; color: inherit; font: inherit; }
+.cal-day b { font-size: 10px; white-space: nowrap; }
+.cal-day small { font-size: 9.5px; color: var(--muted); line-height: 1.15; text-align: center; word-break: keep-all; overflow-wrap: anywhere; }
+.cal-day.work { background: #1d2619; }
+.cal-day.off small { color: #7f756a; }
+.cal-day.today { border-color: var(--yellow); }
+.cal-day.on { background: #3a2f14; border-color: var(--yellow); box-shadow: 0 0 0 2px var(--yellow) inset; }
+.cal-day.past { opacity: 0.35; justify-content: center; }
+.cal-own { font-style: normal; font-size: 8.5px; font-weight: 700; color: #ffcf6a; }
+.cal-day.own { border-style: dashed; border-color: #c99a3a; }
+.cal-repeat span { display: inline-block; margin-right: 8px; white-space: nowrap; }
+.cal-repeat span.off { color: #7f756a; }
+.cal-picked { margin: 0; font-size: 12px; font-weight: 700; }
 .shift-edit { display: flex; flex-direction: column; gap: 6px; }
 .shift-row { display: flex; flex-wrap: wrap; gap: 6px 10px; }
 .shift-row label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }

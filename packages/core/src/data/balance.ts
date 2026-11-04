@@ -222,6 +222,8 @@ export const BALANCE = {
     logMax: 40,
     /** シフトの刻み（分） */
     shiftStepMin: 30,
+    /** カレンダーで日にちごとにシフトを決められる日数（今日から4週間） */
+    calendarDays: 28,
   },
 
   /**

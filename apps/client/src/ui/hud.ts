@@ -211,6 +211,12 @@ export class Hud {
                 class: 'chip',
                 title: 'ゲーム速度',
                 onclick: () => {
+                  // 爆発事故の間は倍速にできない（等速で火事を見せる）
+                  if (this.host.state.events?.accident) {
+                    this.host.speed = 1;
+                    this.lastTopKey = '';
+                    return;
+                  }
                   this.host.speed = this.host.speed >= 3 ? 1 : this.host.speed + 1;
                   this.lastTopKey = '';
                 },
@@ -240,7 +246,7 @@ export class Hud {
 
   private updateTop(s: GameState): void {
     const buzz = buzzLeftMinutes(s);
-    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}|${buzz}`;
+    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}|${buzz}|${s.events?.accident ? 1 : 0}`;
     if (key === this.lastTopKey) return;
     this.lastTopKey = key;
     const t = (this.topParts ??= this.buildTop());
@@ -257,7 +263,12 @@ export class Hud {
     t.queue.textContent = `🚶${s.queue.length}/${s.insideQueue.length}`;
     t.buzz.textContent = buzz !== null ? `📱 バズ中 あと${buzz}分` : '';
     t.buzz.hidden = buzz === null;
-    if (this.host.mode === 'local') t.speed.textContent = `×${this.host.speed}`;
+    if (this.host.mode === 'local') {
+      t.speed.textContent = `×${this.host.speed}`;
+      const locked = !!s.events?.accident;
+      (t.speed as HTMLButtonElement).disabled = locked;
+      t.speed.title = locked ? '事故の間は倍速にできません' : 'ゲーム速度';
+    }
     else {
       t.speed.className = `chip conn ${this.host.conn}`;
       // 参加コードは常に出す（押すと大きく表示してコピーできる）
