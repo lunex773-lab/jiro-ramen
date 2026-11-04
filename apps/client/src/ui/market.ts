@@ -1,6 +1,7 @@
-// オンライン市場の画面（統合進化設計書 v2.1 Phase 3+4）。
-// オーナーの判断: 市場の1日＝実時間9分（全員が同じサーバーの時計）、市場用に新しく始める、招待コード＋AIだけの市場、AI と合わせて最大6社。
-// 市場の中では、すべての店を店長（本店は店主）が営業し、プレイヤーは経営（値段・人・拡張・出店）を決める。
+// 共通市場の画面（docs/MARKET_RANKING_PLAN.md）。
+// オーナーの判断: 各社は端末で1日ずつ営業してサーバーへ送り、JST の0時に、いちばん進んだ企業の日付まで全社を自動営業でそろえる。
+// 市場用に新しく始める。招待コードで入る。AI で埋めるか・社数（2〜6）・期間・企業の扱いは作る人が決める。
+// この画面では、各社の進み具合・0時の同期の状態を見て、端末での営業を始める。営業していない間の経営（値段・人・出店）もここで決める。
 // 画面は数秒ごとにサーバーから市場の今を読み直す（市場の権威はサーバー。操作は cid つきで送る）。
 
 import {
@@ -28,11 +29,14 @@ import { confirmDialog, h, replace, stars, toast, yenStr } from './dom';
 import { codeBlock } from './room-code';
 
 export type MarketScreenView = MarketView & {
-  clock: { day: number; dayMs: number; nextDayAt: number; serverNow: number };
+  clock: { serverNow: number; nextMidnight: number; nextSyncAt: number | null; syncPending: boolean };
   code: string;
   isOwner: boolean;
   joined: boolean;
+  today: string;
 };
+
+const PERIOD_LABEL = (d: number | null) => (d === null ? '無期限' : `${d}日`);
 
 const POLL_MS = 8000;
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
@@ -64,6 +68,20 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
   const company = h('input', { class: 'input', value: app.settings.playerName ? `${app.settings.playerName}の店` : '', placeholder: '会社（店）の名前', maxLength: 20 }) as HTMLInputElement;
   const marketName = h('input', { class: 'input', placeholder: '市場の名前（なくてもよい）', maxLength: 20 }) as HTMLInputElement;
   const codeInput = h('input', { class: 'input code', placeholder: '招待コード（6文字）', maxLength: 6 }) as HTMLInputElement;
+  const sel = (attr: string, opts: [string, string][], value: string) =>
+    h('select', { [attr]: '' }, opts.map(([v, label]) => h('option', { value: v, selected: v === value }, label))) as HTMLSelectElement;
+  const aiFill = sel('data-ai-fill', [['1', 'AI 企業で埋める'], ['0', '人だけ（AI なし）']], '1');
+  const maxCompanies = sel(
+    'data-max-companies',
+    Array.from({ length: BALANCE.market.maxCompanies - BALANCE.market.minCompanies + 1 }, (_, i) => {
+      const n = BALANCE.market.minCompanies + i;
+      return [String(n), `${n}社まで`] as [string, string];
+    }),
+    String(BALANCE.market.maxCompanies),
+  );
+  const period = sel('data-period', [['30', '30日'], ['90', '90日'], ['180', '180日'], ['365', '365日'], ['', '無期限']], '');
+  const entry = sel('data-entry', [['grown', '育てた企業で参加できる'], ['fresh', '新規の企業だけ']], 'grown');
+  const visibility = sel('data-visibility', [['invite', '招待制'], ['public', '公開']], 'invite');
   const status = h('div', { class: 'note' });
   const list = h('div', { class: 'table market-list' });
   const busy = (on: boolean, text = '') => {
@@ -106,14 +124,25 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
   };
   replace(
     body,
-    h('section', { class: 'card wide' }, h('h4', null, 'サーバー'), urlInput, h('p', { class: 'note' }, '市場はサーバーの時計で進みます（1日 = 営業9分の周期）。あなたがいない間も、店主と店長が営業し、AI 企業も動き続けます。')),
+    h(
+      'section',
+      { class: 'card wide' },
+      h('h4', null, 'サーバー'),
+      urlInput,
+      h('p', { class: 'note' }, '各社は自分の端末で1日ずつ営業し、1日の終わりにサーバーへ送ります。毎日0時（日本時間）に、いちばん進んだ会社の日付まで、ほかの会社を自動営業でそろえます。'),
+    ),
     h(
       'section',
       { class: 'card wide' },
       h('h4', null, '市場を作る'),
-      h('p', { class: 'note' }, `あなたの会社と AI 企業${BALANCE.market.maxCompanies - 1}社で始まります。招待コードを配ると友達も入れます（プレイヤーは${BALANCE.market.maxPlayers}社まで。入るたびに AI が1社抜けます）。全社が資金30万円・8席から。`),
+      h('p', { class: 'note' }, '全社が資金30万円・8席から。招待コードを配ると友達も入れます（AI で埋めた市場では、入るたびに AI が1社抜けます）。'),
       company,
       marketName,
+      h('div', { class: 'kv' }, h('span', null, '空いた枠'), aiFill),
+      h('div', { class: 'kv' }, h('span', null, '参加企業数'), maxCompanies),
+      h('div', { class: 'kv' }, h('span', null, '競争期間'), period),
+      h('div', { class: 'kv' }, h('span', null, '終わったあとの企業'), entry),
+      h('div', { class: 'kv' }, h('span', null, '参加の方法'), visibility),
       h(
         'button',
         {
@@ -124,7 +153,13 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
             try {
               const c = await connect();
               if (!c) return;
-              const r = await c.api.createMarket(c.auth.token, marketName.value.trim(), company.value.trim());
+              const r = await c.api.createMarket(c.auth.token, marketName.value.trim(), company.value.trim(), {
+                aiFill: aiFill.value === '1',
+                maxCompanies: Number(maxCompanies.value),
+                periodDays: period.value === '' ? null : Number(period.value),
+                entry: entry.value,
+                visibility: visibility.value,
+              });
               open(c.api, c.auth, r.marketId);
             } catch (e) {
               status.textContent = errText(e);
@@ -189,6 +224,7 @@ export class MarketScreen {
     private auth: Auth,
     private marketId: string,
     private onBack: () => void,
+    private onPlay: () => void,
   ) {
     this.head = h('div', { class: 'market-head' });
     this.body = h('div', { class: 'market-body' });
@@ -208,10 +244,17 @@ export class MarketScreen {
     this.pressing = false;
   };
 
-  close(): void {
+  /** 読み直しをやめる（営業を始めるとき・画面を閉じるとき） */
+  stop(): void {
     if (this.timer !== null) window.clearInterval(this.timer);
     if (this.clockTimer !== null) window.clearInterval(this.clockTimer);
+    this.timer = null;
+    this.clockTimer = null;
     window.removeEventListener('pointerup', this.release);
+  }
+
+  close(): void {
+    this.stop();
     this.el.remove();
     this.onBack();
   }
@@ -248,15 +291,37 @@ export class MarketScreen {
     const v = this.view;
     if (!v) return;
     const now = Date.now() + this.offset;
-    const left = Math.max(0, Math.ceil((v.clock.nextDayAt - now) / 1000));
-    const mm = Math.floor(left / 60);
-    const ss = String(left % 60).padStart(2, '0');
+    const left = Math.max(0, Math.ceil((v.clock.nextMidnight - now) / 1000));
+    const hh = Math.floor(left / 3600);
+    const mm = String(Math.floor((left % 3600) / 60)).padStart(2, '0');
+    const mine = v.mine;
+    const playing = !!mine?.openDay;
+    const bankrupt = mine ? mine.state.phase === 'bankrupt' : true;
+    const myDay = mine ? mine.progress.lastProcessedGameDate + 1 : 0;
+    const syncText = v.clock.syncPending ? '0時の計算中（終わるまで新しい日は始められません）' : `次の0時まで ${hh}時間${mm}分`;
     replace(
       this.head,
       h('h2', null, v.name),
-      h('div', { class: 'kv' }, h('span', null, '市場の日'), h('b', { 'data-market-day': String(v.day) }, v.day === 0 ? '1日目の営業中' : `${v.day}日目まで営業済み`)),
-      h('div', { class: 'kv' }, h('span', null, '次の日まで'), h('b', null, `${mm}分${ss}秒`)),
+      h('div', { class: 'kv' }, h('span', null, '全社が営業済み'), h('b', { 'data-market-day': String(v.commonMarketDate) }, v.commonMarketDate === 0 ? 'まだ0日' : `${v.commonMarketDate}日目まで`)),
+      h('div', { class: 'kv' }, h('span', null, 'いちばん進んだ会社'), h('b', { 'data-leader-day': String(v.leaderDay) }, `${v.leaderDay}日目まで`)),
+      h('div', { class: 'kv' }, h('span', null, '同期'), h('b', { 'data-sync': v.clock.syncPending ? 'pending' : 'idle' }, syncText)),
       h('div', { class: 'market-code' }, h('span', { class: 'note' }, '招待コード'), codeBlock(this.root, v.code)),
+      mine
+        ? h(
+            'button',
+            {
+              class: 'btn primary big',
+              'data-market-play': '',
+              disabled: bankrupt || v.clock.syncPending,
+              onclick: () => {
+                this.stop();
+                this.onPlay();
+              },
+            },
+            bankrupt ? '破産しています' : playing ? `${myDay}日目の営業を続ける（初めから）` : `${myDay}日目を営業する`,
+          )
+        : null,
+      h('p', { class: 'note' }, `あなたの会社は ${mine ? mine.progress.lastProcessedGameDate : 0}日目まで営業済み（今日 手動で ${mine?.progress.manualProgressDays ?? 0}日）。0時に、遅れている会社は自動営業で ${v.leaderDay}日目までそろいます。`),
     );
   }
 
@@ -273,7 +338,7 @@ export class MarketScreen {
     return h(
       'section',
       { class: 'card wide market-standings' },
-      h('h4', null, `企業の順位（市場シェア = 直近${BALANCE.market.shareDays}日の純売上の割合）`),
+      h('h4', null, `企業の順位（市場シェア = 全社がそろった日までの直近${BALANCE.market.shareDays}日の純売上の割合）`),
       h(
         'div',
         { class: 'table' },
@@ -289,7 +354,8 @@ export class MarketScreen {
               h('small', null, `${c.kind === 'ai' ? `AI・${AI_STRATEGY_LABEL[(c.strategy ?? 'standard') as AiStrategy] ?? ''}` : 'プレイヤー'}・${c.stores.map((s) => `${s.area}${s.seats}席★${s.reputation.toFixed(1)}`).join('／')}${c.bankrupt ? '・撤退' : ''}`),
             ),
             h('div', { class: 'tsub' }, `シェア ${pct(c.share)}`),
-            h('div', { class: 'tsub' }, `前日 ${yenStr(c.netSales)}（利益 ${yenStr(c.operatingProfit)}）`),
+            h('div', { class: 'tsub', 'data-progress': String(c.lastDay) }, `${c.lastDay}日目まで${c.manualDays > 0 ? `（今日 手動${c.manualDays}日）` : ''}${c.playing ? '・営業中' : ''}`),
+            h('div', { class: 'tsub' }, `${v.commonMarketDate > 0 ? `${v.commonMarketDate}日目` : '—'} ${yenStr(c.netSales)}（利益 ${yenStr(c.operatingProfit)}）`),
           ),
         ),
       ),
@@ -324,8 +390,18 @@ export class MarketScreen {
       bankrupt ? h('p', { class: 'note bad' }, '破産しました。市場から消えています') : null,
       s.loans.length === 0 && !bankrupt ? h('button', { class: 'btn ghost', onclick: () => void this.act({ type: 'takeLoan' }, '融資を受けました') }, `融資を受ける（${yenStr(BALANCE.loan.amount)}）`) : null,
     );
-    const stores = s.company.stores.map((entry) => this.storeCard(s, entry, v.day));
-    return h('div', { class: 'market-mine-col' }, finance, ...stores, this.growth(s, v), this.hiring(s));
+    const stores = s.company.stores.map((entry) => this.storeCard(s, entry, v.mine!.progress.lastProcessedGameDate));
+    const st = v.settings;
+    const rules = h(
+      'section',
+      { class: 'card market-rules' },
+      h('h4', null, 'この市場の決まり'),
+      row('参加企業数', `${st.maxCompanies}社まで${st.aiFill ? '（空いた枠は AI 企業）' : '（人だけ）'}`),
+      row('競争期間', st.endsAt ? `${PERIOD_LABEL(st.periodDays)}（${new Date(st.endsAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })} 0時まで）` : PERIOD_LABEL(st.periodDays)),
+      row('終わったあとの企業', st.entry === 'fresh' ? '新規の企業だけ（次の市場は新しい会社で）' : '育てた企業で次の市場に参加できる'),
+      h('p', { class: 'note' }, '営業していない間の経営（値段・人・出店）は、この画面で決められます。拡張の工事は、営業の画面で閉店後に決めます。'),
+    );
+    return h('div', { class: 'market-mine-col' }, finance, rules, ...stores, this.growth(s, v), this.hiring(s));
   }
 
   private storeCard(s: GameState, entry: StoreEntry, day: number): HTMLElement {
@@ -399,7 +475,7 @@ export class MarketScreen {
             null,
             h('div', { class: 'kv' }, h('span', null, `本店を${info.next.name}に`), h('b', null, `工事費 ${yenStr(info.cost)}${adv ? `（席・冷蔵庫・手元資金を含めた目安 ${yenStr(adv.total)}）` : ''}`)),
             info.reason ? h('p', { class: 'note' }, info.reason) : null,
-            h('button', { class: 'btn', 'data-expand': '', disabled: !info.canExpand, onclick: async () => { if (await confirmDialog(this.root, '拡張', `本店を${info.next!.name}に拡張します。工事費 ${yenStr(info.cost)}。工事の日は休業します。`, '拡張する')) await this.act({ type: 'expand' }, '拡張しました'); } }, '拡張する'),
+            h('p', { class: 'note' }, '拡張の工事は、営業の画面で閉店後に「経営」から決めます（工事の日は休業します）。'),
           )
         : null,
       missingSeats.length > 0 ? h('button', { class: 'btn ghost', onclick: async () => { for (const seat of missingSeats) await this.act({ type: 'buySeat', seatIndex: seat.index }); } }, `増えた席の椅子を買う（${missingSeats.length}脚）`) : null,

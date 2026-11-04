@@ -1,6 +1,6 @@
 // バックエンド（Cloudflare Workers）の HTTP API クライアント（設計書 18.1）。
 
-import type { Action, ActionResult, SaveFile } from '@jiro/core';
+import type { Action, ActionResult, CommitResult, DayTicket, GameState, SaveFile } from '@jiro/core';
 
 const URL_KEY = 'jiro.serverUrl';
 const AUTH_KEY = 'jiro.auth';
@@ -121,10 +121,10 @@ export class Api {
     return this.req(`/api/v1/save/${slot}`, { token });
   }
 
-  // ── オンライン市場（Phase 3+4） ──
+  // ── 共通市場（docs/MARKET_RANKING_PLAN.md） ──
 
-  createMarket(token: string, name: string, companyName: string): Promise<{ marketId: string; code: string; name: string }> {
-    return this.req('/api/v1/market/create', { method: 'POST', token, body: JSON.stringify({ name, companyName }) });
+  createMarket(token: string, name: string, companyName: string, settings?: Record<string, unknown>): Promise<{ marketId: string; code: string; name: string }> {
+    return this.req('/api/v1/market/create', { method: 'POST', token, body: JSON.stringify({ name, companyName, settings }) });
   }
 
   joinMarket(token: string, code: string, companyName: string): Promise<{ marketId: string; companyId: string | null }> {
@@ -141,6 +141,17 @@ export class Api {
 
   actMarket(token: string, marketId: string, cid: string, action: Action): Promise<ActionResult & { duplicate?: boolean }> {
     return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/act`, { method: 'POST', token, body: JSON.stringify({ cid, action }) });
+  }
+
+  /** 端末で1日を始める（その日の条件をもらう）。baseVersion: 端末が持っている会社の状態の版 */
+  startMarketDay(token: string, marketId: string, dayToken: string, baseVersion: number): Promise<{ ok: boolean; ticket: DayTicket }> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/day/start`, { method: 'POST', token, body: JSON.stringify({ token: dayToken, baseVersion }) });
+  }
+
+  /** 1日の終わりの状態を送る（爆発事故の控えは送らない。サーバーが確かめて受け取る） */
+  commitMarketDay(token: string, marketId: string, dayToken: string, state: GameState): Promise<CommitResult & { companyId: string | null }> {
+    const body = JSON.stringify({ token: dayToken, state }, (k, v: unknown) => (k === 'prepSnapshot' ? null : v));
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/day/commit`, { method: 'POST', token, body });
   }
 
   wsUrl(roomId: string, joinToken: string): string {

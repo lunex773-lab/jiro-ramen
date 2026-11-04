@@ -985,3 +985,9 @@ input, select { font: inherit; }
 .market-log .trow .tsub { flex: 0 0 64px; }
 .staff-list .trow { padding: 4px 0; }
 .staff-list select, .store-card select { max-width: 60%; }
+
+/* 共通市場: 1日をサーバーへ送っている間（操作できないように覆う） */
+.market-busy { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 60; padding: 16px; }
+.market-busy .card { max-width: 420px; text-align: center; }
+.market-head [data-market-play] { grid-column: 1 / -1; }
+.market-head > .note { grid-column: 1 / -1; }

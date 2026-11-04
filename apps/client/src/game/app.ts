@@ -35,6 +35,7 @@ import { loadSettings, saveSettings, type Settings } from './settings';
 import { findFocus, interactableBoxes } from './targeting';
 import { openLobby } from '../ui/lobby';
 import { MarketScreen, openMarketLobby } from '../ui/market';
+import { MarketHost, MarketSession, prepareState } from './market-play';
 import type { Api, Auth } from '../net/api';
 import { installRotatedScroll } from '../ui/rotated-scroll';
 import { cloudDownload, cloudUpload } from '../net/cloud';
@@ -89,6 +90,10 @@ export class App {
   private lastT = 0;
   private lastPhase = '';
   private pausedForMenu = false;
+  /** 共通市場の企業を端末で営業している（会社の状態はサーバー。端末のスロットには保存しない） */
+  private marketPlay: { session: MarketSession; api: Api; auth: Auth; marketId: string } | null = null;
+  /** サーバーへ1日を送っている間（時間を止め、操作できないようにする） */
+  private marketBusy: HTMLElement | null = null;
   private localPos = { x: 0, z: 0 };
   private moveSendAcc = 0;
   private unsub: (() => void)[] = [];
@@ -279,8 +284,114 @@ export class App {
   /** オンライン市場の画面（サーバーの市場を読み直しながら経営する） */
   showMarket(api: Api, auth: Auth, marketId: string): void {
     this.leaveGame();
-    const screen = new MarketScreen(this.uiLayer, api, auth, marketId, () => this.showMarketLobby());
+    const screen = new MarketScreen(this.uiLayer, api, auth, marketId, () => this.showMarketLobby(), () => void this.startMarketPlay(api, auth, marketId));
     this.show(screen.el);
+  }
+
+  /**
+   * 共通市場の企業を端末で営業する（サーバーの会社の状態を読み、その日の条件をもらって始める）。
+   * 日の終わり（次の日へ）にその日を送る（commitMarketDay）
+   */
+  async startMarketPlay(api: Api, auth: Auth, marketId: string): Promise<void> {
+    const session = new MarketSession(api, auth, marketId);
+    let r: Awaited<ReturnType<MarketSession['begin']>>;
+    try {
+      r = await session.begin();
+    } catch (e) {
+      toast(this.uiLayer, (e as Error)?.message ?? '始められませんでした', 'danger', 5000);
+      return;
+    }
+    if (!r.ok) {
+      const waiting = r.code === 'sync_pending' || r.code === 'syncing';
+      await alertDialog(this.uiLayer, waiting ? '0時の計算中です' : '営業を始められません', waiting ? '日付が変わったので、全社の日付をそろえる計算をしています。終わるまで新しい日は始められません。' : r.message, 'わかった');
+      return;
+    }
+    this.slot = 0;
+    const me = r.state.players[0];
+    if (me) {
+      me.connected = true;
+      me.lastMoveAt = 0;
+      if (this.settings.playerName) me.name = this.settings.playerName;
+    }
+    this.startGame(new MarketHost(r.state, me?.id ?? 'p1', session));
+    this.marketPlay = { session, api, auth, marketId };
+    toast(this.uiLayer, `${r.ticket.gameDate}日目の営業（日の終わりにサーバーへ送ります）`, 'info', 3000);
+  }
+
+  /** 市場の画面へ戻る（端末の営業をやめる） */
+  private backToMarket(): void {
+    const mp = this.marketPlay;
+    if (!mp) {
+      this.showTitle();
+      return;
+    }
+    this.showMarket(mp.api, mp.auth, mp.marketId);
+  }
+
+  private setMarketBusy(text: string | null): void {
+    this.marketBusy?.remove();
+    this.marketBusy = null;
+    if (text === null) return;
+    this.marketBusy = h('div', { class: 'market-busy', 'data-market-busy': '' }, h('div', { class: 'card' }, h('p', null, text)));
+    this.marketBusy.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.uiLayer.appendChild(this.marketBusy);
+  }
+
+  /**
+   * その日の営業をサーバーへ送る（次の日へ進んだあと）。送れるまで次の日は始められない（判断 1d）。
+   * 受け取られなければ、サーバーの前の日の状態からやり直す（判断 1b）
+   */
+  private async commitMarketDay(): Promise<void> {
+    const mp = this.marketPlay;
+    const host = this.host;
+    if (!mp || !host) return;
+    this.controls?.releaseAll();
+    this.setMarketBusy('その日の営業をサーバーに送っています…');
+    let r: Awaited<ReturnType<MarketSession['commit']>>;
+    for (;;) {
+      r = await mp.session.commit(host.state);
+      if (r.ok || r.code !== 'network') break;
+      this.setMarketBusy(null);
+      const c = await choiceDialog(this.uiLayer, '送れませんでした', `${r.reason ?? '通信できません'}。通信できるところで、もう一度送ってください（送れるまで次の日は始められません）。`, [
+        { label: '市場の画面へ（この日は送られていません）', value: 'leave', kind: 'ghost' },
+        { label: 'もう一度送る', value: 'retry', kind: 'primary' },
+      ]);
+      if (this.host !== host) return;
+      if (c !== 'retry') {
+        this.backToMarket();
+        return;
+      }
+      this.setMarketBusy('その日の営業をサーバーに送っています…');
+    }
+    this.setMarketBusy(null);
+    if (this.host !== host) return;
+    if (!r.ok) {
+      const reasons = 'reject' in r && r.reject ? r.reject.slice(0, 3).join('・') : '';
+      await alertDialog(this.uiLayer, 'この日は受け取られませんでした', `${r.reason ?? ''}${reasons ? `（${reasons}）` : ''}`, 'サーバーの状態からやり直す');
+      await this.startMarketPlay(mp.api, mp.auth, mp.marketId);
+      return;
+    }
+    if (r.bankrupt) {
+      await alertDialog(this.uiLayer, '破産しました', '資金が尽きて、この企業は市場から消えました。', '市場の画面へ');
+      this.backToMarket();
+      return;
+    }
+    if (r.flags && r.flags.length > 0) toast(this.uiLayer, 'この日は上限を超える値があったため、順位には数えられません', 'warn', 6000);
+    // 次の日の条件
+    const t = await mp.session.startTicket();
+    if (this.host !== host) return;
+    if (!t.ok) {
+      if (t.code === 'stale') {
+        await this.startMarketPlay(mp.api, mp.auth, mp.marketId);
+        return;
+      }
+      const waiting = t.code === 'sync_pending' || t.code === 'syncing';
+      await alertDialog(this.uiLayer, waiting ? '0時の計算中です' : '次の日を始められません', waiting ? `${r.gameDate}日目までを送りました。日付が変わったので、全社の日付をそろえる計算をしています。終わるまで新しい日は始められません。` : t.message, '市場の画面へ');
+      this.backToMarket();
+      return;
+    }
+    prepareState(host.state, t.ticket);
+    toast(this.uiLayer, `${r.gameDate}日目を送りました。${t.ticket.gameDate}日目の営業です`, 'good', 2500);
   }
 
   // ───────────────── ゲーム開始・終了 ─────────────────
@@ -332,10 +443,18 @@ export class App {
       onLayoutEditor: () => this.openEditor(),
       onSave: () => this.saveNow(true),
       onCloudSave: () => {
+        if (this.marketPlay) {
+          this.saveNow(true);
+          return;
+        }
         this.saveNow(false);
         void cloudUpload(this.uiLayer, this.store, this.slot, this.settings.playerName);
       },
       onCloudLoad: async () => {
+        if (this.marketPlay) {
+          this.saveNow(true);
+          return;
+        }
         const replaced = await cloudDownload(this.uiLayer, this.store, this.slot, this.settings.playerName);
         if (!replaced) return;
         const r = loadFromSlot(this.store, this.slot);
@@ -405,6 +524,8 @@ export class App {
 
   leaveGame(): void {
     cancelAnimationFrame(this.raf);
+    this.marketPlay = null;
+    this.setMarketBusy(null);
     for (const u of this.unsub) u();
     this.unsub = [];
     this.manage?.close();
@@ -453,6 +574,21 @@ export class App {
     const host = this.host;
     if (!host) {
       this.showTitle();
+      return;
+    }
+    if (this.marketPlay) {
+      const closed = host.state.phase === 'closed';
+      const ok = await confirmDialog(
+        this.uiLayer,
+        '市場の画面に戻りますか？',
+        closed
+          ? '今日の営業は、まだサーバーに送られていません（「次の日へ」で送ります）。戻ると、この日はサーバーの前の日の状態から、もう一度やり直しになります。'
+          : '今日の営業は、まだサーバーに送られていません。戻ると、この日はサーバーの前の日の状態から、もう一度やり直しになります。',
+        '市場の画面に戻る',
+        true,
+        'キャンセル',
+      );
+      if (ok && this.host === host) this.backToMarket();
       return;
     }
     const remote = host.mode === 'remote';
@@ -529,7 +665,7 @@ export class App {
     c.enabled = !blocking && av.awake;
     this.setAccidentMode(acc?.stage === 'destroyed');
     // シングルプレイではメニュー中は時間を止める
-    const pauseLocal = host.mode === 'local' && (blocking || s.phase === 'closed');
+    const pauseLocal = host.mode === 'local' && (blocking || s.phase === 'closed' || !!this.marketBusy);
     if (!pauseLocal) host.tick(dt);
     c.update();
     const me = s.players.find((p) => p.id === host.playerId);
@@ -680,6 +816,9 @@ export class App {
       this.controls?.releaseAll();
       if (prev !== 'closed' || initial) this.autosave('dayEnd');
       this.showResults();
+    } else if (s.phase === 'bankrupt' && this.marketPlay) {
+      // 共通市場: 破産の日はサーバーへ送ってから市場の画面へ（commitMarketDay が知らせる）
+      this.controls?.releaseAll();
     } else if (s.phase === 'bankrupt') {
       this.controls?.releaseAll();
       this.autosave('dayEnd');
@@ -720,13 +859,23 @@ export class App {
             return;
           }
           const res = await host.act({ type: 'nextDay' });
+          // 共通市場: 次の日へ進めたら（破産も）、その日をサーバーへ送る
+          if (this.marketPlay && (res.ok || host.state.phase === 'bankrupt')) {
+            await this.commitMarketDay();
+            return;
+          }
           if (!res.ok) {
             toast(this.uiLayer, res.reason ?? '進めません', 'danger', 5000);
             this.openManage('dash');
           }
         },
         onManage: () => this.openManage(),
+        saveTitleLabel: this.marketPlay ? '市場の画面へ' : undefined,
         onSaveTitle: () => {
+          if (this.marketPlay) {
+            void this.returnToTitle();
+            return;
+          }
           this.saveNow(true);
           this.showTitle();
         },
@@ -892,6 +1041,10 @@ export class App {
   saveNow(notify: boolean): void {
     const host = this.host;
     if (!host) return;
+    if (this.marketPlay) {
+      if (notify) toast(this.uiLayer, '市場の企業は、1日の終わり（次の日へ）にサーバーへ送られます', 'info');
+      return;
+    }
     if (this.slot === 0) {
       if (notify) toast(this.uiLayer, 'タイトルから始めたチュートリアルは保存されません', 'info');
       return;

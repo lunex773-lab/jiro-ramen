@@ -129,6 +129,8 @@ export interface ResultCallbacks {
   onNextDay(): void;
   onManage(): void;
   onSaveTitle(): void;
+  /** 「保存してタイトルへ」の代わりの文字（共通市場では「市場の画面へ」） */
+  saveTitleLabel?: string;
 }
 
 export function resultScreen(s: GameState, r: DayReport, isHost: boolean, cb: ResultCallbacks): HTMLElement {
@@ -189,7 +191,7 @@ export function resultScreen(s: GameState, r: DayReport, isHost: boolean, cb: Re
       { class: 'row center' },
       h('button', { class: 'btn', onclick: () => cb.onManage() }, '☰ 経営メニュー（発注・採用・設備・拡張）'),
       isHost ? h('button', { class: 'btn big primary', onclick: () => cb.onNextDay() }, '翌日の仕込みへ →') : h('div', { class: 'note' }, 'ホストが翌日に進めるのを待っています'),
-      h('button', { class: 'btn ghost', onclick: () => cb.onSaveTitle() }, '保存してタイトルへ'),
+      h('button', { class: 'btn ghost', onclick: () => cb.onSaveTitle() }, cb.saveTitleLabel ?? '保存してタイトルへ'),
     ),
   );
 }

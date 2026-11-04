@@ -1,6 +1,26 @@
-// オンライン市場の画面（Phase 3+4）。サーバーを偽物に差し替え、core の市場の規則（createMarket・marketView・marketAction）で答える。
+// 共通市場の画面と、端末での営業（docs/MARKET_RANKING_PLAN.md）。
+// サーバーを偽物に差し替え、core の市場の規則（createMarket・marketView・startDay・commitDay・runSync）で答える。
+// 端末で1日を営業して「翌日の仕込みへ」で送ると、サーバーの確かめ方（verify）を通って受け取られることまで確かめる。
 import { expect, test, type Page } from '@playwright/test';
-import { advanceMarketTo, createMarket, marketAction, marketView, type Action, type MarketState } from '@jiro/core';
+import {
+  addDays,
+  commitDay,
+  createMarket,
+  finishSync,
+  jstDateKey,
+  jstMidnight,
+  marketAction,
+  marketView,
+  nextJstMidnight,
+  nextSyncAt,
+  playerCompany,
+  runSync,
+  startDay,
+  syncPending,
+  type Action,
+  type GameState,
+  type MarketState,
+} from '@jiro/core';
 
 const SERVER = 'https://mock.jiro.test';
 const SHOTS = process.env.SHOTS_DIR;
@@ -10,15 +30,29 @@ const shot = async (page: Page, name: string) => {
 
 function mockMarket(page: Page) {
   let market: MarketState | null = null;
-  const DAY_MS = 600_000;
   const start = Date.now();
   const cids = new Set<string>();
   const acts: Action[] = [];
+  const commits: { ok: boolean; flags?: string[]; reject?: string[] }[] = [];
+  let skew = 0;
+  const now = () => Date.now() + skew;
   return {
     get market() {
       return market;
     },
     acts,
+    commits,
+    /** サーバーの時計を、次の JST の0時の31分後（営業中の日を待つ30分のあと）に進めて同期する（アラームの代わり） */
+    midnight() {
+      const t = nextJstMidnight(now()) + 31 * 60_000;
+      skew = t - Date.now();
+      for (;;) {
+        const r = runSync(market!, now());
+        if (r.status === 'more') continue;
+        if (r.status === 'ranking') finishSync(market!, now());
+        break;
+      }
+    },
     async install() {
       await page.route(`${SERVER}/api/v1/**`, async (route) => {
         const req = route.request();
@@ -31,10 +65,8 @@ function mockMarket(page: Page) {
         if (p === '/api/v1/profile') return send({ playerId: 'u1', name: 'テスター' });
         if (p === '/api/v1/markets') return send({ markets: market ? [{ marketId: 'mk1', code: 'MKT234', name: market.name, createdAt: start, isOwner: true }] : [] });
         if (p === '/api/v1/market/create') {
-          const b = JSON.parse(req.postData() ?? '{}') as { name?: string; companyName: string };
-          market = createMarket({ id: 'mk1', name: b.name || 'テストの市場', seed: 4242, creator: { ownerId: 'u1', companyName: b.companyName } });
-          // 3日分すでに進んでいる（サーバーの時計）
-          advanceMarketTo(market, 4);
+          const b = JSON.parse(req.postData() ?? '{}') as { name?: string; companyName: string; settings?: Record<string, unknown> };
+          market = createMarket({ id: 'mk1', name: b.name || 'テストの市場', seed: 4242, now: now(), settings: b.settings ?? {}, creator: { ownerId: 'u1', companyName: b.companyName } });
           return send({ marketId: 'mk1', code: 'MKT234', name: market.name }, 201);
         }
         if (p === '/api/v1/market/mk1/act') {
@@ -42,20 +74,44 @@ function mockMarket(page: Page) {
           if (cids.has(b.cid)) return send({ ok: true, duplicate: true });
           cids.add(b.cid);
           acts.push(b.action);
-          return send(marketAction(market!, 'u1', b.action));
+          return send(marketAction(market!, 'u1', b.action, now()));
+        }
+        if (p === '/api/v1/market/mk1/day/start') {
+          const b = JSON.parse(req.postData() ?? '{}') as { token: string; baseVersion: number };
+          const r = startDay(market!, 'u1', now(), b.token, b.baseVersion);
+          return r.ok ? send({ ok: true, ticket: r.ticket }) : send({ error: r.reason, code: r.code }, 409);
+        }
+        if (p === '/api/v1/market/mk1/day/commit') {
+          const b = JSON.parse(req.postData() ?? '{}') as { token: string; state: GameState };
+          const r = commitDay(market!, 'u1', now(), b.token, b.state);
+          commits.push(r);
+          return send({ ...r, companyId: playerCompany(market!, 'u1')?.id ?? null });
         }
         if (p === '/api/v1/market/mk1') {
           const v = marketView(market!, 'u1');
-          const now = Date.now();
-          return send({ ...v, clock: { day: v.day, dayMs: DAY_MS, nextDayAt: now + 125_000, serverNow: now }, code: 'MKT234', isOwner: true, joined: true });
+          const t = now();
+          return send({
+            ...v,
+            clock: { serverNow: t, nextMidnight: nextJstMidnight(t), nextSyncAt: nextSyncAt(market!, t), syncPending: syncPending(market!, t) },
+            code: 'MKT234',
+            isOwner: true,
+            joined: true,
+            today: jstDateKey(t),
+          });
         }
-        return send({ error: 'not_found', message: 'not found' }, 404);
+        return send({ error: 'not found', code: 'not_found' }, 404);
       });
     },
   };
 }
 
-test('オンライン市場: 市場を作ると AI 企業と同じ街で始まり、順位・招待コード・次の日までの時間・AI の判断が見え、値段を変えられる', async ({ page }) => {
+type Jiro = {
+  host: { state: GameState; speed: number; tick(dt: number): void; act(a: Action): Promise<{ ok: boolean; reason?: string }> };
+  returnToTitle(): Promise<void>;
+};
+
+test('共通市場: 市場を作り、端末で1日を営業して送ると受け取られ、0時に全社がそろう', async ({ page }) => {
+  test.setTimeout(120_000);
   const mock = mockMarket(page);
   await mock.install();
   await page.goto('/');
@@ -67,28 +123,102 @@ test('オンライン市場: 市場を作ると AI 企業と同じ街で始ま�
   const lobby = page.locator('.market-lobby');
   await lobby.locator('input.input').first().fill(SERVER);
   await lobby.locator('input[placeholder="会社（店）の名前"]').fill('テスト亭');
+  // 作る人が決める: 参加企業数（AI で埋める）
+  await lobby.locator('[data-max-companies]').selectOption('4');
   await lobby.locator('[data-create-market]').click();
   // 市場の画面
   const screen = page.locator('.screen.market');
   await expect(screen.locator('.market-head')).toContainText('テストの市場');
   await expect(screen.locator('.market-head .room-code')).toHaveText('MKT234');
-  await expect(screen.locator('[data-market-day]')).toHaveText('3日目まで営業済み');
-  await expect(screen.locator('.market-head')).toContainText('次の日まで');
+  await expect(screen.locator('[data-market-day]')).toHaveText('まだ0日');
+  await expect(screen.locator('[data-sync]')).toContainText('次の0時まで');
   const rows = screen.locator('.market-standings .trow[data-company]');
-  await expect(rows).toHaveCount(6);
+  await expect(rows).toHaveCount(4);
+  expect(mock.market!.settings.maxCompanies).toBe(4);
   await expect(screen.locator('.market-standings .trow.mine')).toContainText('テスト亭（あなた）');
-  await expect(screen.locator('.market-standings')).toContainText('AI・');
-  await expect(screen.locator('.market-mine')).toContainText('あなたの会社: テスト亭');
-  await expect(screen.locator('.store-card').first()).toContainText('店主（あなた）が営業');
-  await expect(screen.locator('.market-log')).toContainText('日目');
+  await expect(screen.locator('.market-rules')).toContainText('4社まで');
   await shot(page, '60-market');
-  // 本店の値段を定価の90%にする（サーバーへ操作を送る）
+  // 営業していない間の経営: 本店の方針の値段を定価の90%にする（サーバーへ操作を送る）
   const storeId = mock.market!.companies[0]!.state.company.stores[0]!.id;
   await screen.locator(`[data-price="${storeId}"]`).selectOption('0.9');
   await expect.poll(() => mock.market!.companies[0]!.state.company.stores[0]!.policy.priceMult).toBe(0.9);
   expect(mock.acts.map((a) => a.type)).toContain('setStorePolicy');
-  await expect(screen.locator(`[data-price="${storeId}"]`)).toHaveValue('0.9');
-  // 市場から出ると入口に戻り、参加している市場が並ぶ
+
+  // 端末で1日目を営業する（その日の条件 = 同じ地域の会社との客の取り合いの倍率をもらう）
+  await screen.locator('[data-market-play]').click();
+  await expect(page.locator('.hud-top')).toBeVisible();
+  const demand = await page.evaluate(() => {
+    const s = (window as unknown as { __jiro: Jiro }).__jiro.host.state;
+    return s.marketDemand?.[s.company.activeStoreId] ?? null;
+  });
+  expect(demand).not.toBeNull();
+  expect(demand!).toBeLessThan(1);
+  expect(mock.market!.pendingPeriods).toHaveLength(1);
+  // 1日を早送り（開店 → 閉店まで）
+  const phase = await page.evaluate(async () => {
+    const app = (window as unknown as { __jiro: Jiro }).__jiro;
+    const h = app.host;
+    await h.act({ type: 'openShop' });
+    h.speed = 3;
+    for (let i = 0; i < 40_000 && h.state.phase !== 'closed'; i++) h.tick(0.25);
+    return h.state.phase;
+  });
+  expect(phase).toBe('closed');
+  // 翌日へ → その日をサーバーへ送る（確かめて受け取られる）
+  await page.getByRole('button', { name: '翌日の仕込みへ →' }).click();
+  await expect.poll(() => mock.commits.length).toBe(1);
+  expect(mock.commits[0]!.reject ?? []).toEqual([]);
+  expect(mock.commits[0]!.ok).toBe(true);
+  expect(mock.commits[0]!.flags ?? []).toEqual([]);
+  const me = () => playerCompany(mock.market!, 'u1')!;
+  expect(me().progress.lastProcessedGameDate).toBe(1);
+  expect(me().progress.manualProgressDays).toBe(1);
+  // 送ったあと、2日目の条件をもらって続けられる
+  await expect.poll(() => me().openDay?.gameDate ?? null).toBe(2);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.host.state.day)).toBe(2);
+  await shot(page, '61-market-play');
+
+  // 市場の画面へ戻る（2日目は送られていない → やり直しになると知らせる）
+  void page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.returnToTitle());
+  await page.getByRole('button', { name: '市場の画面に戻る' }).click();
+  await expect(screen.locator('[data-leader-day]')).toHaveText('1日目まで');
+  await expect(screen.locator('.market-standings .trow.mine [data-progress]')).toContainText('1日目まで（今日 手動1日）');
+
+  // 0時: いちばん進んだ会社（あなた・1日目）まで、AI 企業を自動営業でそろえる
+  mock.midnight();
+  expect(mock.market!.commonMarketDate).toBe(1);
+  expect(mock.market!.companies.filter((c) => c.kind === 'ai').every((c) => c.progress.lastProcessedGameDate === 1 && c.days[0]?.source === 'auto')).toBe(true);
   await page.getByRole('button', { name: '← 市場から出る' }).click();
-  await expect(page.locator('.market-lobby [data-open-market="mk1"]')).toBeVisible();
+  await page.locator('.market-lobby [data-open-market="mk1"]').click();
+  await expect(screen.locator('[data-market-day]')).toHaveText('1日目まで');
+  // 0時に営業中だった2日目は30分を過ぎて無効 → サーバーの1日目の終わりの状態から2日目をやり直す
+  await expect(screen.locator('[data-market-play]')).toContainText('2日目');
+  await expect(screen.locator('.market-log')).toContainText('日目');
+});
+
+test('共通市場: 0時を過ぎて計算が済んでいない間は、新しい日を始められない', async ({ page }) => {
+  const mock = mockMarket(page);
+  await mock.install();
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  const ok = page.getByRole('button', { name: 'わかった' });
+  if (await ok.isVisible()) await ok.click();
+  await page.getByRole('button', { name: /オンライン市場/ }).click();
+  const lobby = page.locator('.market-lobby');
+  await lobby.locator('input.input').first().fill(SERVER);
+  await lobby.locator('input[placeholder="会社（店）の名前"]').fill('夜更かし亭');
+  await lobby.locator('[data-create-market]').click();
+  const screen = page.locator('.screen.market');
+  await expect(screen.locator('[data-market-play]')).toBeEnabled();
+  // 昨日（JST）に始めた日がまだ同期されていない
+  const m = mock.market!;
+  const yesterday = addDays(jstDateKey(Date.now()), -1);
+  m.pendingPeriods = [yesterday];
+  expect(syncPending(m, Date.now())).toBe(true);
+  expect(jstMidnight(yesterday)).toBeLessThan(Date.now());
+  await page.getByRole('button', { name: '← 市場から出る' }).click();
+  await page.locator('.market-lobby [data-open-market="mk1"]').click();
+  await expect(screen.locator('[data-sync]')).toHaveAttribute('data-sync', 'pending');
+  await expect(screen.locator('[data-market-play]')).toBeDisabled();
 });
