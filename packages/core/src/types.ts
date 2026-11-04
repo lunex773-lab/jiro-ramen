@@ -164,7 +164,7 @@ export interface ShiftDay {
 }
 
 /** 勤務の出来事（実際に起きたことだけを記録する） */
-export type StaffLogKind = 'late' | 'absent' | 'slack' | 'private' | 'postpone' | 'argue' | 'rude' | 'abandon' | 'calm' | 'promoted' | 'calledIn';
+export type StaffLogKind = 'late' | 'absent' | 'slack' | 'private' | 'postpone' | 'argue' | 'rude' | 'abandon' | 'calm' | 'promoted' | 'calledIn' | 'offWish' | 'quit';
 
 export interface StaffLogEntry {
   day: number;
@@ -239,6 +239,11 @@ export interface EmployeeProfile {
   patience?: number;
   /** 見た目の番号（制服の色・頭・メガネ・ひげなど。採用の候補のときから変わらない）。古いセーブにはない → id から */
   look?: number;
+  /**
+   * 希望シフト: 出られる曜日（月=0 … 日=6。アルバイト。オーナーの判断 13）。希望外の日に入れると満足度が下がる。
+   * 古いセーブ・社員にはない → 毎日出られる
+   */
+  wishDays?: boolean[];
 }
 
 /**
@@ -313,6 +318,10 @@ export interface Employee extends ActorBase {
   say?: { text: string; until: number; kind?: 'greet' | 'event' } | null;
   /** 出退勤の途中（店の外から歩いて入る・あいさつ・手洗い／あいさつ・歩いて出る）。この間は仕事をしない。古い状態にはない */
   commute?: Commute | null;
+  /** 疲れ（0〜1）。働いた日にたまり、休みの日に回復する（オーナーの判断 12）。古い状態にはない → 0 */
+  fatigue?: number;
+  /** 満足度（0〜1）。希望外の日の勤務・疲れで下がり、ふだんは基準へ戻る。低いと遅刻・欠勤が増え、辞めることがある。古い状態にはない → 基準 */
+  morale?: number;
 }
 
 export interface TaskStep {

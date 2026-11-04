@@ -33,6 +33,11 @@ import {
   EMPLOYMENT_LABEL,
   WEEKDAY_LABEL,
   attendanceText,
+  fatigueSpeed,
+  fatigueText,
+  isWishDay,
+  moraleText,
+  restDaysOf,
   buzzBoostFactor,
   signsOf,
   dailyWageOf,
@@ -853,6 +858,13 @@ export class ManageMenu {
           : null,
       ),
       this.skillBars(e.profile.skills),
+      h(
+        'p',
+        { class: 'note emp-wellbeing', 'data-wellbeing': e.id },
+        `疲れ: ${fatigueText(e)}・満足度: ${moraleText(e)}`,
+        part && e.profile.wishDays ? `・希望の曜日: ${WEEKDAY_LABEL.filter((_, i) => isWishDay(e, i)).join('')}` : '',
+        !part && restDaysOf(e).length > 0 ? `・休み: ${restDaysOf(e).map((i) => WEEKDAY_LABEL[i]).join('')}` : '',
+      ),
       h('p', { class: 'note emp-summary' }, summary.slice(0, 3).join('・')),
       panel === 'shift' ? this.shiftPanel(s, e) : null,
       panel === 'record' ? this.recordPanel(s, e) : null,
@@ -909,7 +921,27 @@ export class ManageMenu {
    */
   private shiftPanel(s: GameState, e: Employee): HTMLElement {
     if (!isPartTime(e)) {
-      return h('div', { class: 'prio' }, h('p', { class: 'note' }, `社員は毎日、仕込みから閉店まで勤務します（日給 ${yenStr(e.profile.wage)}）。遅刻・欠勤が少なく安定します。`));
+      // 社員: 休みの曜日を決める（疲れは休みの日に回復する。オーナーの判断 12）
+      const rest = new Set(restDaysOf(e));
+      const toggleRest = (i: number) => {
+        const next = new Set(rest);
+        if (next.has(i)) next.delete(i);
+        else next.add(i);
+        void this.act({ type: 'setRestDays', employeeId: e.id, days: [...next].sort((a, b) => a - b) });
+      };
+      return h(
+        'div',
+        { class: 'prio' },
+        h('p', { class: 'note' }, `社員は出勤の日は仕込みから閉店まで勤務します（日給 ${yenStr(e.profile.wage)}）。休みの曜日は来ず、日給もかかりません。疲れは休みの日に回復します（週に1〜2日休ませると、ほぼ回復します）。`),
+        h(
+          'div',
+          { class: 'tbtns rest-days', 'data-rest-days': e.id },
+          WEEKDAY_LABEL.map((w, i) =>
+            h('button', { class: `mini ${rest.has(i) ? 'ghost' : 'on'}`, 'data-rest-day': String(i), disabled: !this.host.isHost, onclick: () => toggleRest(i) }, `${w} ${rest.has(i) ? '休み' : '出勤'}`),
+          ),
+        ),
+        h('p', { class: 'note' }, `今: ${fatigueText(e)}（作業の速さ ${Math.round(fatigueSpeed(e) * 100)}%）`),
+      );
     }
     const N = BALANCE.staff.calendarDays;
     const first = s.day - weekdayOf(s.day);
@@ -952,6 +984,7 @@ export class ManageMenu {
           },
           h('b', null, `${d}日目${d === s.day ? '・今日' : ''}`),
           h('small', null, this.shiftText(sh)),
+          !isWishDay(e, weekdayOf(d)) ? h('i', { class: 'cal-unwish', title: '希望していない曜日（入れると満足度が下がる）' }, '希望外') : null,
           own ? h('i', { class: 'cal-own', title: 'この日だけの予定' }, 'この日だけ') : null,
         ),
       );
@@ -963,6 +996,9 @@ export class ManageMenu {
       cells,
     );
     const week = shiftsOf(e);
+    const wishNote = e.profile.wishDays
+      ? h('p', { class: 'note cal-wish' }, `希望の曜日: ${WEEKDAY_LABEL.filter((_, i) => isWishDay(e, i)).join('・')}。希望していない曜日に入れることもできますが、満足度が下がり、遅刻・欠勤が増え、続くと辞めることがあります。`)
+      : null;
     const repeat = h(
       'p',
       { class: 'note cal-repeat' },
@@ -1048,6 +1084,7 @@ export class ManageMenu {
     return h(
       'div',
       { class: 'prio shift' },
+      wishNote,
       cal,
       repeat,
       editor,

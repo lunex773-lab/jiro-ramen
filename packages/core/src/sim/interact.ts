@@ -30,7 +30,7 @@ import type {
 import { clamp01, dist, newId } from '../util';
 import { emptyContents, evaluateBowl, isBowlComplete, menuOf, noodleQualityFor, soupPerBowl, toppingAmount } from './cooking';
 import { cash, noteStockout, recordPL } from './economy';
-import { growFromWork, noteServed } from './staff';
+import { fatigueSpeed, growFromWork, noteServed } from './staff';
 import {
   defOf,
   distanceFactor,
@@ -200,7 +200,8 @@ function actorSpeed(actor: Actor, kind: 'cook' | 'clean' | 'service' | 'general'
   const sk = actor.profile.skills;
   const exp = Math.min(0.2, actor.profile.experience);
   const skill = kind === 'cook' ? sk.cooking : kind === 'clean' ? sk.hygiene : kind === 'service' ? sk.service : sk.speed;
-  return (0.55 + 0.45 * sk.speed + 0.35 * skill) * (1 + exp);
+  // 疲れていると遅くなる（最大2割。オーナーの判断 12）
+  return (0.55 + 0.45 * sk.speed + 0.35 * skill) * (1 + exp) * fatigueSpeed(actor);
 }
 
 // ───────────────────────── 動詞の定義 ─────────────────────────

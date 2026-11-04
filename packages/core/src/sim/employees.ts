@@ -46,7 +46,7 @@ import { unpermittedFilming } from './media';
 import { accidentPanic } from './accident';
 import { moveAlong, staffRoute, walkSpeed } from './walk';
 import { updateCommute } from './commute';
-import { attendHireDay, dailyWageOf, initNewHire, isPartTime, isSlacking, rollCall, rollPostpone, wagesDueToday } from './staff';
+import { attendHireDay, checkQuits, dailyWageOf, initNewHire, isPartTime, isSlacking, rollCall, rollPostpone, wagesDueToday } from './staff';
 
 export const ROLE_LABEL: Record<EmployeeRole, string> = {
   cook: '調理担当',
@@ -198,7 +198,25 @@ export function generateCandidate(s: GameState): Candidate {
   const id = newId(s, 'cand');
   // 見た目の番号は乱数を使わずに決める（ゲームの乱数の並びを変えない）
   profile.look = hashString(`${s.seed}:${id}`) % 1_000_000;
+  // 希望シフト（出られる曜日）も乱数を使わずに決める（オーナーの判断 13）
+  profile.wishDays = wishDaysFor(`${s.seed}:${id}:wish`);
   return { id, profile };
+}
+
+/** 出られる曜日（wishDaysMin〜wishDaysMax 日。名前の種から決まる） */
+export function wishDaysFor(key: string): boolean[] {
+  const st = BALANCE.staff;
+  let h = hashString(key);
+  const n = st.wishDaysMin + (h % (st.wishDaysMax - st.wishDaysMin + 1));
+  const order = [0, 1, 2, 3, 4, 5, 6];
+  for (let i = order.length - 1; i > 0; i--) {
+    h = hashString(`${key}:${i}:${h}`);
+    const j = h % (i + 1);
+    [order[i], order[j]] = [order[j]!, order[i]!];
+  }
+  const days = Array.from({ length: 7 }, () => false);
+  for (const d of order.slice(0, n)) days[d] = true;
+  return days;
 }
 
 export function refreshCandidates(s: GameState): void {
@@ -285,6 +303,8 @@ export function setPriority(s: GameState, employeeId: string, kind: string, valu
 
 /** 出勤確認（シフト・勤怠による遅刻と当日欠勤。staff.ts） */
 export function morningRollCall(s: GameState, ctx: SimCtx): void {
+  // 不満がたまった人は、朝に辞めることがある（オーナーの判断 13）
+  checkQuits(s, ctx);
   rollCall(s, ctx);
 }
 

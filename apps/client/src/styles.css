@@ -991,3 +991,8 @@ input, select { font: inherit; }
 .market-busy .card { max-width: 420px; text-align: center; }
 .market-head [data-market-play] { grid-column: 1 / -1; }
 .market-head > .note { grid-column: 1 / -1; }
+
+/* 疲れ・満足度・希望シフト（Phase 3-2/3-3） */
+.emp-wellbeing { margin: 2px 0; }
+.cal-day .cal-unwish { display: block; font-style: normal; font-size: 10px; color: var(--warn, #e0a030); }
+.rest-days { flex-wrap: wrap; gap: 4px; }

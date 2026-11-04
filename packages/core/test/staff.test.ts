@@ -11,6 +11,7 @@ import {
   fullTimeWageFor,
   hourlyOf,
   initNewHire,
+  isWishDay,
   isHostOnly,
   makeEmployee,
   patienceOf,
@@ -80,7 +81,7 @@ function attendanceDay(s: GameState, ctx: SimCtx): void {
 }
 
 describe('雇用形態と採用', () => {
-  it('アルバイトとして採用され、時給と初めのシフト（毎日・仕込みから閉店まで）が付く。信頼性の数値は持たない', () => {
+  it('アルバイトとして採用され、時給と初めのシフト（希望の曜日・仕込みから閉店まで）が付く。信頼性の数値は持たない', () => {
     const { s, ctx } = newGame(3);
     s.career.unlocked.push('hiring');
     refreshCandidates(s);
@@ -92,10 +93,20 @@ describe('雇用形態と採用', () => {
     const e = s.employees[0]!;
     expect(e.profile.employment).toBe('part');
     expect(hourlyOf(e)).toBe(Math.round(c.profile.wage / BALANCE.staff.employment.fullShiftHours / 10) * 10);
-    expect(shiftsOf(e).every((x) => x && x.fromPrep && x.start === 0 && x.end === 240)).toBe(true);
-    // 仕込み中に雇ったので今日から働く
-    expect(e.presentToday).toBe(true);
-    expect(e.att?.prepWorked).toBe(true);
+    // 希望の曜日（3〜6日）だけ、仕込みから閉店まで
+    const wish = e.profile.wishDays!;
+    expect(wish).toHaveLength(7);
+    const n = wish.filter(Boolean).length;
+    expect(n).toBeGreaterThanOrEqual(BALANCE.staff.wishDaysMin);
+    expect(n).toBeLessThanOrEqual(BALANCE.staff.wishDaysMax);
+    shiftsOf(e).forEach((x, i) => {
+      if (wish[i]) expect(x && x.fromPrep && x.start === 0 && x.end === 240).toBe(true);
+      else expect(x).toBeNull();
+    });
+    // 仕込み中に雇ったので、今日が希望の曜日なら今日から働く
+    const today = isWishDay(e, weekdayOf(s.day));
+    expect(e.presentToday).toBe(today);
+    expect(!!e.att?.prepWorked).toBe(today);
   });
 
   it('採用の候補には見た目の番号があり、採用したあとも変わらない（同じ種・同じ手順なら同じ番号）', () => {

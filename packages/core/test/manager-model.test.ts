@@ -80,6 +80,16 @@ export function compare(c: Config, warm = 10, days = 10) {
 
 const near = (a: number, b: number, tol: number) => Math.abs(a - b) <= Math.abs(b) * tol;
 
+/** いくつかの種で比べた平均（1つの種だけだと、たまたまの故障・返金の日で結果がぶれる） */
+function compareSeeds(seeds: number[], c: Omit<Config, 'seed'>) {
+  const rs = seeds.map((seed) => compare({ ...c, seed }));
+  const mean = (k: 'detailed' | 'model', f: 'served' | 'netSales' | 'op') => rs.reduce((a, r) => a + r[k][f], 0) / rs.length;
+  return {
+    detailed: { served: mean('detailed', 'served'), netSales: mean('detailed', 'netSales'), op: mean('detailed', 'op') },
+    model: { served: mean('model', 'served'), netSales: mean('model', 'netSales'), op: mean('model', 'op') },
+  };
+}
+
 describe('店長の営業と細かいシミュレーションの差（Phase 2-4）', () => {
   it.skipIf(!process.env.MODEL_DUMP)('（測定用）差を書き出す', { timeout: 600_000 }, async () => {
     const { writeFileSync } = await import('node:fs');
@@ -94,15 +104,15 @@ describe('店長の営業と細かいシミュレーションの差（Phase 2-4�
     writeFileSync(process.env.MODEL_DUMP!, JSON.stringify(out, null, 1));
   });
 
-  it('8席・店長＋調理担当: 提供数・純売上は±15%、営業利益は±30%以内', { timeout: 180_000 }, () => {
-    const r = compare({ seed: 301, stage: 0, staff: ['cook'], fridges: 1 });
+  it('8席・店長＋調理担当: 提供数・純売上は±15%、営業利益は±30%以内', { timeout: 400_000 }, () => {
+    const r = compareSeeds([301, 302, 305], { stage: 0, staff: ['cook'], fridges: 1 });
     expect(near(r.model.served, r.detailed.served, 0.15)).toBe(true);
     expect(near(r.model.netSales, r.detailed.netSales, 0.15)).toBe(true);
     expect(near(r.model.op, r.detailed.op, 0.3)).toBe(true);
   });
 
-  it('12席・店長＋調理＋接客・冷蔵庫2台: 提供数・純売上は±15%、営業利益は±30%以内', { timeout: 180_000 }, () => {
-    const r = compare({ seed: 303, stage: 1, staff: ['cook', 'server'], fridges: 2 });
+  it('12席・店長＋調理＋接客・冷蔵庫2台: 提供数・純売上は±15%、営業利益は±30%以内', { timeout: 400_000 }, () => {
+    const r = compareSeeds([303, 304], { stage: 1, staff: ['cook', 'server'], fridges: 2 });
     expect(near(r.model.served, r.detailed.served, 0.15)).toBe(true);
     expect(near(r.model.netSales, r.detailed.netSales, 0.15)).toBe(true);
     expect(near(r.model.op, r.detailed.op, 0.3)).toBe(true);

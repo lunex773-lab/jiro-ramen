@@ -447,6 +447,22 @@ export const BALANCE = {
     shiftStepMin: 30,
     /** カレンダーで日にちごとにシフトを決められる日数（今日から4週間） */
     calendarDays: 28,
+    /**
+     * 疲れ（オーナーの判断 12「作業が遅くなり欠勤しやすく」）。働いた日: 疲れ = 疲れ × keepWorking + gainPerDay × 働いた割合、
+     * 休みの日: 疲れ × keepResting。毎日働くと 0.6 に近づき（作業が12%遅い）、週5日・2日休みなら週の終わりで約0.4、2日休むと約0.06まで戻る。
+     * 作業の速さ × (1 − speedPenalty × 疲れ)、遅刻・欠勤の確率 × (1 + absentMult × 疲れ)
+     */
+    fatigue: { gainPerDay: 0.12, keepWorking: 0.8, keepResting: 0.4, speedPenalty: 0.2, absentMult: 0.6 },
+    /**
+     * 満足度（オーナーの判断 13「入れられるが不満がたまる」）。毎日 基準へ approach の割合で戻り、
+     * 希望外の日に働くと offWishPenalty、疲れていると fatiguePenalty × 疲れ だけ下がる。
+     * 基準より低いと遅刻・欠勤の確率 × (1 + attendanceMult × 下がった割合)。quitBelow より低いと、毎朝 (quitBelow − 満足度) × quitPerDay の確率で辞める。
+     * 希望外の日に毎日入れ続けると約0.28まで下がる（1日に約1.7%で辞める）。週2日なら約0.62（遅刻・欠勤 約1.3倍）
+     */
+    morale: { base: 0.75, approach: 0.15, offWishPenalty: 0.07, fatiguePenalty: 0.03, attendanceMult: 1.5, quitBelow: 0.35, quitPerDay: 0.25 },
+    /** 希望シフト: アルバイトが出られる曜日の数（採用の候補のときに決まる） */
+    wishDaysMin: 3,
+    wishDaysMax: 6,
   },
 
   /**

@@ -13,7 +13,7 @@ export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire',
-  'fire', 'setRole', 'setPriority', 'setShift', 'setDateShift', 'setAutoOrderMode', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
+  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
   'accidentReset', 'openStore', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy',
 ] as const satisfies readonly ActionType[];
 
@@ -113,6 +113,7 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   setRole: { employeeId: isId, role: isRole },
   setPriority: { employeeId: isId, kind: isId, value: isNum },
   setShift: { employeeId: isId, weekday: isIntIn(0, 6), shift: isShift },
+  setRestDays: { employeeId: isId, days: (v: unknown) => Array.isArray(v) && v.length <= 6 && v.every((d) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6) },
   setAutoOrderMode: { mode: (v: unknown) => v === 'manual' || v === 'sales' },
   setDateShift: { employeeId: isId, days: isDayList, shift: isShift, mode: (v: unknown) => v === 'once' || v === 'weekly' || v === 'reset' },
   promote: { employeeId: isId },

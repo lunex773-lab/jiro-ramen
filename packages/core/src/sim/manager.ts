@@ -16,7 +16,7 @@ import { cash, emptyDayStats, finalProfit, netSales, operatingProfit } from './e
 import { upkeepTotal } from './equipment';
 import { addLot, consume, expireLots, fridgeCapacity, stockOf } from './inventory';
 import { makeCtx, type SimCtx } from './notices';
-import { expectedPay } from './staff';
+import { endOfDayWellbeing, expectedPay, fatigueSpeed, shiftFor } from './staff';
 
 const M = () => BALANCE.company.model;
 
@@ -55,10 +55,12 @@ export function storeCapacity(s: GameState, lead: { id: string | null; skill: nu
   const seats = s.seats.filter((x) => x.installed && x.index < STAGES[s.career.stage]!.seats.length).length * m.seatTurns;
   let labor = 0;
   if (lead) {
-    labor = (m.leadPoints * skillFactor(lead.skill)) / skillFactor(0.65);
-    const others = s.employees.filter((e) => e.id !== lead.id);
+    const leadEmp = lead.id ? s.employees.find((e) => e.id === lead.id) : undefined;
+    labor = ((m.leadPoints * skillFactor(lead.skill)) / skillFactor(0.65)) * (leadEmp ? fatigueSpeed(leadEmp) : 1);
+    // その日に勤務の予定がある人だけ（休みの曜日・シフトのない日は来ない）。疲れていると遅い（細かいシミュレーションと同じ倍率）
+    const others = s.employees.filter((e) => e.id !== lead.id && shiftFor(e, s.day) !== null);
     let extra = 0;
-    for (const e of others) extra += (m.rolePoints[e.profile.role] ?? 10) * (skillFactor(avgSkill(e)) / skillFactor(0.65));
+    for (const e of others) extra += (m.rolePoints[e.profile.role] ?? 10) * (skillFactor(avgSkill(e)) / skillFactor(0.65)) * fatigueSpeed(e);
     labor += extra / (1 + m.extraDiminish * Math.max(0, others.length - 1));
   }
   const fridge = fridgeCapacity(s) * m.bowlsPerFridgeKg;
@@ -70,7 +72,8 @@ export function storeCapacity(s: GameState, lead: { id: string | null; skill: nu
  */
 export function storeLead(s: GameState, entry: StoreEntry): { id: string | null; skill: number; owner: boolean } | null {
   const mgr = entry.managerId ? s.employees.find((e) => e.id === entry.managerId) : undefined;
-  if (mgr) return { id: mgr.id, skill: avgSkill(mgr), owner: false };
+  // 店長の休みの曜日は、店長がいない日（店主が回す店でなければ休業）
+  if (mgr && shiftFor(mgr, s.day) !== null) return { id: mgr.id, skill: avgSkill(mgr), owner: false };
   if (s.company?.ownerStoreId === entry.id) return { id: null, skill: M().ownerSkill, owner: true };
   return null;
 }
@@ -183,8 +186,8 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
   } else {
     if (s.closedForConstruction > 0) s.closedForConstruction -= 1;
     t.utilities = BALANCE.utilitiesBase;
-    // 休みでも社員の日給はかかる（アルバイトは来ない）
-    t.wages = s.employees.reduce((a, e) => a + (e.profile.employment === 'full' ? e.profile.wage : 0), 0);
+    // 休みでも社員の日給はかかる（アルバイトは来ない。社員の休みの曜日はかからない）
+    t.wages = s.employees.reduce((a, e) => a + (e.profile.employment === 'full' ? expectedPay(e, day) : 0), 0);
   }
   t.rent = Math.round(st.rent * prop.rentMult);
   t.upkeep = upkeepTotal(s);
@@ -206,6 +209,12 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
     s.reputation = clamp(s.reputation + (target - s.reputation) * m.repApproach, 1, 5);
   } else {
     s.reputation = clamp(s.reputation - m.repClosedDecay, 1, 5);
+  }
+  // 従業員の疲れと満足度（細かいシミュレーションの精算と同じ規則。休業の日は社員だけ出勤）
+  for (const e of s.employees) {
+    const scheduled = shiftFor(e, day) !== null;
+    const worked = scheduled && (plan.open || e.profile.employment === 'full');
+    endOfDayWellbeing(s, e, worked, worked ? 1 : 0);
   }
   // 常連は少しずつ離れる（店長の店では新しい常連の計算はしない）
   for (const r of s.regulars) if (day - r.lastVisitDay > 5) r.loyalty = Math.max(0, r.loyalty - 0.03);

@@ -66,10 +66,64 @@ export function fullDayShift(): ShiftDay {
   return { start: 0, end: MIN_PER_DAY, breakAt: 0, breakLen: 0, fromPrep: true };
 }
 
-/** 曜日ごとのシフト（7日分）。社員と古いセーブは毎日・全時間 */
+/** 曜日ごとのシフト（7日分）。古いセーブは毎日・全時間。社員は休みの曜日以外は毎日・仕込みから閉店まで */
 export function shiftsOf(e: Employee): (ShiftDay | null)[] {
-  if (!isPartTime(e) || !e.shifts) return Array.from({ length: 7 }, () => fullDayShift());
+  if (!e.shifts) return Array.from({ length: 7 }, () => fullDayShift());
+  if (!isPartTime(e)) return Array.from({ length: 7 }, (_, i) => (e.shifts![i] ? fullDayShift() : null));
   return Array.from({ length: 7 }, (_, i) => e.shifts![i] ?? null);
+}
+
+/** 社員の休みの曜日（月=0 … 日=6） */
+export function restDaysOf(e: Employee): number[] {
+  if (isPartTime(e) || !e.shifts) return [];
+  return e.shifts.map((x, i) => (x ? -1 : i)).filter((i) => i >= 0);
+}
+
+/** その曜日が希望の日か（アルバイトの希望シフト。社員・古いデータはいつでも） */
+export function isWishDay(e: Employee, weekday: number): boolean {
+  if (!isPartTime(e) || !e.profile.wishDays) return true;
+  return e.profile.wishDays[weekday] !== false;
+}
+
+/** 疲れ（0〜1） */
+export function fatigueOf(e: Employee): number {
+  return clamp01(e.fatigue ?? 0);
+}
+
+/** 満足度（0〜1） */
+export function moraleOf(e: Employee): number {
+  return clamp01(e.morale ?? ST.morale.base);
+}
+
+/** 疲れの言葉（画面に出す） */
+export function fatigueText(e: Employee): string {
+  const f = fatigueOf(e);
+  return f < 0.2 ? '元気' : f < 0.4 ? '少し疲れている' : f < 0.6 ? '疲れている' : 'とても疲れている';
+}
+
+/** 満足度の言葉（画面に出す。数値は出さない） */
+export function moraleText(e: Employee): string {
+  const m = moraleOf(e);
+  return m >= 0.7 ? '満足' : m >= 0.55 ? 'ふつう' : m >= ST.morale.quitBelow ? '不満がある' : '辞めたがっている';
+}
+
+/** 疲れによる作業の速さの倍率 */
+export function fatigueSpeed(e: Employee): number {
+  return 1 - ST.fatigue.speedPenalty * fatigueOf(e);
+}
+
+/** 社員の休みの曜日を決める（その曜日は来ない・日給もかからない）。週に6日以下にはできない（毎日休みはできない） */
+export function setRestDays(s: GameState, ctx: SimCtx, employeeId: string, days: unknown): { ok: boolean; reason?: string } {
+  const e = s.employees.find((x) => x.id === employeeId);
+  if (!e) return { ok: false, reason: '従業員が見つかりません' };
+  if (isPartTime(e)) return { ok: false, reason: 'アルバイトはシフトで休みを決めます' };
+  if (!Array.isArray(days) || days.length > 6 || !days.every((d) => typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6)) return { ok: false, reason: '休みの曜日が正しくありません（週に1日は出勤）' };
+  const rest = new Set(days as number[]);
+  const before = shiftFor(e, s.day);
+  e.shifts = Array.from({ length: 7 }, (_, i) => (rest.has(i) ? null : fullDayShift()));
+  if (rest.size === 0) delete e.shifts;
+  if (JSON.stringify(before) !== JSON.stringify(shiftFor(e, s.day))) reapplyToday(s, e, ctx);
+  return { ok: true };
 }
 
 /** その日のシフト（日にちごとの予定があればそれ、なければ曜日ごとのくりかえし） */
@@ -116,7 +170,7 @@ export function hourlyOf(e: Employee): number {
 
 /** その日の給与の見込み（予定どおりに働いた場合） */
 export function expectedPay(e: Employee, day: number): number {
-  if (!isPartTime(e)) return e.profile.wage;
+  if (!isPartTime(e)) return shiftFor(e, day) ? e.profile.wage : 0;
   return Math.round((hourlyOf(e) * shiftPaidHours(shiftFor(e, day))) / 10) * 10;
 }
 
@@ -137,6 +191,8 @@ export function payDue(e: Employee, s: GameState): number {
   if (!isPartTime(e)) {
     // 社員は休まなければ日給（遅刻しても減らさない）。このバージョンより前の状態（出勤の記録がない）は出勤していれば払う
     if (!a || a.day !== s.day) return e.presentToday ? e.profile.wage : 0;
+    // 休みの曜日（今日の予定がない日）は日給なし。工事の休業日は出勤するので払う。休みの日に呼び出したら払う
+    if (a.status !== 'closed' && !a.calledIn && a.shift === null) return 0;
     return a.absent ? 0 : e.profile.wage;
   }
   if (!a || a.day !== s.day) return 0;
@@ -292,7 +348,8 @@ export function initNewHire(e: Employee): void {
   const p = e.profile;
   p.employment = ST.employment.hireAs;
   p.hourly = p.hourly ?? Math.round(p.wage / ST.employment.fullShiftHours / 10) * 10;
-  e.shifts = Array.from({ length: 7 }, () => fullDayShift());
+  // 初めのシフトは、希望の曜日だけ・仕込みから閉店まで（希望のない人は毎日）
+  e.shifts = Array.from({ length: 7 }, (_, i) => (isWishDay(e, i) ? fullDayShift() : null));
 }
 
 /**
@@ -349,7 +406,12 @@ function lastLogDay(e: Employee, kind: StaffLogKind): number {
 export function attendanceChances(e: Employee): { absent: number; late: number } {
   const A = ST.attendance;
   const d = diligenceOf(e);
-  return { absent: A.absentMax * Math.pow(1 - d, A.exponent), late: A.lateMax * Math.pow(1 - d, A.exponent) };
+  // 疲れ・不満で増える（オーナーの判断 12・13）
+  const M = ST.morale;
+  const tired = 1 + ST.fatigue.absentMult * fatigueOf(e);
+  const unhappy = 1 + M.attendanceMult * Math.max(0, (M.base - moraleOf(e)) / M.base);
+  const k = tired * unhappy;
+  return { absent: clamp01(A.absentMax * Math.pow(1 - d, A.exponent) * k), late: clamp01(A.lateMax * Math.pow(1 - d, A.exponent) * k) };
 }
 
 /** サボり・私的な休憩の確率（1回の抽選） */
@@ -705,10 +767,55 @@ export function closeStaffDay(s: GameState): void {
   for (const e of s.employees) {
     const a = e.att;
     const worked = a && a.day === s.day ? !a.absent && (a.workedSec > 0 || a.prepWorked || (a.status === 'closed' && !isPartTime(e))) : e.presentToday;
+    const share = a && a.day === s.day ? clamp01((a.workedSec + (a.prepWorked ? BALANCE.openDuration * 0.1 : 0)) / BALANCE.openDuration) : worked ? 1 : 0;
+    endOfDayWellbeing(s, e, worked, a?.status === 'closed' ? 1 : share);
     if (!worked) continue;
     ensureRecord(e).daysWorked += 1;
     e.profile.experience = Math.min(1, e.profile.experience + ST.experiencePerDay);
   }
+}
+
+/**
+ * 1日の終わりの疲れと満足度（細かいシミュレーションの精算と、店長の営業の両方から呼ぶ。同じ規則）。
+ * worked: その日に働いたか、share: 働いた割合（0〜1）
+ */
+export function endOfDayWellbeing(s: GameState, e: Employee, worked: boolean, share: number): void {
+  const F = ST.fatigue;
+  const M = ST.morale;
+  const f = fatigueOf(e);
+  e.fatigue = clamp01(worked ? f * F.keepWorking + F.gainPerDay * clamp01(share) : f * F.keepResting);
+  let m = moraleOf(e);
+  m += (M.base - m) * M.approach;
+  if (worked && !isWishDay(e, weekdayOf(s.day))) {
+    m -= M.offWishPenalty;
+    logStaff(s, e, 'offWish', '希望していない曜日に働いた');
+  }
+  if (worked) m -= M.fatiguePenalty * e.fatigue;
+  e.morale = clamp01(m);
+}
+
+/**
+ * 不満がたまった人が辞める（毎朝、出勤の確認の前に1回だけ引く）。辞めた人の名前を返す。
+ * 解雇ではないので解雇手当はない。辞めた人のその日の給与はない
+ */
+export function checkQuits(s: GameState, ctx: SimCtx | null): string[] {
+  const M = ST.morale;
+  const out: string[] = [];
+  if (s.tutorial) return out;
+  s.employees = s.employees.filter((e) => {
+    const m = moraleOf(e);
+    if (m >= M.quitBelow) return true;
+    if (evRand(s) >= (M.quitBelow - m) * M.quitPerDay) return true;
+    out.push(e.profile.name);
+    if (ctx) notify(s, ctx, `quit:${e.id}`, 'danger', `${e.profile.name}さんが辞めました（不満がたまっていました。希望していない曜日の勤務や疲れが続くと辞めやすくなります）`);
+    return false;
+  });
+  // 辞めた人が店長だった店は、店長がいなくなる
+  if (out.length > 0) {
+    const ids = new Set(s.employees.map((e) => e.id));
+    for (const st of s.company?.stores ?? []) if (st.managerId && st.snapshot === null && !ids.has(st.managerId)) st.managerId = null;
+  }
+  return out;
 }
 
 /** 給与の合計（閉店後の精算） */
@@ -749,6 +856,9 @@ export function promote(s: GameState, ctx: SimCtx, employeeId: string): { ok: bo
   if (p) return { ok: false, reason: p };
   e.profile.wage = fullTimeWageFor(e);
   e.profile.employment = 'full';
+  // 社員は毎日・仕込みから閉店まで（休みの曜日はあとで決める）
+  delete e.shifts;
+  delete e.dateShifts;
   logStaff(s, e, 'promoted', `社員になった（日給 ¥${e.profile.wage.toLocaleString('ja-JP')}）`);
   // 今日の予定は社員の勤務（毎日・仕込みから閉店まで）に変える。仕込み中なら今から出勤
   if (s.phase === 'prep') reapplyToday(s, e, ctx);

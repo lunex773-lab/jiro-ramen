@@ -20,7 +20,7 @@ import { currentTutorialStep, inBasicsTutorial, tutorialAction, updateTutorial, 
 import { accidentHalted, EVENT_KINDS } from './events';
 import { accidentFainted, resetAccident } from './accident';
 import { forceEvent } from './visitors';
-import { promote, setDateShift, setShift, type DateShiftMode } from './staff';
+import { promote, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
 import { answerRequest } from './media';
 import { assignManager, enterStore, openStore, setStorePolicy, transferEmployee } from './stores';
 
@@ -47,6 +47,8 @@ export type Action =
   | { type: 'setPriority'; employeeId: Id; kind: string; value: number }
   /** アルバイトの曜日ごとのシフト（weekday: 月=0 … 日=6、shift: null でその曜日は休み） */
   | { type: 'setShift'; employeeId: Id; weekday: number; shift: ShiftDay | null }
+  /** 社員の休みの曜日（月=0 … 日=6。空なら毎日出勤） */
+  | { type: 'setRestDays'; employeeId: Id; days: number[] }
   /** 自動発注のしかた（manual: 目安の量まで / sales: 売れ行きに合わせる） */
   | { type: 'setAutoOrderMode'; mode: 'manual' | 'sales' }
   /** カレンダーで日にちを選んでシフトを決める（once: その日だけ / weekly: 毎週くりかえす / reset: くりかえしに戻す） */
@@ -266,6 +268,8 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return setPriority(s, a.employeeId, a.kind, a.value) ? { ok: true } : fail('変更できません');
     case 'setShift':
       return setShift(s, ctx, a.employeeId, a.weekday, a.shift);
+    case 'setRestDays':
+      return setRestDays(s, ctx, a.employeeId, a.days);
     case 'setAutoOrderMode':
       if (a.mode !== 'manual' && a.mode !== 'sales') return fail('不正な値');
       s.autoOrderMode = a.mode;
