@@ -60,6 +60,13 @@ export const BALANCE = {
     reputationExponent: 1.6,
     /** 価格基準（この平均価格で価格倍率1.0） */
     referencePrice: 1_000,
+    /** 価格の効き方（来客の倍率 = (基準 ÷ 平均価格)^指数）。基準より安いとき／高いとき */
+    priceExponentLow: 1.3,
+    priceExponentHigh: 1.3,
+    /** 価格による来客の倍率の下限 */
+    priceFloor: 0.35,
+    /** 満足度のうち「値段に見合うか」の重み */
+    valueWeight: 0.09,
     maxCustomers: 60,
     walkSpeed: 1.25,
     ticketTime: 2,

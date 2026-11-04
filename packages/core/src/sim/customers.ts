@@ -209,7 +209,8 @@ export function arrivalRate(s: GameState): number {
   const c = BALANCE.customers;
   const repF = Math.pow(Math.max(0.3, s.reputation) / 3, c.reputationExponent);
   const x = s.openT / BALANCE.openDuration;
-  const priceF = clamp(Math.pow(c.referencePrice / averagePrice(s), 1.3), 0.35, 1.7);
+  const avgP = averagePrice(s);
+  const priceF = clamp(Math.pow(c.referencePrice / avgP, avgP > c.referencePrice ? c.priceExponentHigh : c.priceExponentLow), c.priceFloor, 1.7);
   const demand = 1 + effectSum(s, 'demand');
   // 常連客は安定した需要を生む
   const regularF = 1 + Math.min(0.6, s.regulars.reduce((a, r) => a + r.loyalty, 0) * 0.03);
@@ -933,11 +934,16 @@ const PART_WEIGHTS: Record<keyof SatisfactionParts, number> = {
   taste: 0.3, speed: 0.17, service: 0.1, cleanliness: 0.12, accuracy: 0.12, stock: 0.05, value: 0.09, comfort: 0.05,
 };
 
+/** 満足度の重み（「値段に見合うか」は BALANCE で調整できる） */
+function partWeight(k: keyof SatisfactionParts): number {
+  return k === 'value' ? BALANCE.customers.valueWeight : PART_WEIGHTS[k];
+}
+
 export function overallSatisfaction(c: Customer): number {
   let v = 0;
   for (const k of Object.keys(PART_WEIGHTS) as (keyof SatisfactionParts)[]) {
     // 個性で重みを変える
-    let w = PART_WEIGHTS[k];
+    let w = partWeight(k);
     if (k === 'taste') w *= 0.7 + 0.6 * c.traits.tasteCritic;
     if (k === 'service') w *= 0.6 + 0.8 * c.traits.serviceSensitivity;
     if (k === 'cleanliness') w *= 0.6 + 0.8 * c.traits.cleanlinessDemand;
@@ -947,7 +953,7 @@ export function overallSatisfaction(c: Customer): number {
   }
   let wsum = 0;
   for (const k of Object.keys(PART_WEIGHTS) as (keyof SatisfactionParts)[]) {
-    let w = PART_WEIGHTS[k];
+    let w = partWeight(k);
     if (k === 'taste') w *= 0.7 + 0.6 * c.traits.tasteCritic;
     if (k === 'service') w *= 0.6 + 0.8 * c.traits.serviceSensitivity;
     if (k === 'cleanliness') w *= 0.6 + 0.8 * c.traits.cleanlinessDemand;

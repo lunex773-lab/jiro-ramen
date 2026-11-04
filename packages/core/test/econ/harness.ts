@@ -274,6 +274,39 @@ export const CASES: CasePolicy[] = [
       buySeats(s, ctx);
     },
   },
+  // ── 価格の戦略（調理担当がいて杯数を出せる店） ──
+  {
+    id: 'c15_low_price_cook',
+    name: '15. 低価格（0.8倍）＋調理担当＋売れ行きに合わせる（高回転）',
+    setup: salesMode,
+    morning: (s, ctx) => {
+      setAllPrices(s, ctx, 0.8);
+      if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
+    },
+  },
+  {
+    id: 'c16_high_price_cook',
+    name: '16. 高価格（1.3倍）＋調理担当＋売れ行きに合わせる',
+    setup: salesMode,
+    morning: (s, ctx) => {
+      setAllPrices(s, ctx, 1.3);
+      if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
+    },
+  },
+  {
+    id: 'c17_growth_full',
+    name: '17. 14＋拡張のあと業務用冷蔵庫を買う（成長に必要な設備もそろえる）',
+    setup: salesMode,
+    morning: (s, ctx) => {
+      if (s.employees.length < 2) hireCheapest(s, ctx, 'cook');
+      else if (s.career.stage >= 1 && s.employees.length < 3) hireCheapest(s, ctx, 'server');
+    },
+    evening: (s, ctx) => {
+      tryExpand(s, ctx, false);
+      buySeats(s, ctx);
+      if (s.career.stage >= 1) buyPlaced(s, ctx, 'fridge_l', 60_000);
+    },
+  },
 ];
 
 // ───────────────── 集計 ─────────────────

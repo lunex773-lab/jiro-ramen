@@ -26,13 +26,15 @@ const ONLY = process.env.ECON_CASES?.split(',');
 describe.skipIf(!ON)('経済バランスの測定（設計書 v2.1 §4.3）', () => {
   it('10ケースを同じ種で回す', { timeout: 3_600_000 }, () => {
     const out: unknown[] = [];
+    const seeds = (process.env.ECON_SEEDS ?? '777').split(',').map(Number);
     for (const c of CASES) {
       if (ONLY && !ONLY.includes(c.id)) continue;
-      const t0 = Date.now();
-      const { rows } = runCase(c, DAYS);
-      const sum = summarize(c, rows);
-      out.push({ ...sum, rows, ms: Date.now() - t0 });
-      console.log(`[econ] ${c.id} days=${rows.length} ${Math.round((Date.now() - t0) / 1000)}s d8_30.op=${sum.avg.d8_30?.op} cash90=${sum.at.day90?.cash}`);
+      for (const seed of seeds) {
+        const t0 = Date.now();
+        const { rows } = runCase(c, DAYS, seed);
+        const sum = summarize(c, rows);
+        out.push({ ...sum, seed, rows, ms: Date.now() - t0 });
+      }
     }
     if (process.env.ECON_OUT) writeFileSync(process.env.ECON_OUT, JSON.stringify({ days: DAYS, tune: process.env.ECON_TUNE ?? null, expansion: EXPANSION_COSTS, equipment: EQUIPMENT_PRICES, cases: out }, null, 1));
     expect(out.length).toBeGreaterThan(0);
