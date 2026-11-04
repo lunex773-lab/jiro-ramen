@@ -35,6 +35,8 @@ export const BALANCE = {
     stockoutBoost: 1.25,
     /** 目安の量の下限（手動の目安に対する割合。使用量が少ない日でも最低限は持つ） */
     floorOfManual: 0.5,
+    /** 目安の量の下限（仕込みのレシピ1回に使う量の何回分か） */
+    batchFloor: 2,
   },
 
   /**

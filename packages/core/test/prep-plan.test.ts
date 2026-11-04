@@ -108,3 +108,15 @@ describe('スープ切れと休業日（拡張後の測定で発見）', () => {
     expect(autoOrderTarget(s, 'noodle')).toBe(Math.max(want, Math.round(s.autoOrder.noodle! * A.floorOfManual)));
   });
 });
+
+describe('「売れ行きに合わせる」の下限（仕込み1回分）', () => {
+  it('仕込みのレシピ1回に使う量の2回分は必ず持つ（背脂が1回分に届かず炊けない悪循環を防ぐ）', () => {
+    const { s, ctx } = newGame(86);
+    applyAction(s, 'p1', { type: 'setAutoOrderMode', mode: 'sales' }, ctx);
+    s.today.served = 40;
+    // 背脂を炊けず、スープにだけ少し使った日
+    s.today.usedItems = { backfat_raw: 800 };
+    const batch = Math.max(...Object.values(PREP_RECIPES).flatMap((r) => r.inputs.filter((i) => i.itemId === 'backfat_raw').map((i) => i.qty)));
+    expect(autoOrderTarget(s, 'backfat_raw')).toBeGreaterThanOrEqual(batch * BALANCE.autoOrderSales.batchFloor);
+  });
+});

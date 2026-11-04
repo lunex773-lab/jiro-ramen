@@ -4,6 +4,7 @@
 import { BALANCE } from '../data/balance';
 import { EQUIPMENT } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
+import { PREP_RECIPES } from '../data/prep';
 import type { GameState, Lot } from '../types';
 import { clamp01, newId } from '../util';
 import { cash, recordPL } from './economy';
@@ -150,8 +151,14 @@ export function autoOrderTarget(s: GameState, itemId: string): number {
   let short = false;
   for (const [k, n] of Object.entries(s.today.stockoutItems ?? {})) if (n >= 2 && STOCKOUT_SOURCE[k]?.raw.includes(itemId)) short = true;
   const want = avg * A.safety * (short ? A.stockoutBoost : 1);
-  return Math.round(Math.max(manual * A.floorOfManual, want));
+  // 仕込み1回に使う量の batchFloor 回分は必ず持つ（以前は背脂が1回分の1,000gに届かず炊けないまま、使用量も増えない悪循環になった）
+  const batch = (PREP_BATCH[itemId] ?? 0) * A.batchFloor;
+  return Math.round(Math.max(manual * A.floorOfManual, batch, want));
 }
+
+/** 仕込みのレシピ1回に使う、その食材の量（レシピの中の最大） */
+const PREP_BATCH: Record<string, number> = {};
+for (const r of Object.values(PREP_RECIPES)) for (const i of r.inputs) PREP_BATCH[i.itemId] = Math.max(PREP_BATCH[i.itemId] ?? 0, i.qty);
 
 /** 品切れのもとの食材（仕込みで作る物 → 仕入れる食材）。閉店後の原因の説明と「売れ行きに合わせる」自動発注で使う */
 export const STOCKOUT_SOURCE: Record<string, { raw: string[]; label: string }> = {
@@ -274,7 +281,7 @@ const ESSENTIAL_ITEMS = ['noodle', 'bones'];
 
 /**
  * 自動発注（閉店後の翌朝便）。目標在庫に足りない分をパック単位で発注する。
- * 冷蔵の食材が冷蔵庫に入りきらないときは、足りない分を比例して減らし（麺・豚骨は最低1パック）、余った容量は麺・豚骨、次に残りが少ない食材から入れる
+ * 冷蔵の食材が冷蔵庫に入りきらないときは、足りない分を比例して減らし（麺・豚骨は最低1パック）、余った容量は残りが少ない食材から入れる
  * （以前は表の順に発注していたため、麺・豚・ガラで冷蔵庫が埋まり、もやしが入らずヤサイが作れなくなって店が止まった。
  * 統合進化設計書 v2.1 の経済の測定で発見）
  */
@@ -315,9 +322,8 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
       n.packs = p;
       left -= p * n.kgPerPack;
     }
-    // 余った容量は、麺・豚骨、次に残りが少ない食材から1パックずつ
-    const ess = (n: Need) => (ESSENTIAL_ITEMS.includes(n.itemId) ? 0 : 1);
-    const order = [...fridgeNeeds].sort((a, b) => ess(a) - ess(b) || a.coverage - b.coverage || a.kgPerPack - b.kgPerPack);
+    // 余った容量は、残りが少ない食材から1パックずつ（麺・豚骨を先にすると、少量の背脂・ニンニクが毎晩入らなくなった）
+    const order = [...fridgeNeeds].sort((a, b) => a.coverage - b.coverage || a.kgPerPack - b.kgPerPack);
     let added = true;
     while (added) {
       added = false;
