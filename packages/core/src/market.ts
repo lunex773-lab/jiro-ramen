@@ -1377,6 +1377,8 @@ export interface MarketView {
   /** 同期の状態（進行中・直近） */
   sync: SyncRun | null;
   lastSync: SyncRun | null;
+  /** 0時の同期の記録（新しい順・最大30件。仕様書 8.4 の競争履歴） */
+  syncLog: SyncRun[];
   pendingPeriods: DateKey[];
 }
 
@@ -1431,6 +1433,7 @@ export function marketView(m: MarketState, ownerId: string | null, now?: number)
     ended: now !== undefined ? isEnded(m, now) : undefined,
     sync: m.sync && m.sync.status !== 'done' ? m.sync : null,
     lastSync: m.syncLog[m.syncLog.length - 1] ?? null,
+    syncLog: m.syncLog.slice(-30).reverse(),
     pendingPeriods: [...m.pendingPeriods],
   };
 }

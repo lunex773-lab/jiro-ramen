@@ -987,6 +987,7 @@ input, select { font: inherit; }
 [data-market-ended] { border: 1px solid var(--warn); border-radius: 8px; padding: 6px 8px; }
 .market-mine-col { display: contents; }
 .market-log .trow .tsub { flex: 0 0 64px; }
+.market-history .trow .tsub:first-child { flex: 0 0 64px; }
 .staff-list .trow { padding: 4px 0; }
 .staff-list select, .store-card select { max-width: 60%; }
 

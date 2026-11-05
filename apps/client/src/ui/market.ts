@@ -277,6 +277,19 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
   return el;
 }
 
+/** 自動営業の実行状況（仕様書 8.1）: 同期の最中ならその段階、なければ前回の結果 */
+function autoStatusText(v: MarketScreenView): string {
+  const run = v.sync;
+  if (run) {
+    if (run.status === 'closing') return `営業中の日が届くのを待っています（${new Date(run.closeDeadline).toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit' })}まで）`;
+    if (run.status === 'syncing') return `自動営業でそろえています（${run.targetDate ?? 0}日目まで・${run.autoDays}社日済み）`;
+    return '集計を書いています';
+  }
+  const last = v.lastSync;
+  if (!last) return 'まだありません';
+  return `前回（${Number(last.periodId.slice(5, 7))}/${Number(last.periodId.slice(8, 10))}の分）: ${last.targetDate ?? 0}日目までそろえた・自動営業 ${last.autoDays}社日`;
+}
+
 /** 競争期間の終わり（JST の日付。その日の0時に終わる） */
 function endText(endsAt: number): string {
   return `${new Date(endsAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })} 0時`;
@@ -387,6 +400,7 @@ export class MarketScreen {
       h('div', { class: 'kv' }, h('span', null, '全社が営業済み'), h('b', { 'data-market-day': String(v.commonMarketDate) }, v.commonMarketDate === 0 ? 'まだ0日' : `${v.commonMarketDate}日目まで`)),
       h('div', { class: 'kv' }, h('span', null, 'いちばん進んだ会社'), h('b', { 'data-leader-day': String(v.leaderDay) }, `${v.leaderDay}日目まで`)),
       h('div', { class: 'kv' }, h('span', null, '同期'), h('b', { 'data-sync': v.ended ? 'ended' : v.clock.syncPending ? 'pending' : 'idle' }, syncText)),
+      h('div', { class: 'kv' }, h('span', null, '自動営業'), h('b', { 'data-auto-status': v.sync ? v.sync.status : 'idle' }, autoStatusText(v))),
       v.ended
         ? h(
             'p',
@@ -441,7 +455,7 @@ export class MarketScreen {
     if (!v) return;
     this.renderHead();
     const scroll = this.body.scrollTop;
-    replace(this.body, h('div', { class: 'grid2' }, this.standings(v), this.mine(v), this.decisions(v)));
+    replace(this.body, h('div', { class: 'grid2' }, this.standings(v), this.mine(v), this.decisions(v), this.history(v)));
     this.body.scrollTop = scroll;
   }
 
@@ -471,6 +485,36 @@ export class MarketScreen {
         ),
       ),
       h('p', { class: 'note' }, `同じ地域の店どうしで客を取り合います（安い店・評判の良い店ほど客が来る）。出店先の空き: ${PROPERTY_CANDIDATES.map((p) => `${PROPERTIES[p]!.area} ${v.freeSlots[p] ?? 0}件`).join('・')}`),
+    );
+  }
+
+  /** 競争の記録（仕様書 8.4）: 0時の同期ごとに、どの日付まで全社をそろえ、何日分を自動営業したか */
+  private history(v: MarketScreenView): HTMLElement {
+    const log = v.syncLog ?? [];
+    return h(
+      'section',
+      { class: 'card wide market-history', 'data-history': '' },
+      h('h4', null, '競争の記録（0時の同期）'),
+      h(
+        'p',
+        { class: 'note' },
+        `競争の開始 ${new Date(v.settings.startsAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })}・${v.settings.endsAt ? `終わり ${endText(v.settings.endsAt)}` : '無期限'}${v.ended ? '（終わりました。ランキングの「累計」が大会の結果です）' : ''}`,
+      ),
+      log.length === 0
+        ? h('p', { class: 'note' }, 'まだ同期はありません（誰かが営業した日の次の0時に同期します）')
+        : h(
+            'div',
+            { class: 'table' },
+            log.map((r) =>
+              h(
+                'div',
+                { class: 'trow', 'data-sync-run': r.periodId },
+                h('div', { class: 'tsub' }, `${Number(r.periodId.slice(5, 7))}/${Number(r.periodId.slice(8, 10))}の分`),
+                h('div', { class: 'tname' }, `${r.targetDate ?? 0}日目まで全社をそろえた`),
+                h('div', { class: 'tsub' }, `自動営業 ${r.autoDays}社日${r.expiredDays > 0 ? `・届かず無効 ${r.expiredDays}日` : ''}`),
+              ),
+            ),
+          ),
     );
   }
 
@@ -508,6 +552,7 @@ export class MarketScreen {
       'section',
       { class: 'card market-rules' },
       h('h4', null, 'この市場の決まり'),
+      st.description ? h('p', { class: 'note', 'data-description': '' }, st.description) : null,
       row('参加企業数', `${st.maxCompanies}社まで${st.aiFill ? '（空いた枠は AI 企業）' : '（人だけ）'}`),
       row('競争期間', st.endsAt ? `${PERIOD_LABEL(st.periodDays)}（${new Date(st.endsAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })} 0時まで）` : PERIOD_LABEL(st.periodDays)),
       row('参加できる企業', st.entry === 'fresh' ? '新規の企業だけ' : '育てた企業も参加できる'),

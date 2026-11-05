@@ -183,7 +183,7 @@ export class RankingScreen {
       'section',
       { class: 'card wide ranking-rewards' },
       h('h4', null, '称号（報酬）'),
-      rewards.length === 0 ? h('p', { class: 'note' }, 'まだありません。週・月・年の終わりに、総合評価の上位3社に称号が付きます。') : h('ul', null, rewards.map((x) => h('li', { 'data-reward': x.key }, x.title))),
+      rewards.length === 0 ? h('p', { class: 'note' }, 'まだありません。週・月・年の終わりと、コミュニティの競争期間の終わり（優勝・準優勝・3位）に、総合評価の上位3社に称号が付きます。') : h('ul', null, rewards.map((x) => h('li', { 'data-reward': x.key }, x.title))),
     );
     replace(this.body, this.tabs(), head, table, titles);
   }

@@ -169,6 +169,7 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   await expect(screen.locator('.market-head')).toContainText('テストの市場');
   await expect(screen.locator('.market-head .room-code')).toHaveText('MKT234');
   await expect(screen.locator('[data-market-day]')).toHaveText('まだ0日');
+  await expect(screen.locator('[data-auto-status]')).toHaveText('まだありません');
   await expect(screen.locator('[data-sync]')).toContainText('次の0時まで');
   const rows = screen.locator('.market-standings .trow[data-company]');
   await expect(rows).toHaveCount(4);
@@ -243,6 +244,10 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   // 0時に営業中だった2日目は30分を過ぎて無効 → サーバーの1日目の終わりの状態から2日目をやり直す
   await expect(screen.locator('[data-market-play]')).toContainText('2日目');
   await expect(screen.locator('.market-log')).toContainText('日目');
+  // 自動営業の実行状況と競争の記録（仕様書 8.1・8.4）
+  await expect(screen.locator('[data-auto-status]')).toContainText('1日目までそろえた・自動営業 3社日');
+  await expect(screen.locator('[data-history] [data-sync-run]')).toHaveCount(1);
+  await expect(screen.locator('[data-history] [data-sync-run]')).toContainText('1日目まで全社をそろえた');
 
   // ランキング（コミュニティ・全体、期間、種別、自社の順位、称号）
   await screen.locator('[data-open-ranking]').click();
