@@ -7,7 +7,7 @@ import { connectRoom, createSession, joinSession, leaveSession } from './api/ses
 import { rankingsApi, rewardsApi } from './api/ranking';
 import { grantEndedCommunities, grantGlobalRewards } from './rank-store';
 import { jstDateKey } from '@jiro/core';
-import { actMarketApi, commitDayApi, createMarketApi, joinMarketApi, listMarketsApi, publicCommunitiesApi, retireCompanyApi, startDayApi, viewMarketApi } from './api/market';
+import { actMarketApi, commitDayApi, createMarketApi, deleteMarketApi, joinMarketApi, listMarketsApi, publicCommunitiesApi, retireCompanyApi, startDayApi, viewMarketApi } from './api/market';
 import { requirePlayer } from './auth';
 import type { Env } from './env';
 import { allowedOrigins, corsHeaders, errorResponse, HttpError, withCors } from './http';
@@ -114,6 +114,10 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     return joinMarketApi(req, env, ctx, player);
   }
   if (marketView && m === 'GET') return viewMarketApi(env, player, decodeURIComponent(marketView[1]!));
+  if (marketView && m === 'DELETE') {
+    limit(HTTP_LIMITS.session, player.id);
+    return deleteMarketApi(env, ctx, player, decodeURIComponent(marketView[1]!));
+  }
   if (marketAct && m === 'POST') {
     limit(HTTP_LIMITS.market, player.id);
     return actMarketApi(req, env, player, decodeURIComponent(marketAct[1]!));

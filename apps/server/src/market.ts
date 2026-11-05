@@ -95,6 +95,8 @@ export class MarketRoom extends DurableObject<Env> {
   meta: MarketMeta | null = null;
   market: MarketState | null = null;
   private corrupt = false;
+  /** 市場を消した（この Durable Object はもう使わない） */
+  private destroyed = false;
   private cids = new Map<string, RidCache>();
   /** 状態が変わった企業（保存するもの。共通部分は毎回保存する） */
   private dirtyCompanies = new Set<string>();
@@ -220,7 +222,7 @@ export class MarketRoom extends DurableObject<Env> {
 
   /** 変わった部分を1つのトランザクションで保存する */
   private save(): void {
-    if (!this.market || !this.meta) return;
+    if (!this.market || !this.meta || this.destroyed) return;
     const m = this.market;
     const shell: MarketShell = { ...m, companies: m.companies.map(({ state: _s, ...rest }) => rest) };
     const shellText = JSON.stringify(shell);
@@ -250,7 +252,7 @@ export class MarketRoom extends DurableObject<Env> {
    * 何度呼んでも同じ結果。D1 に書けなければ ranking のまま残し、少しあとにやり直す
    */
   async advanceSync(now: number): Promise<void> {
-    if (!this.market || this.corrupt || this.syncBusy) return;
+    if (!this.market || this.corrupt || this.syncBusy || this.destroyed) return;
     this.syncBusy = true;
     try {
       const m = this.market;
@@ -355,8 +357,21 @@ export class MarketRoom extends DurableObject<Env> {
     if (m.settings.endsAt !== null && periodId >= jstDateKey(m.settings.endsAt - 1)) await grantFinalRewards(db, m.id, m.name, now);
   }
 
+  /** 市場のデータをすべて消す（アラームも止める）。0時の集計を書いている最中は断る（消したあとに集計が書き戻されないように） */
+  private async destroy(): Promise<Response> {
+    if (this.syncBusy) return json({ error: 'market_syncing', message: '0時の計算中です。少しあとでもう一度お試しください' }, 409);
+    this.destroyed = true;
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    this.market = null;
+    this.meta = null;
+    this.cids.clear();
+    this.dirtyCompanies.clear();
+    return json({ ok: true });
+  }
+
   override async alarm(): Promise<void> {
-    if (!this.market || this.corrupt) return;
+    if (!this.market || this.corrupt || this.destroyed) return;
     // 要求の処理で同期を進めている最中なら、少しあとにかけ直す（アラームは一度動くと消えるので、そのまま返すと続きが止まる）
     if (this.syncBusy) {
       await this.ctx.storage.setAlarm(Date.now() + ALARM_BUSY_RETRY_MS);
@@ -370,6 +385,9 @@ export class MarketRoom extends DurableObject<Env> {
   override async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === '/internal/init' && req.method === 'POST') return this.init(await req.json());
+    // 市場を消す（作った人だけ。Worker が確かめてから呼ぶ）。何度呼んでもよい
+    if (url.pathname === '/internal/destroy' && req.method === 'POST') return this.destroy();
+    if (this.destroyed) return json({ error: 'market_not_found', message: '市場が見つかりません' }, 404);
     if (this.corrupt) return json({ error: 'market_corrupt', message: '市場のデータが壊れているため開けません' }, 503);
     if (!this.meta || !this.market) return json({ error: 'market_not_found', message: '市場が見つかりません' }, 404);
     const playerId = req.headers.get(MARKET_IDENTITY.playerId);

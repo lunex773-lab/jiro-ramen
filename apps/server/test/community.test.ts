@@ -220,3 +220,56 @@ describe('大会の称号（判断 17）', () => {
     expect(r.results).toEqual([{ rank: 1, title: '🏆 ひとり店の市場 優勝' }]);
   });
 });
+
+describe('市場を消す（作った人だけ。ほかの人の会社があっても消せる）', () => {
+  it('作った人だけが消せ、Durable Object と D1 のデータが消える。称号は残る。消したあとは開けない', async () => {
+    const a = await newPlayer('消す人');
+    const b = await newPlayer('入った人');
+    const m = await create(a, '消える店', { visibility: 'public' });
+    expect((await callJson('/api/v1/market/join', { token: b.token, body: { marketId: m.marketId, companyName: '巻き込まれ店' } })).status).toBe(200);
+    await playDay(a, m.marketId);
+    await env.DB.prepare("INSERT INTO rewards (reward_key, player_id, market_id, company_id, scope_key, board, metric, rank, title, created_at) VALUES (?, ?, ?, 'c1', 'T', 'community', 'final', 1, 'テストの称号', 0)")
+      .bind(`test:${m.marketId}`, a.playerId, m.marketId)
+      .run();
+    // 一覧に、ほかのプレイヤーの会社の数が出る
+    const list = await callJson<{ markets: { marketId: string; isOwner: boolean; otherCompanies: number }[] }>('/api/v1/markets', { token: a.token });
+    expect(list.body.markets.find((x) => x.marketId === m.marketId)).toMatchObject({ isOwner: true, otherCompanies: 1 });
+    // 作った人でなければ消せない
+    const ng = await callJson(`/api/v1/market/${m.marketId}`, { token: b.token, method: 'DELETE' });
+    expect(ng.status).toBe(403);
+    expect(code(ng)).toBe('not_owner');
+    // 0時の計算中は断る
+    await inMarket(m.marketId, (x) => {
+      (x as unknown as { syncBusy: boolean }).syncBusy = true;
+    });
+    const busy = await callJson(`/api/v1/market/${m.marketId}`, { token: a.token, method: 'DELETE' });
+    expect(busy.status).toBe(409);
+    expect(code(busy)).toBe('market_syncing');
+    await inMarket(m.marketId, (x) => {
+      (x as unknown as { syncBusy: boolean }).syncBusy = false;
+    });
+    // 消す
+    const ok = await callJson(`/api/v1/market/${m.marketId}`, { token: a.token, method: 'DELETE' });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect((await view(a, m.marketId)).status).toBe(404);
+    expect((await view(b, m.marketId)).status).toBe(404);
+    for (const t of ['markets', 'communities', 'market_members', 'market_companies', 'company_periods', 'rank_agg']) {
+      const col = t === 'markets' ? 'id' : 'market_id';
+      const n = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ${col} = ?`).bind(m.marketId).first<{ n: number }>();
+      expect(n!.n, t).toBe(0);
+    }
+    const kept = await env.DB.prepare('SELECT COUNT(*) AS n FROM rewards WHERE market_id = ?').bind(m.marketId).first<{ n: number }>();
+    expect(kept!.n).toBe(1);
+    const left = await inMarket(m.marketId, async (x) => {
+      const r = x as unknown as { ctx: DurableObjectState };
+      return { alarm: await r.ctx.storage.getAlarm(), market: (x as unknown as { market: unknown }).market };
+    });
+    expect(left).toEqual({ alarm: null, market: null });
+    expect((await callJson<{ markets: { marketId: string }[] }>('/api/v1/markets', { token: b.token })).body.markets.some((x) => x.marketId === m.marketId)).toBe(false);
+    // もう一度消そうとしても見つからない
+    expect((await callJson(`/api/v1/market/${m.marketId}`, { token: a.token, method: 'DELETE' })).status).toBe(404);
+    // 公開の一覧にも出ない
+    const pub = await callJson<{ communities: { marketId: string }[] }>('/api/v1/communities', { token: b.token });
+    expect(pub.body.communities.some((x) => x.marketId === m.marketId)).toBe(false);
+  });
+});

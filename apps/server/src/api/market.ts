@@ -292,18 +292,45 @@ export async function retireCompanyApi(env: Env, ctx: ExecutionContext, player: 
   return json({ ok: true });
 }
 
+/**
+ * DELETE /api/v1/market/:id → 市場を消す（作った人だけ。ほかの人の会社があっても消せる。オーナーの判断）。
+ * 先に Durable Object のデータを消し（0時のアラームも止まる）、そのあと D1 の行を消す。称号（報酬）は受け取った人のものなので残す
+ */
+export async function deleteMarketApi(env: Env, ctx: ExecutionContext, player: AuthedPlayer, marketId: string): Promise<Response> {
+  if (!isUuid(marketId)) throw new HttpError(404, 'market_not_found', '市場が見つかりません');
+  const m = await env.DB.prepare('SELECT owner_id, name FROM markets WHERE id = ?').bind(marketId).first<{ owner_id: string; name: string }>();
+  if (!m) throw new HttpError(404, 'market_not_found', '市場が見つかりません');
+  if (m.owner_id !== player.id) throw new HttpError(403, 'not_owner', '市場を作った人だけが消せます');
+  const others = await env.DB.prepare('SELECT COUNT(*) AS n FROM market_companies WHERE market_id = ? AND player_id != ?').bind(marketId, player.id).first<{ n: number }>();
+  await readBody(await stub(env, marketId).fetch('https://market/internal/destroy', { method: 'POST', headers: identity(player) }));
+  const del = (table: string) => env.DB.prepare(`DELETE FROM ${table} WHERE market_id = ?`).bind(marketId);
+  await env.DB.batch([
+    del('rank_agg'),
+    del('company_period_ext'),
+    del('company_periods'),
+    del('sync_runs'),
+    del('market_companies'),
+    del('market_members'),
+    del('communities'),
+    env.DB.prepare('DELETE FROM markets WHERE id = ?').bind(marketId),
+  ]);
+  ctx.waitUntil(audit(env.DB, { kind: 'market_delete', playerId: player.id, detail: { marketId, name: m.name, otherCompanies: others?.n ?? 0 } }));
+  return json({ ok: true });
+}
+
 /** GET /api/v1/markets → 参加している市場の一覧（自分の会社の状態・競争期間が終わったか） */
 export async function listMarketsApi(env: Env, player: AuthedPlayer): Promise<Response> {
   const rows = await env.DB.prepare(
     `SELECT m.id, m.code, m.name, m.created_at, m.owner_id, c.ends_at, c.entry,
        (SELECT mc.company_id FROM market_companies mc WHERE mc.market_id = m.id AND mc.player_id = ? ORDER BY mc.created_at DESC LIMIT 1) AS company_id,
        (SELECT mc.status FROM market_companies mc WHERE mc.market_id = m.id AND mc.player_id = ? ORDER BY mc.created_at DESC LIMIT 1) AS company_status,
-       (SELECT mc.name FROM market_companies mc WHERE mc.market_id = m.id AND mc.player_id = ? ORDER BY mc.created_at DESC LIMIT 1) AS company_name
+       (SELECT mc.name FROM market_companies mc WHERE mc.market_id = m.id AND mc.player_id = ? ORDER BY mc.created_at DESC LIMIT 1) AS company_name,
+       (SELECT COUNT(*) FROM market_companies mo WHERE mo.market_id = m.id AND mo.player_id != ?) AS others
      FROM market_members mm JOIN markets m ON m.id = mm.market_id LEFT JOIN communities c ON c.market_id = m.id
      WHERE mm.player_id = ? AND m.status = 'open' ORDER BY mm.joined_at DESC LIMIT 20`,
   )
-    .bind(player.id, player.id, player.id, player.id)
-    .all<{ id: string; code: string; name: string; created_at: number; owner_id: string; ends_at: number | null; entry: string | null; company_id: string | null; company_status: string | null; company_name: string | null }>();
+    .bind(player.id, player.id, player.id, player.id, player.id)
+    .all<{ id: string; code: string; name: string; created_at: number; owner_id: string; ends_at: number | null; entry: string | null; company_id: string | null; company_status: string | null; company_name: string | null; others: number }>();
   const now = Date.now();
   return json({
     markets: rows.results.map((r) => ({
@@ -318,6 +345,8 @@ export async function listMarketsApi(env: Env, player: AuthedPlayer): Promise<Re
       companyId: r.company_id,
       companyName: r.company_name,
       companyStatus: r.company_status,
+      /** ほかのプレイヤーの会社の数（市場を消すときの確認に出す） */
+      otherCompanies: r.others,
     })),
   });
 }
