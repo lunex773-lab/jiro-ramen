@@ -184,7 +184,8 @@ test('出店マップ: 新しく始めるときに1店目の場所を選べる�
   await expect(map.locator('[data-map-crumbs]')).not.toContainText('新宿区');
   await map.locator('[data-map-search]').fill('新宿');
   await map.locator('[data-map-muni="13104"]').click();
-  await expect(map).toContainText('来客 +');
+  await expect(map.locator('.map-detail .kv', { hasText: '来客' })).toContainText('+');
+  await expect(map.locator('.map-detail .kv', { hasText: '家賃' })).toContainText('+');
   await map.locator('[data-map-confirm]').click();
   await expect(map).toHaveCount(0);
   await expect(page.getByText('ラーメンができるまで')).toBeVisible();

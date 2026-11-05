@@ -854,6 +854,8 @@ export class App {
     this.lastPhase = s.phase;
     if (s.phase === 'closed') {
       this.controls?.releaseAll();
+      // 営業中の知らせ（客が帰った など）は、結果の画面にかぶらないように消す
+      for (const t of Array.from(this.root.querySelectorAll('.toasts'))) t.replaceChildren();
       if (prev !== 'closed' || initial) this.autosave('dayEnd');
       this.showResults();
     } else if (s.phase === 'bankrupt' && this.marketPlay) {

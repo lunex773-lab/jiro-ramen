@@ -321,7 +321,8 @@ export function openStoreMap(root: HTMLElement, o: StoreMapOptions): { el: HTMLE
     if (!l) return h('p', { class: 'note bad' }, 'この市区町村の情報がありません');
     const rows = [
       h('div', { class: 'kv' }, h('span', null, '人口'), h('b', null, people(l.population))),
-      h('div', { class: 'kv' }, h('span', null, '来客・家賃'), h('b', null, `来客 ${pctOf(l.demand)}・家賃 ${pctOf(l.rent)}`)),
+      h('div', { class: 'kv' }, h('span', null, '来客'), h('b', null, pctOf(l.demand))),
+      h('div', { class: 'kv' }, h('span', null, '家賃'), h('b', null, pctOf(l.rent))),
     ];
     if (o.mode === 'city') {
       const ci = o.cityInfo?.(l.code) ?? { lines: [], problem: null };

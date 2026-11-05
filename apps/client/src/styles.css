@@ -39,27 +39,46 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 #app, .app { position: fixed; inset: 0; }
-.app { container: app / size; }
-/* 表示を回しているとき: 表示の左＝画面の上（ノッチ）、右＝画面の下（ホームバー）、上＝画面の右、下＝画面の左 */
-.app.rotated {
-  --sat: env(safe-area-inset-right, 0px);
-  --sar: env(safe-area-inset-bottom, 0px);
-  --sab: env(safe-area-inset-left, 0px);
-  --sal: env(safe-area-inset-top, 0px);
+/* はみ出したものでページが広がると、iOS が表示ごと縮めたり片側に寄せたりするので、表示の外は切る */
+.app { container: app / size; overflow: hidden; }
+/* 縦向きのスマホでは表示ごと時計回りに 90° 回す（game/orientation.ts の lockLandscape が .lock-landscape を付ける）。
+   左上を軸に回すと画面の左の外に出るので、画面の幅だけ右へずらす。回すかどうかと大きさは、JS ではなく CSS
+   （向きのメディアクエリと画面の大きさの単位 dvw/dvh）でブラウザに決めさせる。向きを変えた直後は JS の知らせが遅れたり、
+   JS で読む大きさ（innerWidth など）が古いままだったりする端末があり、それを使うと表示が片側に寄ったりはみ出したりするため。
+   JS の .rotated（タッチの座標の直し方・スクロール）も同じ条件（orientation.ts）。 */
+@media (orientation: portrait) and (pointer: coarse) {
+  .app.lock-landscape {
+    width: var(--rot-w, 100vh);
+    height: var(--rot-h, 100vw);
+    transform-origin: 0 0;
+    transform: translateX(var(--rot-h, 100vw)) rotate(90deg);
+    /* 表示の左＝画面の上（ノッチ）、右＝画面の下（ホームバー）、上＝画面の右、下＝画面の左 */
+    --sat: env(safe-area-inset-right, 0px);
+    --sar: env(safe-area-inset-bottom, 0px);
+    --sab: env(safe-area-inset-left, 0px);
+    --sal: env(safe-area-inset-top, 0px);
+  }
+  @supports (height: 100dvh) {
+    .app.lock-landscape { width: 100dvh; height: 100dvw; transform: translateX(100dvw) rotate(90deg); }
+  }
+  /* Safari で回して表示しているとき（ホーム画面から開いたときは除く）: 表示の右＝画面の下は Safari のバーの場所で、
+     そこを触るとバーが出てタップを取られるので、右側を少し空ける。左＝画面の上（時刻の表示）も少し空ける */
+  .app.lock-landscape:not(.standalone) {
+    --sar: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    --sal: calc(env(safe-area-inset-top, 0px) + 8px);
+  }
 }
-/* Safari で回して表示しているとき（ホーム画面から開いたときは除く）: 表示の右＝画面の下は Safari のバーの場所で、
-   そこを触るとバーが出てタップを取られるので、右側を少し空ける。左＝画面の上（時刻の表示）も少し空ける */
 /* 表示を回しているときのスクロールはブラウザに任せず自分で動かす（ui/rotated-scroll.ts） */
 .app.rotated .screen, .app.rotated .manage-body, .app.rotated .layout-side, .app.rotated .tabs { touch-action: none; }
-.app.rotated:not(.standalone) {
-  --sar: calc(env(safe-area-inset-bottom, 0px) + 18px);
-  --sal: calc(env(safe-area-inset-top, 0px) + 8px);
-}
 .game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .overlay3d { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .ui-layer { position: absolute; inset: 0; pointer-events: none; }
 .ui-layer > * { pointer-events: auto; }
 .ui-layer > .hud { pointer-events: none; }
+/* 経営メニュー・レイアウト編集・画面（結果・遊び方・設定など）を開いている間は、後ろの HUD と 3D の上の文字を消す
+   （半透明の画面の後ろに透けて、文字やボタンが重なって見えないように） */
+.ui-layer:has(> .manage, > .layout-editor, > .screen:not(.behind)) > .hud,
+.app:has(> .ui-layer > .manage, > .ui-layer > .layout-editor, > .ui-layer > .screen:not(.behind)) > .overlay3d { visibility: hidden; }
 
 button { font: inherit; color: inherit; }
 input, select { font: inherit; }
@@ -123,11 +142,15 @@ input, select { font: inherit; }
   border: 1px solid var(--line);
   background: #1d1814;
   color: var(--text);
+  /* 16px より小さいと、iPhone が入力のときに画面を拡大して、閉じた後も表示がずれたままになる */
+  font-size: 16px;
   -webkit-user-select: text;
   user-select: text;
 }
 .input.code { font-size: 22px; letter-spacing: 0.3em; text-transform: uppercase; text-align: center; }
-.select { width: auto; }
+.select { width: auto; max-width: 100%; text-overflow: ellipsis; }
+.card > .select { width: 100%; }
+.card > .input + .btn, .card > .select + .btn { margin-top: 8px; }
 .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
 .row.end { justify-content: flex-end; }
 .row.center { justify-content: center; flex-wrap: wrap; }
@@ -567,7 +590,9 @@ input, select { font: inherit; }
 .help-step p { margin: 2px 0; color: var(--muted); font-size: 14px; }
 
 /* カード・表 */
-.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 12px; }
+/* 中の長い文字（選択欄など）で列が広がって隣にかぶらないように */
+.grid2 > * { min-width: 0; }
 .card {
   background: var(--panel-2);
   border: 1px solid var(--line);
@@ -581,7 +606,9 @@ input, select { font: inherit; }
 .card.warn { border-color: var(--warn); }
 .card h4 { margin: 0 0 8px; color: var(--yellow); }
 .kv { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
-.kv b { text-align: right; }
+/* 名前は縮めない（値が長いときは値のほうを折り返す） */
+.kv > span:first-child { flex-shrink: 0; max-width: 60%; }
+.kv b { text-align: right; min-width: 0; overflow-wrap: anywhere; }
 .kv.good b { color: var(--good); }
 .kv.bad b { color: var(--bad); }
 .kv.warn b { color: var(--warn); }
@@ -752,6 +779,12 @@ input, select { font: inherit; }
   pointer-events: none !important;
   z-index: 60;
   width: min(460px, 92cqw);
+}
+/* 経営メニュー・画面を開いている間は、見出し・タブにかからないように下に出す */
+.app:has(.ui-layer > .manage, .ui-layer > .layout-editor, .ui-layer > .screen:not(.behind)) .toasts {
+  top: auto;
+  bottom: calc(var(--sab) + 12px);
+  flex-direction: column-reverse;
 }
 .toast {
   background: rgba(20, 16, 12, 0.94);
@@ -1056,6 +1089,8 @@ input, select { font: inherit; }
 .map-site.selected circle { fill: #ff8c55; stroke: #fff; stroke-width: 2.5; }
 .map-site-icon { text-anchor: middle; pointer-events: none; }
 .map-side { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; background: #19222e; border: 1px solid #344354; border-radius: 12px; padding: 8px 10px; touch-action: pan-y; }
+/* 中身が多いときは、中身を縮めず（入力欄がつぶれて下のボタンにかぶらないように）欄ごとスクロールする */
+.map-side > * { flex-shrink: 0; }
 .map-side h4 { margin: 2px 0 6px; color: var(--yellow); font-size: 15px; }
 .map-list { display: flex; flex-direction: column; gap: 4px; }
 .map-list.short { margin-top: 8px; max-height: 40%; overflow-y: auto; }
