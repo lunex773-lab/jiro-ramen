@@ -153,8 +153,16 @@ export function runCase(policy: CasePolicy, days: number, seed = 777): { rows: D
 
 // ───────────────── 経営のしかた（設計書 §4.3 の10ケース） ─────────────────
 
+/**
+ * 慎重なプレイヤーは、初めて黒字になってから人を雇う（採用は1日目から解放されているが、
+ * 経営のしかたは前と同じ「初めての黒字のあと」にする。2026-11-05 に採用を最初から解放したときに足した）
+ */
+function readyToHire(s: GameState): boolean {
+  return s.career.unlocked.includes('hiring') && s.career.goalsDone.includes('black_day');
+}
+
 export function hireCheapest(s: GameState, ctx: SimCtx, role?: EmployeeRole): boolean {
-  if (!s.career.unlocked.includes('hiring')) return false;
+  if (!readyToHire(s)) return false;
   if (s.candidates.length === 0) refreshCandidates(s);
   const list = s.candidates.filter((c) => !role || c.profile.role === role).sort((a, b) => a.profile.wage - b.profile.wage);
   const c = list[0] ?? s.candidates[0];
@@ -164,7 +172,7 @@ export function hireCheapest(s: GameState, ctx: SimCtx, role?: EmployeeRole): bo
 
 /** 仕込み担当を雇う（候補に仕込み担当がいなければ調理担当を雇って担当を仕込みに変える） */
 function hirePrep(s: GameState, ctx: SimCtx): boolean {
-  if (!s.career.unlocked.includes('hiring')) return false;
+  if (!readyToHire(s)) return false;
   if (s.candidates.length === 0) refreshCandidates(s);
   const list = s.candidates.filter((c) => c.profile.role === 'prep' || c.profile.role === 'cook').sort((a, b) => a.profile.wage - b.profile.wage);
   const c = list[0];
@@ -229,7 +237,7 @@ function buyPlaced(s: GameState, ctx: SimCtx, type: string, keep: number, upTo =
  * （Phase 3-4。オーナーの判断「短期バイトに意義を持たせる」。上手な経営のしかたの一つ）
  */
 export function coverWithTemp(s: GameState, ctx: SimCtx): void {
-  if (!s.career.unlocked.includes('hiring')) return;
+  if (!readyToHire(s)) return;
   const working = s.employees.filter((e) => e.profile.name !== 'bot-cook' && !e.profile.temp && e.att?.shift);
   if (working.length === 0) applyAction(s, 'p1', { type: 'hireTemp', role: 'cook' }, ctx);
 }

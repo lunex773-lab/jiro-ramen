@@ -219,6 +219,43 @@ export function wishDaysFor(key: string): boolean[] {
   return days;
 }
 
+/** 最初から解放されているもの（採用は1日目から。オーナーの判断 2026-11-05） */
+export const STARTING_UNLOCKS: readonly string[] = ['hiring'];
+
+/** 最初から解放されているものを足す（前のセーブ・共同経営・共通市場の会社）。足したら true */
+export function ensureStartingUnlocks(s: GameState): boolean {
+  let added = false;
+  for (const u of STARTING_UNLOCKS) {
+    if (!s.career.unlocked.includes(u)) {
+      s.career.unlocked.push(u);
+      added = true;
+    }
+  }
+  return added;
+}
+
+/**
+ * ゲームの乱数・イベントの乱数・ID の連番を使わずに、採用の候補を出す（新しいゲームの1日目と、前のセーブを読み込んだとき）。
+ * 1日目に雇わなければ、採用を最初から解放する前と同じ進み方になる
+ */
+export function candidatesWithoutRng(s: GameState, tag: string): void {
+  const rng = s.rng;
+  const nextId = s.nextId;
+  const ev = s.events ? s.events.rng : null;
+  s.rng = hashString(`${s.seed}:${tag}`) >>> 0;
+  if (s.events) s.events.rng = hashString(`${s.seed}:${tag}:ev`) >>> 0;
+  refreshCandidates(s);
+  s.rng = rng;
+  s.nextId = nextId;
+  if (s.events && ev !== null) s.events.rng = ev;
+  // ID は連番を使わない名前にする（見た目・希望シフトも ID から決め直す）
+  s.candidates.forEach((c, i) => {
+    c.id = `cand-${tag}-${i + 1}`;
+    c.profile.look = hashString(`${s.seed}:${c.id}`) % 1_000_000;
+    c.profile.wishDays = wishDaysFor(`${s.seed}:${c.id}:wish`);
+  });
+}
+
 export function refreshCandidates(s: GameState): void {
   if (!s.career.unlocked.includes('hiring')) {
     s.candidates = [];

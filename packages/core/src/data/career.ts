@@ -29,7 +29,8 @@ export const GOALS: GoalDef[] = [
   },
   {
     id: 'black_day', name: '初めての黒字', description: '1日の営業利益を黒字にする',
-    unlocks: ['hiring'],
+    // 採用は最初から解放している（オーナーの判断 2026-11-05: 従業員を1日目から雇える）
+    unlocks: [],
     check: (s) => s.career.bestDayProfit > 0,
     progress: (s) => (s.career.bestDayProfit > 0 ? 1 : 0),
   },

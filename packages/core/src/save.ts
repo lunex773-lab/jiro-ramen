@@ -9,6 +9,7 @@ import { SCHEMA_VERSION } from './state';
 import { removePlayer } from './sim/actions';
 import { makeCtx } from './sim/notices';
 import { newCompany } from './sim/company';
+import { candidatesWithoutRng, ensureStartingUnlocks } from './sim/employees';
 import type { GameState } from './types';
 
 export const SLOT_COUNT = 3;
@@ -263,7 +264,10 @@ export function parseSave(text: string | null | undefined): ParseResult {
   }
   const errs = validateState(state);
   if (errs.length > 0) return { ok: false, error: `検証エラー: ${errs.slice(0, 3).join(', ')}` };
-  return { ok: true, save: { ...file, schema: SCHEMA_VERSION, state: state as unknown as GameState }, migrated };
+  // 前のセーブは、読み込んだときに最初から解放されているもの（採用は1日目から）を足し、準備中なら採用の候補を出す
+  const gs = state as unknown as GameState;
+  if (ensureStartingUnlocks(gs) && gs.phase === 'prep' && gs.candidates.length === 0) candidatesWithoutRng(gs, `load${gs.day}`);
+  return { ok: true, save: { ...file, schema: SCHEMA_VERSION, state: gs }, migrated };
 }
 
 // ───────────────────────── スロット管理 ─────────────────────────

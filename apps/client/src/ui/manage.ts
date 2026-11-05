@@ -863,7 +863,7 @@ export class ManageMenu {
         { class: 'card wide' },
         h('h4', null, `従業員（${s.employees.length}人）`),
         s.employees.length > 0 ? h('p', { class: 'note staff-today' }, `今日（${s.day}日目・${WEEKDAY_LABEL[wd]}曜）の出勤: ${today}`) : null,
-        s.employees.length === 0 ? h('p', { class: 'note' }, hiring ? 'まだ誰も雇っていません。' : '「初めての黒字」を達成すると採用できるようになります。') : null,
+        s.employees.length === 0 ? h('p', { class: 'note' }, hiring ? 'まだ誰も雇っていません。下の採用候補から雇えます（通常の採用は2日後から出勤。今日すぐ人手が要るときは短期バイト）。' : '採用はまだできません。') : null,
         s.employees.map((e) => this.staffCard(s, e)),
       ),
       hiring

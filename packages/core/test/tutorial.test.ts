@@ -277,9 +277,9 @@ describe('チュートリアル（3日目: 従業員）', () => {
     return g;
   }
 
-  it('受けると採用が解放され、雇う → 担当設定 → 終了 と進む', () => {
+  it('受けると、雇う → 担当設定 → 終了 と進む（採用は最初から解放されている）', () => {
     const { s, ctx } = day3();
-    expect(s.career.unlocked.includes('hiring')).toBe(false);
+    expect(s.career.unlocked.includes('hiring')).toBe(true);
     ok(s, ctx, { type: 'tutorial', op: 'staffStart' });
     expect(s.career.staffTutorialOffered).toBe(true);
     expect(s.career.unlocked.includes('hiring')).toBe(true);
@@ -318,12 +318,12 @@ describe('チュートリアル（3日目: 従業員）', () => {
     expect(s.employees).toHaveLength(0);
   });
 
-  it('断ると案内済みになり、採用の解放は変わらない', () => {
+  it('断ると案内済みになる（採用はそのまま使える）', () => {
     const { s, ctx } = day3();
     ok(s, ctx, { type: 'tutorial', op: 'staffDecline' });
     expect(s.career.staffTutorialOffered).toBe(true);
     expect(s.tutorial ?? null).toBeNull();
-    expect(s.career.unlocked.includes('hiring')).toBe(false);
+    expect(s.career.unlocked.includes('hiring')).toBe(true);
   });
 
   it('2日目までは受けられない', () => {

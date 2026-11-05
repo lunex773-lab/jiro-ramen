@@ -509,6 +509,22 @@ async function openSettings(page: Page) {
 type JiroState = { t: number; day: number; money: number; phase: string; players: { pos: { x: number; z: number } }[]; events?: { accident: unknown; buzz: unknown } };
 const jiroState = (page: Page) => page.evaluate(() => (window as unknown as { __jiro: { host: { state: JiroState } } }).__jiro.host.state);
 
+test('従業員: 新しく始めた1日目から、採用の候補がいて雇える（通常の採用は3日目から出勤）', async ({ page }) => {
+  await startNewGame(page);
+  const state = () => page.evaluate(() => (window as unknown as { __jiro: { host: { state: { day: number; career: { unlocked: string[] }; candidates: unknown[]; employees: unknown[] } } } }).__jiro.host.state);
+  const s0 = await state();
+  expect(s0.day).toBe(1);
+  expect(s0.career.unlocked).toContain('hiring');
+  expect(s0.candidates.length).toBeGreaterThan(0);
+  await page.locator('.chip.menu').click();
+  await page.getByRole('button', { name: '従業員', exact: true }).click();
+  const body = page.locator('.manage-body');
+  await expect(body).toContainText('採用候補');
+  await body.getByRole('button', { name: '採用する' }).first().click();
+  await expect.poll(async () => (await state()).employees.length).toBe(1);
+  await expect(body.locator('.emp[data-emp]').first()).toContainText('3日目から出勤');
+});
+
 test('従業員: アルバイトとして採用し、カレンダーで日にちごと・毎週のシフトを決め、記録を見て社員にできる（勤怠・辛抱の数値は出ない）', async ({ page }) => {
   await startNewGame(page);
   // 採用を解放し、候補者を1人入れる（隠しパラメータの値は画面に出てはいけない）

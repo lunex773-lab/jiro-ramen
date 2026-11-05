@@ -15,7 +15,7 @@ import { runAbsentStores } from './stores';
 import { cash, emptyDayStats, finalProfit, foldIntoLastReport, netSales, operatingProfit, recordPL, totalDebt } from './economy';
 import { finishRepair, resaleValue, runMaintenance, upkeepTotal, useEquipment } from './equipment';
 import { dropHand } from './interact';
-import { morningRollCall, refreshCandidates, releaseTemps, wagesDue } from './employees';
+import { ensureStartingUnlocks, morningRollCall, refreshCandidates, releaseTemps, wagesDue } from './employees';
 import { closeStaffDay, expectedWages } from './staff';
 import { expireLots, receiveDeliveries, runAutoOrder, STOCKOUT_SOURCE } from './inventory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
@@ -358,6 +358,8 @@ export function startNextDay(s: GameState, ctx: SimCtx, takeSnapshot = true): { 
     e.process = null;
   }
   receiveDeliveries(s, ctx, true);
+  // 前のセーブ・共同経営・共通市場の会社も、朝に最初から解放されているもの（採用）を足す
+  ensureStartingUnlocks(s);
   refreshCandidates(s);
   morningRollCall(s, ctx);
   for (const p of s.players) {

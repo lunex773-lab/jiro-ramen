@@ -12,6 +12,7 @@ import { newEvents } from './sim/events';
 import { takePrepSnapshot } from './sim/accident';
 import { newId } from './util';
 import { newCompany } from './sim/company';
+import { candidatesWithoutRng, STARTING_UNLOCKS } from './sim/employees';
 
 /**
  * セーブの形の版。1 → 2: 会社（店舗の一覧・会社の日報）を足した（統合進化設計書 v2.1 Phase 2。
@@ -207,6 +208,9 @@ export function createGame(opts: NewGameOptions = {}): GameState {
   s.career.bestDayProfit = -1e12;
 
   fillNewStore(s, 0);
+  // 採用は1日目から（最初の朝から候補がいる。ゲームの乱数の並びは変えない）
+  s.career.unlocked.push(...STARTING_UNLOCKS);
+  candidatesWithoutRng(s, `d${s.day}`);
 
   s.players.push(makePlayer(s, opts.playerId ?? 'p1', opts.playerName?.trim() || '店主', true));
   // 1日目の仕込み開始時点（爆発事故のリセット用）。練習の日（0日目）は事故が起きないので作らない
