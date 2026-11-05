@@ -134,6 +134,7 @@ input, select { font: inherit; }
 .row.wrap { flex-wrap: wrap; }
 .note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 6px 0; }
 .note.bad { color: #ff8a7a; }
+.note.warn { color: var(--warn); }
 
 /* ───────── HUD（iPhone の横向き専用） ─────────
    上: 状態の行 / 左の列: 伝票・通知 / 上部中央: 手に持っている物 / 右の列: 詳細＋小さな丸い操作ボタン（右手の親指で押す）/
@@ -981,6 +982,9 @@ input, select { font: inherit; }
 .market-standings .trow.mine { background: rgba(242, 194, 0, 0.08); border-radius: 8px; padding-left: 6px; }
 .market-standings .trow.mine .tname { color: var(--yellow); }
 .market-standings .trow.gone { opacity: 0.5; }
+.market-list .trow.ended .tname { color: var(--muted); }
+.market-public .trow small { display: block; }
+[data-market-ended] { border: 1px solid var(--warn); border-radius: 8px; padding: 6px 8px; }
 .market-mine-col { display: contents; }
 .market-log .trow .tsub { flex: 0 0 64px; }
 .staff-list .trow { padding: 4px 0; }

@@ -29,7 +29,7 @@ import {
   type StoreEntry,
 } from '@jiro/core';
 import type { App } from '../game/app';
-import { Api, ApiError, defaultServerUrl, rememberServerUrl, type Auth } from '../net/api';
+import { Api, ApiError, defaultServerUrl, rememberServerUrl, type Auth, type MyMarket } from '../net/api';
 import { confirmDialog, h, replace, stars, toast, yenStr } from './dom';
 import { codeBlock } from './room-code';
 
@@ -87,8 +87,11 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
   const period = sel('data-period', [['30', '30日'], ['90', '90日'], ['180', '180日'], ['365', '365日'], ['', '無期限']], '');
   const entry = sel('data-entry', [['grown', '育てた企業で参加できる'], ['fresh', '新規の企業だけ']], 'grown');
   const visibility = sel('data-visibility', [['invite', '招待制'], ['public', '公開']], 'invite');
-  const status = h('div', { class: 'note' });
+  const status = h('div', { class: 'note', 'data-lobby-status': '' });
   const list = h('div', { class: 'table market-list' });
+  const pubList = h('div', { class: 'table market-public', 'data-public-list': '' }, h('p', { class: 'note' }, '「公開のコミュニティを読み込む」で一覧が出ます'));
+  // 参加する会社: 新しい会社か、終わった市場の自分の会社（育てた企業で参加できる市場へ持っていく。オーナーの判断 15）
+  const bringSel = h('select', { 'data-bring': '' }, h('option', { value: '' }, '新しい会社で入る（上の名前）')) as HTMLSelectElement;
   const busy = (on: boolean, text = '') => {
     for (const b of Array.from(body.querySelectorAll('button'))) (b as HTMLButtonElement).disabled = on;
     status.textContent = text;
@@ -105,11 +108,28 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
     return { api, auth };
   };
   const open = (api: Api, auth: Auth, marketId: string) => app.showMarket(api, auth, marketId);
+  const marketState = (m: MyMarket): string => {
+    const parts: string[] = [];
+    if (m.ended) parts.push('競争期間は終了（営業は続けられます）');
+    else if (m.endsAt) parts.push(`${endText(m.endsAt)}まで`);
+    if (m.companyStatus === 'moved') parts.push('会社は別のコミュニティへ移動済み');
+    else if (m.companyStatus === 'retired') parts.push('会社は引退');
+    else if (m.companyStatus === 'bankrupt') parts.push('破産');
+    return parts.join('・');
+  };
   const refreshList = async () => {
     try {
       const c = await connect();
       if (!c) return;
       const r = await c.api.listMarkets(c.auth.token);
+      // 持っていける会社（終わった市場で営業している自分の会社）
+      const movable = r.markets.filter((m) => m.ended && m.companyStatus === 'active' && m.companyId);
+      const keep = bringSel.value;
+      replace(
+        bringSel,
+        h('option', { value: '' }, '新しい会社で入る（上の名前）'),
+        movable.map((m) => h('option', { value: `${m.marketId}|${m.companyId}`, selected: keep === `${m.marketId}|${m.companyId}` }, `${m.companyName ?? '会社'}を持っていく（${m.name}から）`)),
+      );
       replace(
         list,
         r.markets.length === 0
@@ -117,14 +137,70 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
           : r.markets.map((m) =>
               h(
                 'div',
-                { class: 'trow' },
-                h('div', { class: 'tname' }, m.name, h('small', null, `招待コード ${m.code}${m.isOwner ? '・あなたが作った市場' : ''}`)),
+                { class: `trow${m.ended ? ' ended' : ''}`, 'data-my-market': m.marketId },
+                h('div', { class: 'tname' }, m.name, h('small', null, [`招待コード ${m.code}${m.isOwner ? '・あなたが作った市場' : ''}`, marketState(m)].filter(Boolean).join('・'))),
                 h('button', { class: 'btn', 'data-open-market': m.marketId, onclick: () => open(c.api, c.auth, m.marketId) }, '開く'),
               ),
             ),
       );
     } catch (e) {
       replace(list, h('p', { class: 'note bad' }, errText(e)));
+    }
+  };
+  /** 招待コード・公開の市場に入る（持っていく会社を選んでいれば、その会社で） */
+  const join = async (to: { code: string } | { marketId: string }) => {
+    busy(true, '市場に入っています…');
+    try {
+      const c = await connect();
+      if (!c) return;
+      const [bm, bc] = bringSel.value ? bringSel.value.split('|') : [];
+      if (bm && bc) {
+        const ok = await confirmDialog(
+          app.root,
+          '育てた会社を持っていく',
+          'お金・店・従業員・在庫・評判はそのままで、入る市場の日付に合わせて営業を続けます。\n元の市場では「移った」になり、営業できなくなります（記録は残ります）。',
+          '持っていく',
+        );
+        if (!ok) return;
+      }
+      const r = await c.api.joinMarket(c.auth.token, to, company.value.trim(), bm && bc ? { marketId: bm, companyId: bc } : undefined);
+      open(c.api, c.auth, r.marketId);
+    } catch (e) {
+      status.textContent = errText(e);
+    } finally {
+      busy(false, status.textContent ?? '');
+    }
+  };
+  const refreshPublic = async () => {
+    try {
+      const c = await connect();
+      if (!c) return;
+      const r = await c.api.publicCommunities(c.auth.token);
+      replace(
+        pubList,
+        r.communities.length === 0
+          ? h('p', { class: 'note' }, '入れる公開のコミュニティはいまありません（自分で「公開」の市場を作れます）')
+          : r.communities.map((m) =>
+              h(
+                'div',
+                { class: 'trow', 'data-public': m.marketId },
+                h(
+                  'div',
+                  { class: 'tname' },
+                  m.name,
+                  h(
+                    'small',
+                    null,
+                    `${m.entry === 'fresh' ? '新規の企業だけ' : '育てた企業も参加できる'}・${m.players}人／${m.maxCompanies}社${m.aiFill ? '（空きは AI 企業）' : ''}・${m.endsAt ? `${endText(m.endsAt)}まで` : '無期限'}`,
+                  ),
+                  m.description ? h('small', null, m.description) : null,
+                ),
+                h('button', { class: 'btn', 'data-join-public': m.marketId, onclick: () => void join({ marketId: m.marketId }) }, '入る'),
+              ),
+            ),
+      );
+    } catch (e) {
+      replace(pubList, h('p', { class: 'note bad' }, errText(e)));
     }
   };
   replace(
@@ -146,7 +222,7 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
       h('div', { class: 'kv' }, h('span', null, '空いた枠'), aiFill),
       h('div', { class: 'kv' }, h('span', null, '参加企業数'), maxCompanies),
       h('div', { class: 'kv' }, h('span', null, '競争期間'), period),
-      h('div', { class: 'kv' }, h('span', null, '終わったあとの企業'), entry),
+      h('div', { class: 'kv' }, h('span', null, '参加できる企業'), entry),
       h('div', { class: 'kv' }, h('span', null, '参加の方法'), visibility),
       h(
         'button',
@@ -179,35 +255,31 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
     h(
       'section',
       { class: 'card wide' },
+      h('h4', null, '参加する会社'),
+      h('p', { class: 'note' }, '競争期間が終わった市場の会社は、「育てた企業も参加できる」市場へ持っていけます（お金・店・従業員はそのまま。入る市場の日付に合わせます）。'),
+      h('div', { class: 'kv' }, h('span', null, '入る会社'), bringSel),
+    ),
+    h(
+      'section',
+      { class: 'card wide' },
       h('h4', null, '招待コードで入る'),
       codeInput,
-      h(
-        'button',
-        {
-          class: 'btn',
-          'data-join-market': '',
-          onclick: async () => {
-            busy(true, '市場に入っています…');
-            try {
-              const c = await connect();
-              if (!c) return;
-              const r = await c.api.joinMarket(c.auth.token, codeInput.value, company.value.trim());
-              open(c.api, c.auth, r.marketId);
-            } catch (e) {
-              status.textContent = errText(e);
-            } finally {
-              busy(false, status.textContent ?? '');
-            }
-          },
-        },
-        '入る',
-      ),
+      h('button', { class: 'btn', 'data-join-market': '', onclick: () => void join({ code: codeInput.value }) }, '入る'),
     ),
+    h('section', { class: 'card wide' }, h('h4', null, '公開のコミュニティ'), pubList, h('button', { class: 'btn ghost', 'data-load-public': '', onclick: () => void refreshPublic() }, '公開のコミュニティを読み込む')),
     h('section', { class: 'card wide' }, h('h4', null, '参加している市場'), list, h('button', { class: 'btn ghost', onclick: () => void refreshList() }, '一覧を読み込む')),
     status,
   );
-  if (urlInput.value) void refreshList();
+  if (urlInput.value) {
+    void refreshList();
+    void refreshPublic();
+  }
   return el;
+}
+
+/** 競争期間の終わり（JST の日付。その日の0時に終わる） */
+function endText(endsAt: number): string {
+  return `${new Date(endsAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })} 0時`;
 }
 
 // ───────────────────────── 市場の画面 ─────────────────────────
@@ -304,13 +376,26 @@ export class MarketScreen {
     const playing = !!mine?.openDay;
     const bankrupt = mine ? mine.state.phase === 'bankrupt' : true;
     const myDay = mine ? mine.progress.lastProcessedGameDate + 1 : 0;
-    const syncText = v.clock.syncPending ? '0時の計算中（終わるまで新しい日は始められません）' : `次の0時まで ${hh}時間${mm}分`;
+    const syncText = v.ended
+      ? '競争期間は終わりました（0時の同期・ランキングはありません）'
+      : v.clock.syncPending
+        ? '0時の計算中（終わるまで新しい日は始められません）'
+        : `次の0時まで ${hh}時間${mm}分`;
     replace(
       this.head,
       h('h2', null, v.name),
       h('div', { class: 'kv' }, h('span', null, '全社が営業済み'), h('b', { 'data-market-day': String(v.commonMarketDate) }, v.commonMarketDate === 0 ? 'まだ0日' : `${v.commonMarketDate}日目まで`)),
       h('div', { class: 'kv' }, h('span', null, 'いちばん進んだ会社'), h('b', { 'data-leader-day': String(v.leaderDay) }, `${v.leaderDay}日目まで`)),
-      h('div', { class: 'kv' }, h('span', null, '同期'), h('b', { 'data-sync': v.clock.syncPending ? 'pending' : 'idle' }, syncText)),
+      h('div', { class: 'kv' }, h('span', null, '同期'), h('b', { 'data-sync': v.ended ? 'ended' : v.clock.syncPending ? 'pending' : 'idle' }, syncText)),
+      v.ended
+        ? h(
+            'p',
+            { class: 'note warn', 'data-market-ended': '' },
+            '🏁 この市場の競争期間は終わりました。営業は続けられます（ほかの会社とは同期しません）。上位3社には大会の称号が届きます。会社は「育てた企業も参加できる」別のコミュニティへ持っていけます（入口の「参加する会社」で選びます）。',
+          )
+        : null,
+      !mine && v.myStatus === 'moved' ? h('p', { class: 'note', 'data-my-status': 'moved' }, 'あなたの会社は別のコミュニティへ移りました（この市場の記録は残ります）') : null,
+      !mine && v.myStatus === 'retired' ? h('p', { class: 'note', 'data-my-status': 'retired' }, 'あなたの会社は引退しました（この市場の記録は残ります）') : null,
       h('div', { class: 'market-code' }, h('span', { class: 'note' }, '招待コード'), codeBlock(this.root, v.code)),
       h(
         'button',
@@ -339,7 +424,15 @@ export class MarketScreen {
             bankrupt ? '破産しています' : playing ? `${myDay}日目の営業を続ける（初めから）` : `${myDay}日目を営業する`,
           )
         : null,
-      h('p', { class: 'note' }, `あなたの会社は ${mine ? mine.progress.lastProcessedGameDate : 0}日目まで営業済み（今日 手動で ${mine?.progress.manualProgressDays ?? 0}日）。0時に、遅れている会社は自動営業で ${v.leaderDay}日目までそろいます。`),
+      mine
+        ? h(
+            'p',
+            { class: 'note' },
+            v.ended
+              ? `あなたの会社は ${mine.progress.lastProcessedGameDate}日目まで営業済み。`
+              : `あなたの会社は ${mine.progress.lastProcessedGameDate}日目まで営業済み（今日 手動で ${mine.progress.manualProgressDays}日）。0時に、遅れている会社は自動営業で ${v.leaderDay}日目までそろいます。`,
+          )
+        : null,
     );
   }
 
@@ -407,6 +500,7 @@ export class MarketScreen {
       row('評判（本店）', `${stars(s.reputation)} ${s.reputation.toFixed(2)}`),
       bankrupt ? h('p', { class: 'note bad' }, '破産しました。市場から消えています') : null,
       s.loans.length === 0 && !bankrupt ? h('button', { class: 'btn ghost', onclick: () => void this.act({ type: 'takeLoan' }, '融資を受けました') }, `融資を受ける（${yenStr(BALANCE.loan.amount)}）`) : null,
+      bankrupt || v.ended ? h('button', { class: 'btn ghost danger', 'data-retire': '', onclick: () => void this.retire(bankrupt) }, '会社を引退させる') : null,
     );
     const stores = s.company.stores.map((entry) => this.storeCard(s, entry, v.mine!.progress.lastProcessedGameDate));
     const st = v.settings;
@@ -416,10 +510,31 @@ export class MarketScreen {
       h('h4', null, 'この市場の決まり'),
       row('参加企業数', `${st.maxCompanies}社まで${st.aiFill ? '（空いた枠は AI 企業）' : '（人だけ）'}`),
       row('競争期間', st.endsAt ? `${PERIOD_LABEL(st.periodDays)}（${new Date(st.endsAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })} 0時まで）` : PERIOD_LABEL(st.periodDays)),
-      row('終わったあとの企業', st.entry === 'fresh' ? '新規の企業だけ（次の市場は新しい会社で）' : '育てた企業で次の市場に参加できる'),
+      row('参加できる企業', st.entry === 'fresh' ? '新規の企業だけ' : '育てた企業も参加できる'),
+      row('参加の方法', st.visibility === 'public' ? '公開（一覧から誰でも）' : '招待コード'),
+      row('終わったあと', 'この市場で営業を続けられる（同期・順位なし）／別のコミュニティへ移せる／上位3社に称号'),
       h('p', { class: 'note' }, '営業していない間の経営（値段・人・出店）は、この画面で決められます。拡張の工事は、営業の画面で閉店後に決めます。'),
     );
     return h('div', { class: 'market-mine-col' }, finance, rules, this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
+  }
+
+  /** 会社を引退させる（終わった市場・破産した会社。記録は残り、1人が持てる会社の数から外れる） */
+  private async retire(bankrupt: boolean): Promise<void> {
+    const ok = await confirmDialog(
+      this.root,
+      '会社を引退させる',
+      `${bankrupt ? '破産した会社を' : 'この会社を'}引退させます。この市場では営業できなくなり、別のコミュニティへも持っていけなくなります（記録・称号は残ります）。\n1人が持てる会社（${BALANCE.market.maxCompaniesPerPlayer}社）の数から外れます。`,
+      '引退させる',
+      true,
+    );
+    if (!ok) return;
+    try {
+      await this.api.retireCompany(this.auth.token, this.marketId);
+      toast(this.root, '会社を引退させました', 'good', 1800);
+    } catch (e) {
+      toast(this.root, errText(e), 'warn');
+    }
+    await this.refresh();
   }
 
   /**

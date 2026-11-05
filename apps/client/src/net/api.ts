@@ -29,6 +29,35 @@ export interface Auth {
   server: string;
 }
 
+/** 参加している市場（自分の会社の状態つき） */
+export interface MyMarket {
+  marketId: string;
+  code: string;
+  name: string;
+  createdAt: number;
+  isOwner: boolean;
+  endsAt?: number | null;
+  ended?: boolean;
+  entry?: string;
+  companyId?: string | null;
+  companyName?: string | null;
+  companyStatus?: string | null;
+}
+
+/** 公開のコミュニティ */
+export interface PublicCommunity {
+  marketId: string;
+  name: string;
+  description: string;
+  entry: string;
+  aiFill: boolean;
+  maxCompanies: number;
+  periodDays: number | null;
+  endsAt: number | null;
+  players: number;
+  createdAt: number;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -127,12 +156,26 @@ export class Api {
     return this.req('/api/v1/market/create', { method: 'POST', token, body: JSON.stringify({ name, companyName, settings }) });
   }
 
-  joinMarket(token: string, code: string, companyName: string): Promise<{ marketId: string; companyId: string | null }> {
-    return this.req('/api/v1/market/join', { method: 'POST', token, body: JSON.stringify({ code: code.trim().toUpperCase(), companyName }) });
+  /**
+   * 市場に入る。to: 招待コード、または公開の市場の id。bring: 終わった市場の自分の会社を持っていく（育てた企業で参加できる市場だけ）
+   */
+  joinMarket(token: string, to: { code: string } | { marketId: string }, companyName: string, bring?: { marketId: string; companyId: string }): Promise<{ marketId: string; companyId: string | null }> {
+    const target = 'code' in to ? { code: to.code.trim().toUpperCase() } : { marketId: to.marketId };
+    return this.req('/api/v1/market/join', { method: 'POST', token, body: JSON.stringify({ ...target, companyName, ...(bring ? { bring } : {}) }) });
   }
 
-  listMarkets(token: string): Promise<{ markets: { marketId: string; code: string; name: string; createdAt: number; isOwner: boolean }[] }> {
+  listMarkets(token: string): Promise<{ markets: MyMarket[] }> {
     return this.req('/api/v1/markets', { token });
+  }
+
+  /** 公開のコミュニティの一覧（終わる前・空きのあるもの） */
+  publicCommunities(token: string): Promise<{ communities: PublicCommunity[] }> {
+    return this.req('/api/v1/communities', { token });
+  }
+
+  /** 会社を引退させる（終わった市場・破産した会社） */
+  retireCompany(token: string, marketId: string): Promise<{ ok: boolean }> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/retire`, { method: 'POST', token, body: '{}' });
   }
 
   viewMarket<T>(token: string, marketId: string): Promise<T> {
