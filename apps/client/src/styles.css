@@ -1017,3 +1017,56 @@ input, select { font: inherit; }
 .rename-row .row { margin: 0; flex: 1 1 auto; justify-content: flex-end; min-width: 0; }
 .rename-row .rename-input { width: min(240px, 100%); min-width: 0; padding: 6px 8px; margin: 0; }
 .rename-row .btn { flex: 0 0 auto; }
+
+/* ───────── 日本地図の出店マップ（ui/store-map.ts） ───────── */
+.screen.store-map {
+  z-index: 30;
+  overflow: hidden;
+  background: rgba(12, 16, 22, 0.97);
+  padding: calc(var(--sat) + 8px) calc(var(--sar) + 8px) calc(var(--sab) + 8px) calc(var(--sal) + 8px);
+  touch-action: none;
+}
+.store-map-inner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 34%); gap: 8px; height: 100%; }
+.map-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #19222e; border: 1px solid #344354; border-radius: 12px; overflow: hidden; }
+.map-head { padding: 6px 10px 4px; border-bottom: 1px solid #344354; }
+.map-head h3 { margin: 0 0 2px; font-size: 15px; color: var(--yellow); }
+.map-crumbs { font-size: 12px; color: #9cabbc; display: flex; flex-wrap: wrap; gap: 2px; align-items: center; }
+.map-crumbs .crumb.link { color: #72c8ff; cursor: pointer; text-decoration: underline; }
+.map-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; border-bottom: 1px solid #344354; gap: 6px; }
+.map-toolbar .row { margin: 0; gap: 4px; }
+.btn.mini { padding: 4px 10px; min-height: 30px; font-size: 13px; }
+.map-stage { position: relative; flex: 1; min-height: 0; background: radial-gradient(ellipse at center, #1b2a38 0%, #101923 75%); touch-action: none; }
+.store-map-svg { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.store-map-svg.dragging { cursor: grabbing; }
+.map-status { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; pointer-events: none; }
+.map-status[hidden] { display: none; }
+.map-shape { fill: #304253; stroke: #71869a; stroke-width: 0.7; vector-effect: non-scaling-stroke; cursor: pointer; }
+.map-shape:hover { fill: #52728d; }
+.map-shape.region-0 { fill: #34506a; } .map-shape.region-1 { fill: #2f5a57; } .map-shape.region-2 { fill: #4a4f6e; } .map-shape.region-3 { fill: #3c5a3e; }
+.map-shape.region-4 { fill: #5a4a3a; } .map-shape.region-5 { fill: #3a4f5f; } .map-shape.region-6 { fill: #574460; } .map-shape.region-7 { fill: #4f5a36; }
+.map-shape.dim { fill: #222c38; opacity: 0.7; }
+.map-shape.muni.pop-1 { fill: #2a3a48; } .map-shape.muni.pop-2 { fill: #2f4a5a; } .map-shape.muni.pop-3 { fill: #36606a; } .map-shape.muni.pop-4 { fill: #3f7a78; } .map-shape.muni.pop-5 { fill: #4b9488; }
+.map-shape.muni.closed { fill: #1d232b; cursor: not-allowed; }
+.map-shape.selected, .map-shape.muni.selected { fill: #b58b49; stroke: #ffe0a0; stroke-width: 1.6; }
+.map-label { fill: #e8f0f6; text-anchor: middle; pointer-events: none; paint-order: stroke; stroke: rgba(10, 14, 20, 0.85); stroke-linejoin: round; font-weight: 600; }
+.map-label.strong { fill: #ffe0a0; font-weight: 800; }
+.map-pin { fill: #ffca72; stroke: #fff0ca; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.map-site { cursor: pointer; }
+.map-site circle { fill: #ffca72; stroke: #fff0ca; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.map-site.selected circle { fill: #ff8c55; stroke: #fff; stroke-width: 2.5; }
+.map-site-icon { text-anchor: middle; pointer-events: none; }
+.map-side { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; background: #19222e; border: 1px solid #344354; border-radius: 12px; padding: 8px 10px; touch-action: pan-y; }
+.map-side h4 { margin: 2px 0 6px; color: var(--yellow); font-size: 15px; }
+.map-list { display: flex; flex-direction: column; gap: 4px; }
+.map-list.short { margin-top: 8px; max-height: 40%; overflow-y: auto; }
+.btn.map-item { text-align: left; display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 6px 10px; min-height: 34px; font-size: 14px; }
+.btn.map-item small { color: #9cabbc; font-size: 12px; }
+.btn.map-item.on { border-color: var(--yellow); background: rgba(242, 194, 0, 0.12); }
+.btn.map-item.map-site-btn { flex-direction: column; align-items: flex-start; gap: 0; width: 100%; }
+.map-search { margin: 0 0 4px; }
+.map-detail .kv { font-size: 13px; }
+.map-site-card { margin: 4px 0; }
+.map-site-card.on { border-left: 3px solid var(--yellow); padding-left: 6px; }
+.map-detail .btn.primary { margin-top: 8px; width: 100%; }
+.map-foot { margin-top: auto; padding-top: 8px; }
+.map-credit { font-size: 10px; line-height: 1.4; }

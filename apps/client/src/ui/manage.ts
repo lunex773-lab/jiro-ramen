@@ -2,6 +2,11 @@
 
 import {
   cleanStoreName,
+  locationInfo,
+  locationLabel,
+  locationProblem,
+  storeDemandMult,
+  storeRentMult,
   STORE_NAME_MAX,
   BALANCE,
   BOWL_PACK,
@@ -87,6 +92,7 @@ function companyTabVisible(s: GameState): boolean {
   return s.career.stage >= B.unlockStage && s.reputation >= B.unlockReputation;
 }
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
+import { openStoreMap } from './store-map';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
 import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
 
@@ -219,6 +225,65 @@ export class ManageMenu {
     return this.host.mode === 'remote' && !this.host.isHost;
   }
 
+  /** 出店先を地図で選ぶ（候補地 → 店長 → 確認 → 出店） */
+  private openStoreMapForNew(s: GameState): void {
+    const fullStaff = s.employees.filter((e) => e.profile.employment === 'full');
+    let managerId = fullStaff[0]?.id ?? '';
+    const closed = s.phase === 'closed';
+    const map = openStoreMap(this.root, {
+      title: '出店先を選ぶ（2店舗目以降）',
+      mode: 'site',
+      confirmLabel: 'ここに出店する',
+      siteInfo: (code, propertyId) => {
+        const p = PROPERTIES[propertyId]!;
+        const l = locationInfo(code);
+        const rent = Math.round((STAGES[p.stage]?.rent ?? 0) * p.rentMult * (l?.rent ?? 1));
+        return {
+          lines: [`初期費用 ${yenStr(p.initialCost)}・家賃 ${yenStr(rent)}/日・来客 ×${(p.demand * (l?.demand ?? 1)).toFixed(2)}・準備 ${p.openingDays}日`],
+          problem: !closed ? '閉店後に出店できます' : managerId ? (openStoreProblem(s, propertyId, managerId) ?? locationProblem(code)) : '店長にする社員がいません',
+        };
+      },
+      extra: () =>
+        fullStaff.length > 0
+          ? h(
+              'div',
+              { class: 'kv' },
+              h('span', null, '店長'),
+              h(
+                'select',
+                { 'data-open-mgr': '', onchange: (ev: Event) => (managerId = (ev.target as HTMLSelectElement).value) },
+                fullStaff.map((e) => h('option', { value: e.id, selected: e.id === managerId }, `${e.profile.name}（${ROLE_LABEL[e.profile.role]}）`)),
+              ),
+            )
+          : null,
+      onPick: async ({ code, propertyId }) => {
+        if (!propertyId) return;
+        const p = PROPERTIES[propertyId]!;
+        const m = s.employees.find((e) => e.id === managerId);
+        if (!m) return;
+        const where = `${locationLabel(code)}の${p.area}`;
+        if (!(await confirmDialog(this.root, '出店', `${where}（${p.name}）に出店します。初期費用 ${yenStr(p.initialCost)}。${m.profile.name}さんが店長として移ります。準備の${p.openingDays}日のあと、店長の営業で開きます。`, '出店する'))) return;
+        if (await this.act({ type: 'openStore', propertyId, managerId, location: code }, '出店しました')) map.close();
+      },
+      onClose: () => this.render(),
+    });
+  }
+
+  /** 場所のない店（1店目・前のセーブの店）の場所を決める（1回だけ） */
+  private openLocationMap(storeId: string): void {
+    const map = openStoreMap(this.root, {
+      title: '店の場所を決める（1回だけ）',
+      mode: 'city',
+      confirmLabel: 'この街にする',
+      cityInfo: (code) => ({ lines: ['決めたあとは変えられません。人口で来客と家賃が少し変わります。'], problem: locationProblem(code) }),
+      onPick: async ({ code }) => {
+        if (!(await confirmDialog(this.root, '店の場所', `${locationLabel(code)}にします。あとで変えられません。`, '決める'))) return;
+        if (await this.act({ type: 'setStoreLocation', storeId, location: code }, `場所を${locationLabel(code)}にしました`)) map.close();
+      },
+      onClose: () => this.render(),
+    });
+  }
+
   /** 名前を変える欄（入力と「変更」。Enter でも変える）。ゲストは変えられない */
   private renameRow(label: string, current: string, attr: string, id: string, submit: (name: string) => void): HTMLElement {
     const can = this.host.isHost;
@@ -336,7 +401,11 @@ export class ManageMenu {
           ? this.renameRow('店名', entry.name, 'data-rename-store', entry.id, (v) => void this.act({ type: 'renameStore', storeId: entry.id, name: v }, `店名を「${v}」にしました`))
           : null,
         row('状態', status),
-        row('立地', `${prop.area}（来客 ×${prop.demand.toFixed(2)}・家賃 ×${prop.rentMult.toFixed(1)}）`),
+        row('場所', entry.location ? locationLabel(entry.location) : '未設定（標準の数字）'),
+        row('立地', `${prop.area}（来客 ×${storeDemandMult(entry).toFixed(2)}・家賃 ×${storeRentMult(entry).toFixed(2)}）`),
+        !entry.location && this.host.isHost
+          ? h('button', { class: 'btn ghost', 'data-set-location': entry.id, onclick: () => this.openLocationMap(entry.id) }, '🗾 この店の場所を決める（1回だけ）')
+          : null,
         row('広さ', STAGES[st.stage]?.name ?? ''),
         row('評判', `${stars(st.reputation)} ${st.reputation.toFixed(2)}`),
         row('従業員', `${st.employees.length}人`),
@@ -445,40 +514,13 @@ export class ManageMenu {
       { class: 'card wide' },
       h('h4', null, '出店（2店舗目以降）'),
       h('p', { class: 'note' }, `条件: ${STAGES[B.unlockStage]?.seats.length ?? 12}席以上で評判★${B.unlockReputation.toFixed(1)}以上の店があること、店長にする社員（今の店から移ります）、初期費用＋運転資金 ${yenStr(B.minFundsAfterOpen)}。閉店後に出店できます。`),
-      candidates.length === 0
-        ? h('p', { class: 'note' }, '出店できる物件はありません')
-        : h(
-            'div',
-            { class: 'table' },
-            candidates.map((p) => {
-              const mgrSel = h('select', { 'data-open-mgr': p.id }, fullStaff.map((e) => h('option', { value: e.id }, `${e.profile.name}（${ROLE_LABEL[e.profile.role]}）`)));
-              const reason = fullStaff.length === 0 ? '店長にする社員がいません（従業員のタブでアルバイトを社員にできます）' : openStoreProblem(s, p.id, fullStaff[0]!.id);
-              const rent = Math.round((STAGES[p.stage]?.rent ?? 0) * p.rentMult);
-              return h(
-                'div',
-                { class: 'trow prop-row', 'data-property': p.id },
-                h('div', { class: 'tname' }, p.name, h('small', null, p.description)),
-                h('div', { class: 'tsub' }, `初期費用 ${yenStr(p.initialCost)}・家賃 ${yenStr(rent)}/日・来客 ×${p.demand.toFixed(2)}・準備 ${p.openingDays}日`),
-                fullStaff.length > 0 ? mgrSel : null,
-                h(
-                  'button',
-                  {
-                    class: 'btn',
-                    'data-open': p.id,
-                    disabled: !!reason || !closed,
-                    onclick: async () => {
-                      const mid = (mgrSel as HTMLSelectElement).value;
-                      const m = s.employees.find((e) => e.id === mid);
-                      if (!m) return;
-                      if (await confirmDialog(this.root, '出店', `${p.name}に出店します。初期費用 ${yenStr(p.initialCost)}。${m.profile.name}さんが店長として移ります。準備の${p.openingDays}日のあと、店長の営業で開きます。`, '出店する')) await this.act({ type: 'openStore', propertyId: p.id, managerId: mid }, '出店しました');
-                    },
-                  },
-                  '出店する',
-                ),
-                reason ? h('p', { class: 'note' }, reason) : null,
-              );
-            }),
-          ),
+      fullStaff.length === 0 ? h('p', { class: 'note' }, '店長にする社員がいません（従業員のタブでアルバイトを社員にできます）') : null,
+      h(
+        'button',
+        { class: 'btn primary', 'data-open-map': '', disabled: !this.host.isHost || fullStaff.length === 0 || candidates.length === 0, onclick: () => this.openStoreMapForNew(s) },
+        '🗾 地図で出店先を選ぶ',
+      ),
+      h('p', { class: 'note' }, '全国の市区町村に、駅前・住宅街・郊外の3つの候補地があります。人口の多い街は客が少し多く、家賃も少し高くなります。'),
     );
     // 異動（今の店の従業員をほかの店へ）
     const others = c.stores.filter((x) => x.id !== c.activeStoreId);
@@ -623,6 +665,20 @@ export class ManageMenu {
         { class: 'card wide rename-card' },
         h('h4', null, '店名（屋号）'),
         this.renameRow('屋号', s.shopName, 'data-rename-shop', '', (v) => void this.act({ type: 'rename', name: v }, `店名を「${v}」にしました`)),
+        (() => {
+          const home = s.company.stores.find((x) => x.propertyId === 'home');
+          if (!home) return null;
+          return h(
+            'div',
+            { class: 'kv' },
+            h('span', null, '本店の場所'),
+            home.location
+              ? h('b', { 'data-home-location': home.location }, locationLabel(home.location))
+              : this.host.isHost
+                ? h('button', { class: 'btn ghost', 'data-set-location': home.id, onclick: () => this.openLocationMap(home.id) }, '🗾 地図で決める（1回だけ）')
+                : h('b', null, '未設定'),
+          );
+        })(),
         h(
           'p',
           { class: 'note' },

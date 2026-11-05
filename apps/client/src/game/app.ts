@@ -3,6 +3,8 @@
 import {
   BALANCE,
   createGame,
+  locationProblem,
+  setStoreLocation,
   equipmentCenter,
   resolveTarget,
   seatCounterPoint,
@@ -20,6 +22,7 @@ import { Sfx } from '../audio/sfx';
 import { World } from '../render/world';
 import { alertDialog, choiceDialog, confirmDialog, h, replace, toast } from '../ui/dom';
 import { Hud } from '../ui/hud';
+import { openStoreMap } from '../ui/store-map';
 import { LayoutEditor } from '../ui/layout-editor';
 import { ManageMenu } from '../ui/manage';
 import { TutorialPanel } from '../ui/tutorial';
@@ -226,6 +229,9 @@ export class App {
             'スキップして1日目から',
           );
           const s = createGame({ shopName, playerName: this.settings.playerName, tutorial });
+          // 1店目の場所を地図で選ぶ（オーナーの判断。「あとで決める」もできる。決めるまで標準の数字）
+          const code = await this.pickHomeLocation();
+          if (code) setStoreLocation(s, s.company.stores[0]!.id, code);
           this.slot = slot;
           const r = saveToSlot(this.store, slot, s);
           if (!r.ok) toast(this.uiLayer, r.error, 'danger');
@@ -241,6 +247,24 @@ export class App {
         },
       }),
     );
+  }
+
+  /** 1店目の場所を地図で選ぶ（選ばなければ null） */
+  private pickHomeLocation(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const map = openStoreMap(this.uiLayer, {
+        title: '1店目の場所を選ぶ',
+        mode: 'city',
+        confirmLabel: 'この街で始める',
+        closeLabel: 'あとで決める',
+        cityInfo: (code) => ({ lines: ['人口の多い街は客が少し多く、家賃も少し高くなります。あとで変えられません（あとで決めることはできます）。'], problem: locationProblem(code) }),
+        onPick: ({ code }) => {
+          map.close();
+          resolve(code);
+        },
+        onClose: () => resolve(null),
+      });
+    });
   }
 
   showHelp(back: () => void): void {

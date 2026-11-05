@@ -29,6 +29,8 @@ async function startNewGame(page: Page, path = '/') {
   await page.getByRole('button', { name: '決定' }).click();
   // チュートリアルを受けるか聞かれる（ここではスキップ）
   await page.getByRole('button', { name: 'スキップして1日目から' }).click();
+  // 1店目の場所（出店マップ）は「あとで決める」
+  await page.locator('[data-store-map] [data-map-close]').click();
   // 初回は遊び方が出る
   await expect(page.getByText('ラーメンができるまで')).toBeVisible();
   await page.getByRole('button', { name: '閉じる' }).click();
@@ -408,6 +410,7 @@ test.describe('チュートリアル', () => {
     await page.locator('.modal input').fill('練習亭');
     await page.getByRole('button', { name: '決定' }).click();
     await page.getByRole('button', { name: 'チュートリアルから始める' }).click();
+    await page.locator('[data-store-map] [data-map-close]').click();
     const panel = page.locator('.tutorial-panel');
     await expect(panel).toBeVisible();
     await expect(panel).toContainText('ようこそ');
@@ -1216,19 +1219,36 @@ test('会社: 12席・評判★4.0以上の店になると「会社」の画面�
   await expect(body).toContainText('会社の財務');
   await expect(body).toContainText('いまここ');
   await expect(body).toContainText('出店（2店舗目以降）');
-  // 住宅街の店に、佐藤さんを店長にして出店する
-  const row = body.locator('.prop-row[data-property="residential"]');
-  await expect(row).toContainText('初期費用 ¥450,000');
-  await row.locator('[data-open="residential"]').click();
+  // 地図で出店先を選ぶ: 全国 → 近畿 → 大阪府 → 大阪市 → 住宅街。佐藤さんを店長にして出店する
+  await body.locator('[data-open-map]').click();
+  const map = page.locator('[data-store-map]');
+  await expect(map.locator('[data-map-region="近畿"]')).toBeVisible();
+  await expect(map.locator('[data-pref]')).toHaveCount(47);
+  await map.locator('[data-map-region="近畿"]').click();
+  await expect(map.locator('[data-map-crumbs]')).toContainText('全国 / 近畿');
+  await map.locator('[data-map-pref="27"]').click();
+  await expect(map.locator('[data-muni]').first()).toBeVisible();
+  await expect(map.locator('[data-map-crumbs]')).toContainText('大阪府');
+  await map.locator('[data-map-muni="27100"]').click();
+  await expect(map.locator('[data-muni="27100"]')).toHaveClass(/selected/);
+  await expect(map.locator('[data-site]')).toHaveCount(3);
+  await map.locator('[data-map-site="residential"] button').click();
+  await expect(map.locator('[data-map-site="residential"]')).toContainText('初期費用 ¥450,000');
+  await shot(page, '49-store-map');
+  await map.locator('[data-map-confirm]').click();
+  await expect(page.locator('.modal')).toContainText('大阪府 大阪市の住宅街');
   await page.locator('.modal').getByRole('button', { name: '出店する' }).click();
   await expect(page.locator('.toast', { hasText: /^出店しました$/ })).toBeVisible();
+  await expect(map).toHaveCount(0);
   const st = await page.evaluate(() => {
     const s = (window as unknown as CJ).__jiro.host.state;
-    return { n: s.company.stores.length, money: s.money, branch: s.company.stores[1]?.id, mgr: s.company.stores[1]?.managerId };
+    return { n: s.company.stores.length, money: s.money, branch: s.company.stores[1]?.id, mgr: s.company.stores[1]?.managerId, loc: s.company.stores[1]?.location, name: s.company.stores[1]?.name };
   });
   expect(st.n).toBe(2);
   expect(st.money).toBe(3_000_000 - 450_000);
   expect(st.mgr).toBe(hired.id);
+  expect(st.loc).toBe('27100');
+  expect(st.name).toContain('大阪市住宅街店');
   const branchCard = body.locator(`.store-card[data-store="${st.branch}"]`);
   await expect(branchCard).toContainText('準備中');
   await expect(branchCard).toContainText('佐藤 一郎');
