@@ -298,8 +298,9 @@ test.describe('共同経営', () => {
     await page.goto('/');
     await page.evaluate(() => localStorage.clear());
     await page.reload();
+    await page.evaluate((u) => localStorage.setItem('jiro.serverUrl', u), SERVER);
     await page.getByRole('button', { name: /オンライン共同経営/ }).click();
-    await page.locator('.lobby input.input').first().fill(SERVER);
+    await expect(page.locator('.lobby [data-server-url]')).toHaveText(SERVER);
     await page.getByRole('button', { name: 'ルームを作成' }).click();
     // 待機画面: 参加コードを大きく表示
     await expect(page.locator('.room-wait .room-code')).toHaveText(CODE);
@@ -359,8 +360,9 @@ test.describe('共同経営のゲスト', () => {
     });
     await page.goto('/');
     await closeHomeTip(page);
+    await page.evaluate((u) => localStorage.setItem('jiro.serverUrl', u), SERVER);
     await page.getByRole('button', { name: /オンライン共同経営/ }).click();
-    await page.locator('.lobby input.input').first().fill(SERVER);
+    await expect(page.locator('.lobby [data-server-url]')).toHaveText(SERVER);
     await page.locator('.lobby input.code').fill(CODE);
     await page.getByRole('button', { name: '参加する' }).click();
     // ゲストは開店できない
@@ -1014,8 +1016,9 @@ test.describe('設定画面とタイトルへの帰還（第2版 21）', () => {
     const join = async () => {
       await page.goto('/');
       await closeHomeTip(page);
+      await page.evaluate((u) => localStorage.setItem('jiro.serverUrl', u), SERVER);
       await page.getByRole('button', { name: /オンライン共同経営/ }).click();
-      await page.locator('.lobby input.input').first().fill(SERVER);
+      await expect(page.locator('.lobby [data-server-url]')).toHaveText(SERVER);
       await page.locator('.lobby input.code').fill('XYZ789');
       await page.getByRole('button', { name: '参加する' }).click();
       await expect(page.locator('.hud-cta')).toContainText('ホストが開店するのを待っています');

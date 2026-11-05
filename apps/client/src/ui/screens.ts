@@ -12,6 +12,7 @@ import {
   reportFinalProfit,
 } from '@jiro/core';
 import type { Settings } from '../game/settings';
+import { serverUrlCard } from './server-url';
 import { confirmDialog, h, promptDialog, stars, yenStr } from './dom';
 
 export const GAME_TITLE = '次郎系ラーメン屋 経営シミュレーター';
@@ -276,7 +277,7 @@ export function settingsScreen(st: Settings, onChange: (s: Settings) => void, on
         },
       }),
     );
-  return screen(
+  const el: HTMLElement = screen(
     'settings',
     h('h2', null, '設定'),
     h(
@@ -317,6 +318,8 @@ export function settingsScreen(st: Settings, onChange: (s: Settings) => void, on
       ),
       inGame?.nameNote ? h('p', { class: 'note' }, inGame.nameNote) : null,
     ),
+    serverUrlCard(() => el),
     h('button', { class: 'btn primary', onclick: onClose }, '閉じる'),
   );
+  return el;
 }

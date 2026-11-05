@@ -6,7 +6,8 @@ import type { App } from '../game/app';
 import { VERSION } from '../game/app';
 import type { GameHost } from '../game/host';
 import { codeBlock, JOIN_HOWTO, memberText } from './room-code';
-import { Api, ApiError, defaultServerUrl, rememberServerUrl } from '../net/api';
+import { Api, ApiError, defaultServerUrl } from '../net/api';
+import { serverUrlNote } from './server-url';
 import { RemoteHost } from '../net/remote';
 import { h, replace, toast } from './dom';
 
@@ -64,7 +65,6 @@ export function openLobby(app: App, onBack: () => void): HTMLElement {
     );
   };
 
-  const urlInput = h('input', { class: 'input', value: defaultServerUrl(), placeholder: 'https://jiro-ramen.<アカウント>.workers.dev' }) as HTMLInputElement;
   const codeInput = h('input', { class: 'input code', placeholder: '参加コード（6文字）', maxLength: 6 }) as HTMLInputElement;
   const status = h('div', { class: 'note' });
   const slots = listSlots(app.store);
@@ -80,12 +80,11 @@ export function openLobby(app: App, onBack: () => void): HTMLElement {
   };
 
   const connect = async (mode: 'create' | 'join') => {
-    const url = Api.normalize(urlInput.value);
+    const url = Api.normalize(defaultServerUrl());
     if (!url) {
-      status.textContent = 'サーバーのURLを入力してください';
+      status.textContent = 'サーバーが設定されていません。設定の画面で URL を入れてください';
       return;
     }
-    rememberServerUrl(url);
     const api = new Api(url);
     busy(true, 'サーバーに接続しています…');
     try {
@@ -136,13 +135,7 @@ export function openLobby(app: App, onBack: () => void): HTMLElement {
 
   replace(
     body,
-    h(
-      'section',
-      { class: 'card wide' },
-      h('h4', null, 'サーバー'),
-      h('p', { class: 'note' }, '共同経営には Cloudflare 上のゲームサーバーが必要です。設定方法はリポジトリの docs/CLOUDFLARE_SETUP.md を参照してください。'),
-      urlInput,
-    ),
+    serverUrlNote(() => app.showSettings(() => app.showLobby())),
     h(
       'div',
       { class: 'grid2' },

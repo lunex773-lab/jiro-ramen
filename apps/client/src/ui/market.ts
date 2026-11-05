@@ -32,7 +32,8 @@ import {
   type StoreEntry,
 } from '@jiro/core';
 import type { App } from '../game/app';
-import { Api, ApiError, defaultServerUrl, rememberServerUrl, type Auth, type MyMarket } from '../net/api';
+import { Api, ApiError, defaultServerUrl, type Auth, type MyMarket } from '../net/api';
+import { serverUrlNote } from './server-url';
 import { confirmDialog, h, replace, stars, toast, yenStr } from './dom';
 import { codeBlock } from './room-code';
 
@@ -78,7 +79,6 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
     h('div', { class: 'screen-inner' }, h('h2', null, 'オンライン市場（AI 企業と同じ街で競う）'), body, h('button', { class: 'btn ghost', onclick: onBack }, '← 戻る')),
   );
   el.addEventListener('pointerdown', (e) => e.stopPropagation());
-  const urlInput = h('input', { class: 'input', value: defaultServerUrl(), placeholder: 'https://jiro-ramen.<アカウント>.workers.dev' }) as HTMLInputElement;
   const company = h('input', { class: 'input', value: app.settings.playerName ? `${app.settings.playerName}の店` : '', placeholder: '会社（店）の名前', maxLength: 20 }) as HTMLInputElement;
   const marketName = h('input', { class: 'input', placeholder: '市場の名前（なくてもよい）', maxLength: 20 }) as HTMLInputElement;
   const codeInput = h('input', { class: 'input code', placeholder: '招待コード（6文字）', maxLength: 6 }) as HTMLInputElement;
@@ -106,12 +106,11 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
     status.textContent = text;
   };
   const connect = async (): Promise<{ api: Api; auth: Auth } | null> => {
-    const url = Api.normalize(urlInput.value);
+    const url = Api.normalize(defaultServerUrl());
     if (!url) {
-      status.textContent = 'サーバーの URL を入力してください';
+      status.textContent = 'サーバーが設定されていません。設定の画面で URL を入れてください';
       return null;
     }
-    rememberServerUrl(url);
     const api = new Api(url);
     const auth = await api.auth(app.settings.playerName || 'プレイヤー');
     return { api, auth };
@@ -214,13 +213,8 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
   };
   replace(
     body,
-    h(
-      'section',
-      { class: 'card wide' },
-      h('h4', null, 'サーバー'),
-      urlInput,
-      h('p', { class: 'note' }, '各社は自分の端末で1日ずつ営業し、1日の終わりにサーバーへ送ります。毎日0時（日本時間）に、いちばん進んだ会社の日付まで、ほかの会社を自動営業でそろえます。'),
-    ),
+    serverUrlNote(() => app.showSettings(() => app.showMarketLobby())),
+    h('p', { class: 'note' }, '各社は自分の端末で1日ずつ営業し、1日の終わりにサーバーへ送ります。毎日0時（日本時間）に、いちばん進んだ会社の日付まで、ほかの会社を自動営業でそろえます。'),
     h(
       'section',
       { class: 'card wide' },
@@ -279,7 +273,7 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
     h('section', { class: 'card wide' }, h('h4', null, '参加している市場'), list, h('button', { class: 'btn ghost', onclick: () => void refreshList() }, '一覧を読み込む')),
     status,
   );
-  if (urlInput.value) {
+  if (defaultServerUrl()) {
     void refreshList();
     void refreshPublic();
   }

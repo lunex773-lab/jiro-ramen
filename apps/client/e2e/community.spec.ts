@@ -141,9 +141,10 @@ async function openLobby(page: Page) {
   await page.reload();
   const ok = page.getByRole('button', { name: 'わかった' });
   if (await ok.isVisible()) await ok.click();
+  await page.evaluate((u) => localStorage.setItem('jiro.serverUrl', u), SERVER);
   await page.getByRole('button', { name: /オンライン市場/ }).click();
   const lobby = page.locator('.market-lobby');
-  await lobby.locator('input.input').first().fill(SERVER);
+  await expect(lobby.locator('[data-server-url]')).toHaveText(SERVER);
   await lobby.locator('[data-load-public]').click();
   await lobby.getByRole('button', { name: '一覧を読み込む' }).click();
   return lobby;

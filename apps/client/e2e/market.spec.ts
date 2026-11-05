@@ -92,6 +92,7 @@ function mockMarket(page: Page) {
         if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
         const send = (body: unknown, status = 200) => route.fulfill({ status, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(body) });
         const p = url.pathname;
+        if (p === '/api/v1/game-version') return send({ gameVersion: 'e2e', minClientVersion: '0.0.0', protocol: 1 });
         if (p === '/api/v1/auth/anonymous') return send({ playerId: 'u1', token: 'tok' });
         if (p === '/api/v1/profile') return send({ playerId: 'u1', name: 'テスター' });
         if (p === '/api/v1/markets') return send({ markets: market ? [{ marketId: 'mk1', code: 'MKT234', name: market.name, createdAt: start, isOwner: true }] : [] });
@@ -159,7 +160,17 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   if (await ok.isVisible()) await ok.click();
   await page.getByRole('button', { name: /オンライン市場/ }).click();
   const lobby = page.locator('.market-lobby');
-  await lobby.locator('input.input').first().fill(SERVER);
+  // サーバーの URL は入口では変えられない（表示だけ）。設定の画面で「変更する」を押して変える
+  await expect(lobby.locator('input[placeholder*="workers.dev"]')).toHaveCount(0);
+  await expect(lobby.locator('[data-server-url-missing], [data-server-url]').first()).toBeVisible();
+  await lobby.locator('[data-open-settings]').click();
+  const settings = page.locator('.screen.settings');
+  await settings.locator('[data-server-url-edit]').click();
+  await settings.locator('[data-server-url-input]').fill(`${SERVER}/`);
+  await settings.locator('[data-server-url-save]').click();
+  await expect(settings.locator('[data-server-url]')).toHaveText(SERVER);
+  await settings.getByRole('button', { name: '閉じる' }).click();
+  await expect(lobby.locator('[data-server-url]')).toHaveText(SERVER);
   await lobby.locator('input[placeholder="会社（店）の名前"]').fill('テスト亭');
   // 作る人が決める: 参加企業数（AI で埋める）
   await lobby.locator('[data-max-companies]').selectOption('4');
@@ -280,9 +291,9 @@ test('共通市場: 0時を過ぎて計算が済んでいない間は、新し�
   await page.reload();
   const ok = page.getByRole('button', { name: 'わかった' });
   if (await ok.isVisible()) await ok.click();
+  await page.evaluate((u) => localStorage.setItem('jiro.serverUrl', u), SERVER);
   await page.getByRole('button', { name: /オンライン市場/ }).click();
   const lobby = page.locator('.market-lobby');
-  await lobby.locator('input.input').first().fill(SERVER);
   await lobby.locator('input[placeholder="会社（店）の名前"]').fill('夜更かし亭');
   await lobby.locator('[data-create-market]').click();
   const screen = page.locator('.screen.market');
