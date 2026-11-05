@@ -4,7 +4,7 @@ import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import type { MarketRoom } from '../src/market';
-import { callJson, newPlayer, type TestPlayer } from './helpers';
+import { callJson, newPlayer, settleMarketSync, type TestPlayer } from './helpers';
 
 function stub(id: string) {
   return env.MARKETS.get(env.MARKETS.idFromName(id));
@@ -167,6 +167,8 @@ describe('共通市場のサーバー: 端末の1日と0時の同期', () => {
     expect(before.body.clock.nextSyncAt).toBe(before.body.clock.nextMidnight);
     await setClock(m.marketId, 1, 0, 1);
     expect(await runDurableObjectAlarm(stub(m.marketId))).toBe(true);
+    // 同期は小分けで進む（1回の呼び出しで自動営業するのは数社日まで。CPU 時間の上限）
+    expect(await settleMarketSync(m.marketId)).toBeGreaterThan(0);
     const v = await view(a, m.marketId);
     expect(v.body.commonMarketDate).toBe(3);
     expect(v.body.companies.filter((c) => c.status === 'active').every((c) => c.lastDay === 3)).toBe(true);
@@ -193,14 +195,61 @@ describe('共通市場のサーバー: 端末の1日と0時の同期', () => {
     expect((await playDay(a, m.marketId)).commit.body.ok).toBe(true);
   });
 
-  it('アラームが遅れても、0時のあとの最初の要求で同期してから答える', async () => {
+  it('アラームが遅れても、0時のあとの要求で同期を進める（済むまで新しい日は始められない）', async () => {
     const a = await newPlayer('遅れ');
     const m = await create(a);
     await playDay(a, m.marketId);
     await setClock(m.marketId, 1, 0, 5);
-    const v = await view(a, m.marketId);
+    // 最初の要求で同期が始まる（AI 5社の1日分は、小分けの1つより多い）
+    const first = await view(a, m.marketId);
+    expect(first.body.clock.syncPending).toBe(true);
+    expect(first.body.commonMarketDate).toBe(0);
+    // 要求のたびに続きを進め、済んだら答えに出る。済んだあとは新しい日を始められる
+    let v = first;
+    for (let i = 0; i < 20 && v.body.clock.syncPending; i++) v = await view(a, m.marketId);
     expect(v.body.commonMarketDate).toBe(1);
     expect(v.body.clock.syncPending).toBe(false);
+    const st = await callJson(`/api/v1/market/${m.marketId}/day/start`, { token: a.token, body: { token: newToken(), baseVersion: v.body.mine!.progress.stateVersion } });
+    expect(st.status).toBe(200);
+  });
+
+  it('同期の小分けの合間に来た日の始め・経営の操作は断る（同期中の競合更新の防止）', async () => {
+    const a = await newPlayer('割り込み');
+    const m = await create(a);
+    for (let i = 0; i < 3; i++) await playDay(a, m.marketId);
+    await setClock(m.marketId, 1, 0, 2);
+    // AI 5社×3日 = 15社日。最初の要求で小分けの1つだけ進む
+    const first = await view(a, m.marketId);
+    expect(first.body.clock.syncPending).toBe(true);
+    // 小分けの合間（同期の続きを止めた状態）に操作と日の始めを送る。アラームが割り込まないよう Durable Object の中で順に呼ぶ
+    const storeId = first.body.mine!.state.company.stores[0]!.id;
+    const headers = { 'Content-Type': 'application/json', 'X-Jiro-Player-Id': a.playerId };
+    const mid = await inMarket(m.marketId, async (x) => {
+      const r = x as unknown as { syncBusy: boolean; fetch(req: Request): Promise<Response>; alarm(): Promise<void>; ctx: DurableObjectState; market: { sync: { status: string } | null } };
+      r.syncBusy = true;
+      try {
+        const act = await r.fetch(new Request('https://market/internal/act', { method: 'POST', headers, body: JSON.stringify({ cid: `cut-${newToken()}`, action: { type: 'setStorePolicy', storeId, policy: { priceMult: 0.9 } } }) }));
+        const start = await r.fetch(new Request('https://market/internal/day/start', { method: 'POST', headers, body: JSON.stringify({ token: newToken(), baseVersion: first.body.mine!.progress.stateVersion }) }));
+        // 同期を進めている最中に来たアラームは、捨てずにかけ直す（続きが止まらない）
+        await r.ctx.storage.deleteAlarm();
+        await r.alarm();
+        const again = await r.ctx.storage.getAlarm();
+        return { status: r.market.sync?.status ?? null, act: (await act.json()) as { ok: boolean; reason?: string }, start: start.status, again };
+      } finally {
+        r.syncBusy = false;
+      }
+    });
+    expect(mid.status).toBe('syncing');
+    expect(mid.act.ok).toBe(false);
+    expect(mid.act.reason).toContain('0時の計算中');
+    expect(mid.start).toBe(409);
+    expect(mid.again).not.toBeNull();
+    // 済んだあとは受け付ける。小分けにしても結果は同じ（全社が3日目まで・自動営業 15社日）
+    await settleMarketSync(m.marketId);
+    const v = await view(a, m.marketId);
+    expect(v.body.commonMarketDate).toBe(3);
+    const run = await env.DB.prepare('SELECT target_date, auto_days FROM sync_runs WHERE market_id = ?').bind(m.marketId).first<{ target_date: number; auto_days: number }>();
+    expect(run).toEqual({ target_date: 3, auto_days: 15 });
   });
 
   it('0時に営業中の日は、届くまで待って前の期間に数える（30分を過ぎたら無効）', async () => {
@@ -225,6 +274,7 @@ describe('共通市場のサーバー: 端末の1日と0時の同期', () => {
     autoPlayDay(s, 1, st.body.ticket.demand, { allowLoan: false });
     const c = await callJson<Commit>(`/api/v1/market/${m.marketId}/day/commit`, { token: a.token, body: { token, state: s } });
     expect(c.body.ok).toBe(true);
+    await settleMarketSync(m.marketId);
     const done = await view(a, m.marketId);
     expect(done.body.commonMarketDate).toBe(1);
     expect(done.body.clock.syncPending).toBe(false);

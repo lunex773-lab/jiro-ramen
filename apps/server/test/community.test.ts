@@ -5,7 +5,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import type { MarketRoom } from '../src/market';
 import { grantEndedCommunities } from '../src/rank-store';
-import { callJson, newPlayer, type TestPlayer } from './helpers';
+import { callJson, newPlayer, settleMarketSync, type TestPlayer } from './helpers';
 
 const stub = (id: string) => env.MARKETS.get(env.MARKETS.idFromName(id));
 const inMarket = <R>(id: string, fn: (m: MarketRoom) => R | Promise<R>) => runInDurableObject(stub(id), (x: MarketRoom) => fn(x));
@@ -186,6 +186,7 @@ describe('大会の称号（判断 17）', () => {
     await playDay(a, m.marketId);
     await setClock(m.marketId, 30, 0, 1);
     await runDurableObjectAlarm(stub(m.marketId));
+    await settleMarketSync(m.marketId);
     const finals = await env.DB.prepare("SELECT player_id, rank, title FROM rewards WHERE market_id = ? AND metric = 'final' ORDER BY rank").bind(m.marketId).all<{ player_id: string; rank: number; title: string }>();
     // 2社とも上位3社に入る（総合が同じなら同じ順位）。順位と称号が合っている
     expect(finals.results).toHaveLength(2);
@@ -208,6 +209,7 @@ describe('大会の称号（判断 17）', () => {
     await playDay(a, m.marketId);
     await setClock(m.marketId, 1, 0, 1);
     await runDurableObjectAlarm(stub(m.marketId));
+    await settleMarketSync(m.marketId);
     const endsAt = (await view(a, m.marketId)).body.settings.endsAt!;
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM rewards WHERE market_id = ? AND metric = 'final'").bind(m.marketId).first<{ n: number }>()).toEqual({ n: 0 });
     // 終わってすぐ（1日たつ前）は渡さない

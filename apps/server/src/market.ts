@@ -51,6 +51,15 @@ import { isObj, log, safeJsonParse } from './util';
 const CHUNK_CHARS = 64 * 1024;
 /** 同期の集計を D1 に書けなかったときに、やり直すまでの時間 */
 const RETRY_MS = 60_000;
+/**
+ * 1回の呼び出し（要求・アラーム）で自動営業する企業・日の数。Free の CPU 時間（1回あたりの上限）に収めるため小分けにし、
+ * 続きはすぐ次のアラームで進める（結果は一度に計算したときと同じ）。計測: 1社1日 約0.6〜1.7ミリ秒（docs/MARKET_RANKING_REPORT.md 6章）
+ */
+export const SYNC_STEP_BUDGET = 4;
+/** 小分けの途中は数回に1回だけ保存する（保存の書き込み行数を抑える。止まっても、保存した所から計算し直せば同じ結果） */
+const SYNC_SAVE_EVERY = 5;
+/** 同期を進めている最中に来たアラームを、かけ直すまでの時間 */
+const ALARM_BUSY_RETRY_MS = 500;
 
 export interface MarketMeta {
   marketId: string;
@@ -91,6 +100,7 @@ export class MarketRoom extends DurableObject<Env> {
   private dirtyCompanies = new Set<string>();
   /** 同期を進めている最中（D1 への書き込みを待つ間に、二重に進めない） */
   private syncBusy = false;
+  private syncSteps = 0;
   /** テスト用: サーバーの時刻のずれ（ミリ秒） */
   skewMs = 0;
 
@@ -236,42 +246,48 @@ export class MarketRoom extends DurableObject<Env> {
   }
 
   /**
-   * 同期を進められるだけ進める（core の runSync）。集計を D1 に書いてから期間を終える。
+   * 同期を小分けの1つ分進める（core の runSync）。全社がそろったら集計を D1 に書いてから期間を終える。
    * 何度呼んでも同じ結果。D1 に書けなければ ranking のまま残し、少しあとにやり直す
    */
   async advanceSync(now: number): Promise<void> {
     if (!this.market || this.corrupt || this.syncBusy) return;
     this.syncBusy = true;
     try {
-      for (let guard = 0; guard < 50; guard++) {
-        const m = this.market;
-        const step = runSync(m, now);
-        if (step.status === 'idle') break;
-        if (step.status === 'waiting') {
-          this.save();
-          await this.ctx.storage.setAlarm(step.until);
-          return;
-        }
-        // 自動営業した企業の状態は変わっている
-        this.markAll();
-        if (step.status === 'more') {
-          this.save();
-          continue;
-        }
-        // ranking: 期間ごとの集計を D1 へ（同じ行を同じ値で書き直すので、二重に書いても同じ）
-        this.save();
-        try {
-          await this.writePeriod(step.periodId, now);
-        } catch (e) {
-          log('error', 'market_period_write_failed', { marketId: this.meta?.marketId, period: step.periodId, error: String(e) });
-          await this.ctx.storage.setAlarm(now + RETRY_MS);
-          return;
-        }
-        finishSync(m, now);
-        this.markAll();
-        this.save();
+      const m = this.market;
+      // 1回の呼び出しでは小分けの1つだけ進める（CPU 時間の上限）。続きはすぐ次のアラームで
+      const step = runSync(m, now, SYNC_STEP_BUDGET);
+      if (step.status === 'idle') {
+        await this.ensureAlarm(now);
+        return;
       }
-      await this.ensureAlarm(now);
+      if (step.status === 'waiting') {
+        this.save();
+        await this.ctx.storage.setAlarm(step.until);
+        return;
+      }
+      // 自動営業した企業の状態は変わっている
+      this.markAll();
+      if (step.status === 'more') {
+        this.syncSteps++;
+        if (this.syncSteps % SYNC_SAVE_EVERY === 0) this.save();
+        await this.ctx.storage.setAlarm(Date.now());
+        return;
+      }
+      // ranking: 期間ごとの集計を D1 へ（同じ行を同じ値で書き直すので、二重に書いても同じ）
+      this.save();
+      try {
+        await this.writePeriod(step.periodId, now);
+      } catch (e) {
+        log('error', 'market_period_write_failed', { marketId: this.meta?.marketId, period: step.periodId, error: String(e) });
+        await this.ctx.storage.setAlarm(now + RETRY_MS);
+        return;
+      }
+      finishSync(m, now);
+      this.markAll();
+      this.save();
+      // 次の期間が残っていれば、すぐ続ける
+      if (syncPending(m, now)) await this.ctx.storage.setAlarm(Date.now());
+      else await this.ensureAlarm(now);
     } finally {
       this.syncBusy = false;
     }
@@ -337,6 +353,11 @@ export class MarketRoom extends DurableObject<Env> {
 
   override async alarm(): Promise<void> {
     if (!this.market || this.corrupt) return;
+    // 要求の処理で同期を進めている最中なら、少しあとにかけ直す（アラームは一度動くと消えるので、そのまま返すと続きが止まる）
+    if (this.syncBusy) {
+      await this.ctx.storage.setAlarm(Date.now() + ALARM_BUSY_RETRY_MS);
+      return;
+    }
     await this.advanceSync(this.now());
   }
 

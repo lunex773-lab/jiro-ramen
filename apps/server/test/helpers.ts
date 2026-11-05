@@ -1,7 +1,8 @@
 // テスト用の補助: API 呼び出し、WebSocket クライアント（パッチを当てて状態を追従するミラー付き）。
 
-import { applyPatch, canonicalJson, stateChecksum, type ClientMsg, type GameState, type ServerMsg } from '@jiro/core';
-import { SELF } from 'cloudflare:test';
+import { applyPatch, canonicalJson, stateChecksum, syncPending, type ClientMsg, type GameState, type MarketState, type ServerMsg } from '@jiro/core';
+import { runDurableObjectAlarm, runInDurableObject, SELF } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
 
 export const BASE = 'https://jiro.test';
 export const ORIGIN = 'http://localhost:5173';
@@ -210,4 +211,21 @@ let ridSeq = 0;
 export function rid(prefix = 'r'): string {
   ridSeq++;
   return `${prefix}-${Date.now().toString(36)}-${ridSeq}`;
+}
+
+/**
+ * 市場の0時の同期が済むまでアラームを動かす（同期は1回の呼び出しで小分けの1つずつ進む）。動かした回数を返す。
+ * 営業中の日を待っている間は済まないので、その場面では使わない
+ */
+export async function settleMarketSync(marketId: string, max = 300): Promise<number> {
+  const st = env.MARKETS.get(env.MARKETS.idFromName(marketId));
+  for (let i = 0; i < max; i++) {
+    const busy = await runInDurableObject(st, (x: unknown) => {
+      const r = x as { market: MarketState | null; now(): number };
+      return !!r.market && ((!!r.market.sync && r.market.sync.status !== 'done') || syncPending(r.market, r.now()));
+    });
+    if (!busy) return i;
+    await runDurableObjectAlarm(st);
+  }
+  throw new Error('市場の同期が終わりません');
 }

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { MarketRoom } from '../src/market';
 import { grantCommunityRewards, grantGlobalRewards, scopesEndingOn } from '../src/rank-store';
 import { computeRanking, type RankAggRow } from '../src/ranking';
-import { callJson, newPlayer, type TestPlayer } from './helpers';
+import { callJson, newPlayer, settleMarketSync, type TestPlayer } from './helpers';
 
 const stub = (id: string) => env.MARKETS.get(env.MARKETS.idFromName(id));
 const inMarket = <R>(id: string, fn: (m: MarketRoom) => R | Promise<R>) => runInDurableObject(stub(id), (x: MarketRoom) => fn(x));
@@ -114,6 +114,7 @@ describe('ランキングの集計と API（12章 14・15・17）', () => {
     // 月曜の0時1分: 同期 → 集計 → 週が終わったので称号
     await setClock(id, jstMidnight(addDays(sunday, 1)) + 60_000);
     expect(await runDurableObjectAlarm(stub(id))).toBe(true);
+    await settleMarketSync(id);
     const week = scopeKey('week', sunday);
     const agg = await env.DB.prepare('SELECT scope_key, company_id, days, net_sales FROM rank_agg WHERE market_id = ? ORDER BY scope_key, company_id').bind(id).all<{ scope_key: string; company_id: string; days: number; net_sales: number }>();
     const keys = new Set(agg.results.map((r) => r.scope_key));
