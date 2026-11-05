@@ -139,6 +139,16 @@ export const BALANCE = {
    */
   ads: { max: 0.2, k: 5873, choices: [0, 1000, 2000, 3000, 5000, 8000] as readonly number[] },
 
+  /**
+   * 出店の場所（市区町村の人口。docs/STORE_MAP_PLAN.md 4章。オーナーの判断「人口で少し変わる」）。
+   * 人口指数 z = log10(人口 ÷ 標準の人口) を −1〜1 に収め、来客 ×(1 + demandSpan·z)・家賃 ×(1 + rentSpan·z)。
+   * 家賃の幅は、どこでも1日の利益の見込みが同じくらいになるよう測って決める（test/econ/location-balance.test.ts）
+   */
+  location: {
+    refPopulation: 100_000,
+    demandSpan: 0.1,
+    rentSpan: 0.25,
+  },
   market: {
     /** コミュニティの企業の数の上限（プレイヤー＋AI）の既定と、作る人が選べる範囲（オーナーの判断: 2〜6社） */
     maxCompanies: 6,

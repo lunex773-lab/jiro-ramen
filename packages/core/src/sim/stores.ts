@@ -14,6 +14,7 @@ import { cash, emptyDayStats, foldIntoLastReport, recordPL } from './economy';
 import { addLot, consume, stockOf } from './inventory';
 import { emit, notify, type SimCtx } from './notices';
 import { runManagerDay } from './manager';
+import { locationInfo, locationProblem } from './location';
 
 /** 店の表示名（1店舗目は店名の変更に合わせる） */
 export function storeDisplayName(s: GameState, entry: StoreEntry): string {
@@ -33,10 +34,28 @@ export function cleanStoreName(v: unknown): string {
   return Array.from(t).slice(0, STORE_NAME_MAX).join('').trim();
 }
 
-/** 2店目以降に自動で付けた名前（屋号＋地域＋店） */
-function autoStoreName(shopName: string, entry: StoreEntry): string | null {
+/** 2店目以降に自動で付ける名前（屋号＋市区町村＋地域＋店。場所がなければ屋号＋地域＋店） */
+export function autoStoreName(shopName: string, entry: StoreEntry): string | null {
   const prop = PROPERTIES[entry.propertyId];
-  return prop ? `${shopName} ${prop.area}店` : null;
+  if (!prop) return null;
+  const city = locationInfo(entry.location)?.name ?? '';
+  return `${shopName} ${city}${prop.area}店`;
+}
+
+/**
+ * 店の場所を決める（場所のない店だけ・1回だけ。1店目の場所をあとで決めるときと、前のセーブの店）。
+ * 支店の名前が自動の名前のままなら、場所を入れた名前にする
+ */
+export function setStoreLocation(s: GameState, storeId: Id, location: string): { ok: boolean; reason?: string } {
+  const entry = s.company?.stores.find((x) => x.id === storeId);
+  if (!entry) return { ok: false, reason: '店が見つかりません' };
+  if (entry.location) return { ok: false, reason: 'この店の場所はもう決まっています' };
+  const problem = locationProblem(location) ?? (location ? null : '場所を選んでください');
+  if (problem) return { ok: false, reason: problem };
+  const before = autoStoreName(s.shopName, entry);
+  entry.location = location;
+  if (entry.propertyId !== 'home' && entry.name === before) entry.name = autoStoreName(s.shopName, entry) ?? entry.name;
+  return { ok: true };
 }
 
 /**
@@ -115,8 +134,8 @@ function detach(e: Employee): void {
  * 出店する（閉店後）。初期費用を払い、今の店の社員を店長にして、新しい店の中身を作る。
  * 新しい店は物件の工事の日数だけ休んでから、店長の営業（プレイヤーが入れば細かいシミュレーション）で開く
  */
-export function openStore(s: GameState, ctx: SimCtx, propertyId: string, managerId: Id): { ok: boolean; reason?: string; storeId?: Id } {
-  const problem = openStoreProblem(s, propertyId, managerId);
+export function openStore(s: GameState, ctx: SimCtx, propertyId: string, managerId: Id, location?: string): { ok: boolean; reason?: string; storeId?: Id } {
+  const problem = openStoreProblem(s, propertyId, managerId) ?? locationProblem(location);
   if (problem) return { ok: false, reason: problem };
   const c = s.company;
   const prop = PROPERTIES[propertyId]!;
@@ -142,13 +161,15 @@ export function openStore(s: GameState, ctx: SimCtx, propertyId: string, manager
   putStore(s, mine);
   const entry: StoreEntry = {
     id: newId(s, 'store'),
-    name: `${s.shopName} ${prop.area}店`,
+    name: '',
     propertyId,
+    ...(location ? { location } : {}),
     openedDay: s.day,
     managerId,
     policy: { ...DEFAULT_POLICY },
     snapshot: snap,
   };
+  entry.name = autoStoreName(s.shopName, entry) ?? `${s.shopName} ${prop.area}店`;
   c.stores.push(entry);
   notify(s, ctx, `store:open:${entry.id}`, 'good', `${entry.name}を出店しました（店長: ${mgr.profile.name}さん）。${prop.openingDays > 0 ? `${prop.openingDays}日の準備のあと` : '明日から'}営業します`);
   emit(ctx, { type: 'storeOpen', text: entry.name });

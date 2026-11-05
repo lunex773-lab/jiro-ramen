@@ -33,7 +33,8 @@ import { hasRolled, markRolled, onCustomerArrive, onVisitEnd } from './visitors'
 import { COMPLAINT_TEXT, UNREASONABLE_TEXT } from '../data/events';
 import { drawGroupSize, findGroupSeats, groupMembers, holdAfterMeal, leaveAfterMeal, meanGroupSize, messyLeaveDirt, rollMessy } from './manners';
 import { maybeYoutuber, onMealFinished } from './media';
-import { activeStore, storeProperty } from './company';
+import { activeStore } from './company';
+import { storeDemandMult } from './location';
 
 // ───────────────────────── 生成 ─────────────────────────
 
@@ -240,7 +241,8 @@ export function arrivalRate(s: GameState, opts: { events?: boolean } = {}): numb
   const repF = Math.pow(Math.max(0.3, s.reputation) / 3, c.reputationExponent);
   const x = s.openT / BALANCE.openDuration;
   const priceF = priceDemandFactor(s);
-  const propF = s.company ? storeProperty(activeStore(s)).demand : 1;
+  // 立地（駅前・住宅街・郊外）と場所（市区町村の人口）の倍率
+  const propF = s.company ? storeDemandMult(activeStore(s)) : 1;
   const demand = 1 + effectSum(s, 'demand');
   // 常連客は安定した需要を生む
   const regularF = 1 + Math.min(0.6, s.regulars.reduce((a, r) => a + r.loyalty, 0) * 0.03);

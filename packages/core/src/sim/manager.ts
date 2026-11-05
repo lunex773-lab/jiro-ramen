@@ -10,7 +10,8 @@ import { MENU } from '../data/menu';
 import { STAGES } from '../data/stages';
 import type { DayReport, Employee, GameState, StoreEntry } from '../types';
 import { clamp } from '../util';
-import { companyPolicyOf, storeProperty, withStore } from './company';
+import { companyPolicyOf, withStore } from './company';
+import { storeRentMult } from './location';
 import { expectedDailyArrivals, expectedTicket } from './customers';
 import { cash, emptyDayStats, finalProfit, netSales, operatingProfit } from './economy';
 import { upkeepTotal } from './equipment';
@@ -169,7 +170,6 @@ function payOrAccrue(s: GameState, type: Parameters<typeof cash>[1], amount: num
 /** 店の中身が GameState に入っている状態で、その日の店長の営業を計算して日報を作る */
 function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, opts: ManagerDayOptions): DayReport {
   const m = M();
-  const prop = storeProperty(entry);
   const st = STAGES[s.career.stage]!;
   const t = s.today;
   const cashStart = s.money;
@@ -233,7 +233,7 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
     // 休みでも社員の日給はかかる（アルバイトは来ない。社員の休みの曜日はかからない）
     t.wages = s.employees.reduce((a, e) => a + (e.profile.employment === 'full' ? expectedPay(e, day) : 0), 0);
   }
-  t.rent = Math.round(st.rent * prop.rentMult);
+  t.rent = Math.round(st.rent * storeRentMult(entry));
   t.upkeep = upkeepTotal(s);
   if (t.sales > 0) cash(s, 'sale', t.sales, `${name}の売上（${day}日目）`, key('sale'));
   payOrAccrue(s, 'rent', t.rent, `${name}の家賃（${day}日目）`, key('rent'));

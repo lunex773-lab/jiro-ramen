@@ -31,6 +31,7 @@ import { expansionInfo } from './sim/layout';
 import { planManagerDay, runManagerDay, standaloneArrivals } from './sim/manager';
 import { makeCtx } from './sim/notices';
 import { cleanStoreName, openStoreProblem, runAbsentStores, storeStatus } from './sim/stores';
+import { locationProblem } from './sim/location';
 
 export const MARKET_SCHEMA = 2;
 
@@ -159,6 +160,11 @@ export interface CommunitySettings {
   entry: 'grown' | 'fresh';
   /** 空いた枠を AI 企業で埋める */
   aiFill: boolean;
+  /**
+   * 市場の街（市区町村のコード5桁。出店マップ。オーナーの判断「市場は1つの街」）。全社の店はこの街の駅前・住宅街・郊外にある。
+   * 前の市場にはない → null（場所の倍率 ×1）
+   */
+  cityCode?: string | null;
 }
 
 /** JST の期間ごとの同期（仕様書 3.4 の状態機械） */
@@ -262,6 +268,7 @@ function addCompany(m: MarketState, kind: 'player' | 'ai', name: string, ownerId
     days: [],
   };
   if (strategy) c.state.company.stores[0]!.policy.priceMult = BALANCE.market.ai.basePrice[strategy] ?? 1;
+  placeInCity(m, c.state);
   m.companies.push(c);
   return c;
 }
@@ -275,6 +282,7 @@ export const DEFAULT_SETTINGS = (now: number): CommunitySettings => ({
   endsAt: null,
   entry: 'grown',
   aiFill: true,
+  cityCode: null,
 });
 
 export interface CreateMarketOptions {
@@ -302,7 +310,15 @@ export function normalizeSettings(raw: Partial<CommunitySettings>, now: number):
     endsAt: periodDays !== null && Number.isFinite(periodDays) ? jstMidnight(jstDateKey(startsAt)) + periodDays * 86_400_000 : null,
     entry: raw.entry === 'fresh' ? 'fresh' : 'grown',
     aiFill: raw.aiFill !== false,
+    cityCode: typeof raw.cityCode === 'string' && !locationProblem(raw.cityCode) ? raw.cityCode : null,
   };
+}
+
+/** 会社の店をすべて市場の街に置く（市場は1つの街。作るとき・入るとき・育てた会社を持ってきたとき） */
+export function placeInCity(m: MarketState, s: GameState): void {
+  const city = m.settings.cityCode;
+  if (!city) return;
+  for (const st of s.company.stores) st.location = city;
 }
 
 /** 市場を作る。AI で埋める設定なら、上限の社数になるまで AI 企業を入れる */
@@ -1056,6 +1072,7 @@ export function importCompany(m: MarketState, ownerId: string, exp: ExportedComp
     lastCommit: null,
     days: [],
   };
+  placeInCity(m, c.state);
   m.companies.push(c);
   log(m, c.id, `${c.name}が育てた会社で参加しました（資金 ¥${s.money.toLocaleString('ja-JP')}・${s.company.stores.length}店。${day}日目から）`);
   return { ok: true, company: c };
@@ -1171,6 +1188,8 @@ export function marketAction(m: MarketState, ownerId: string, a: Action, now = 0
   if (!a || typeof a !== 'object' || !MARKET_ACTIONS.has(a.type)) return { ok: false, reason: '市場では使えない操作です' };
   if (a.type === 'buyEquipment' && a.autoPlace !== true) return { ok: false, reason: '市場では設備は自動で置きます' };
   if (a.type === 'openStore' && freeSlots(m, a.propertyId) <= 0) return { ok: false, reason: `${areaName(a.propertyId)}の物件は空いていません（ほかの企業が出店しています）` };
+  // 市場は1つの街: 出店は市場の街に（どこを指定しても街の物件になる）
+  if (a.type === 'openStore') a = { ...a, location: m.settings.cityCode ?? undefined };
   const phase = c.state.phase;
   c.state.phase = 'closed';
   const r = applyAction(c.state, 'p1', a, ctxOf());
@@ -1188,7 +1207,8 @@ export function marketAction(m: MarketState, ownerId: string, a: Action, now = 0
 
 // ───────────────────────── AI 企業 ─────────────────────────
 
-function act(c: MarketCompany, a: Action): boolean {
+function act(c: MarketCompany, a: Action, city?: string | null): boolean {
+  if (a.type === 'openStore' && city) a = { ...a, location: city };
   const phase = c.state.phase;
   c.state.phase = 'closed';
   const ok = applyAction(c.state, 'p1', a, ctxOf()).ok;
@@ -1280,7 +1300,7 @@ export function aiDecide(m: MarketState, c: MarketCompany, day: number): void {
       if (!cook) break;
       if (cook.profile.employment !== 'full') act(c, { type: 'promote', employeeId: cook.id });
       if (openStoreProblem(s, pid, cook.id)) break;
-      if (act(c, { type: 'openStore', propertyId: pid, managerId: cook.id })) {
+      if (act(c, { type: 'openStore', propertyId: pid, managerId: cook.id }, m.settings.cityCode)) {
         const st = s.company.stores[s.company.stores.length - 1]!;
         st.openedDay = day;
         st.policy.priceMult = base;

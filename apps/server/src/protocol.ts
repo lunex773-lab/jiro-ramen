@@ -14,7 +14,7 @@ export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
   'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
-  'accidentReset', 'openStore', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setCompanyPolicy',
+  'accidentReset', 'openStore', 'setStoreLocation', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setCompanyPolicy',
 ] as const satisfies readonly ActionType[];
 
 /**
@@ -44,6 +44,9 @@ const isIngredient = (v: unknown): boolean => isId(v) && Object.prototype.hasOwn
 const isStr = (max: number) => (v: unknown): boolean => typeof v === 'string' && v.length <= max;
 const isBool = (v: unknown): boolean => typeof v === 'boolean';
 const optBool = (v: unknown): boolean => v === undefined || typeof v === 'boolean';
+/** 市区町村のコード（5桁の数字。中身は core の locationProblem で確かめる） */
+const isCityCode = (v: unknown): boolean => typeof v === 'string' && /^\d{5}$/.test(v);
+const optCityCode = (v: unknown): boolean => v === undefined || isCityCode(v);
 const isNum = (v: unknown): boolean => isFiniteNum(v) && Math.abs(v) <= 1e9;
 const isIntIn = (lo: number, hi: number) => (v: unknown): boolean => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi;
 const isRot = (v: unknown): boolean => v === 0 || v === 1 || v === 2 || v === 3;
@@ -147,7 +150,8 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   // 事故の ID（違えばサーバーは何もしない。同時に届いた2回目以降も何もしない）
   accidentReset: { accidentId: isId },
   // 会社と店舗（Phase 2。ホストだけ。中身の検証は core）
-  openStore: { propertyId: isId, managerId: isId },
+  openStore: { propertyId: isId, managerId: isId, location: optCityCode },
+  setStoreLocation: { storeId: isId, location: isCityCode },
   enterStore: { storeId: isId },
   assignManager: { storeId: isId, employeeId: (v: unknown) => v === null || isId(v) },
   transferEmployee: { employeeId: isId, toStoreId: isId, asManager: optBool },

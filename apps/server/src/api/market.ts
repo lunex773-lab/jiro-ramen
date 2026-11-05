@@ -3,7 +3,7 @@
 // オーナーの判断: 招待コードで友達と入る。AI で埋めるかは作る人が決める（2〜6社）。1人が持てる市場の企業は5社まで。
 // 手動の営業は端末で処理し、1日ごとにサーバーへ送る（Worker は本文を解釈せずに Durable Object へ渡す。CPU を使わない）。
 
-import { BALANCE } from '@jiro/core';
+import { BALANCE, locationInfo, locationLabel, locationProblem } from '@jiro/core';
 import { audit } from '../audit';
 import type { AuthedPlayer } from '../auth';
 import type { Env } from '../env';
@@ -89,6 +89,13 @@ function parseSettings(v: unknown): Record<string, unknown> {
     if (!PERIOD_CHOICES.includes(v.periodDays as number | null)) throw new HttpError(400, 'bad_settings', '競争期間は30・90・180・365日か無期限です');
     out.periodDays = v.periodDays;
   }
+  // 市場の街（市区町村のコード。出店マップ）
+  if (v.cityCode !== undefined && v.cityCode !== null) {
+    if (typeof v.cityCode !== 'string' || !/^\d{5}$/.test(v.cityCode) || locationProblem(v.cityCode) || !locationInfo(v.cityCode)) {
+      throw new HttpError(400, 'bad_settings', '市場の街（市区町村）が不正です');
+    }
+    out.cityCode = v.cityCode;
+  }
   return out;
 }
 
@@ -149,6 +156,7 @@ export async function createMarketApi(req: Request, env: Env, ctx: ExecutionCont
       typeof st.startsAt === 'number' ? st.startsAt : now,
       typeof st.endsAt === 'number' ? st.endsAt : null,
     ),
+    ...(typeof st.cityCode === 'string' ? [env.DB.prepare('INSERT OR REPLACE INTO community_cities (market_id, city_code) VALUES (?, ?)').bind(marketId, st.cityCode)] : []),
     env.DB.prepare("INSERT OR IGNORE INTO market_companies (market_id, company_id, player_id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").bind(
       marketId,
       out.companyId ?? 'c1',
@@ -265,18 +273,31 @@ export async function joinMarketApi(req: Request, env: Env, ctx: ExecutionContex
 export async function publicCommunitiesApi(env: Env): Promise<Response> {
   const now = Date.now();
   const rows = await env.DB.prepare(
-    `SELECT m.id, m.name, m.created_at, c.description, c.entry, c.ai_fill, c.max_companies, c.period_days, c.ends_at,
+    `SELECT m.id, m.name, m.created_at, c.description, c.entry, c.ai_fill, c.max_companies, c.period_days, c.ends_at, cc.city_code,
        (SELECT COUNT(*) FROM market_companies mc WHERE mc.market_id = m.id AND mc.status = 'active') AS players
-     FROM markets m JOIN communities c ON c.market_id = m.id
+     FROM markets m JOIN communities c ON c.market_id = m.id LEFT JOIN community_cities cc ON cc.market_id = m.id
      WHERE m.status = 'open' AND c.visibility = 'public' AND (c.ends_at IS NULL OR c.ends_at > ?)
      ORDER BY m.created_at DESC LIMIT 50`,
   )
     .bind(now)
-    .all<{ id: string; name: string; created_at: number; description: string; entry: string; ai_fill: number; max_companies: number; period_days: number | null; ends_at: number | null; players: number }>();
+    .all<{ id: string; name: string; created_at: number; description: string; entry: string; ai_fill: number; max_companies: number; period_days: number | null; ends_at: number | null; city_code: string | null; players: number }>();
   return json({
     communities: rows.results
       .filter((r) => r.players < r.max_companies)
-      .map((r) => ({ marketId: r.id, name: r.name, description: r.description, entry: r.entry, aiFill: r.ai_fill === 1, maxCompanies: r.max_companies, periodDays: r.period_days, endsAt: r.ends_at, players: r.players, createdAt: r.created_at })),
+      .map((r) => ({
+        marketId: r.id,
+        name: r.name,
+        description: r.description,
+        entry: r.entry,
+        aiFill: r.ai_fill === 1,
+        maxCompanies: r.max_companies,
+        periodDays: r.period_days,
+        endsAt: r.ends_at,
+        cityCode: r.city_code,
+        cityName: locationLabel(r.city_code),
+        players: r.players,
+        createdAt: r.created_at,
+      })),
   });
 }
 
@@ -311,6 +332,7 @@ export async function deleteMarketApi(env: Env, ctx: ExecutionContext, player: A
     del('sync_runs'),
     del('market_companies'),
     del('market_members'),
+    del('community_cities'),
     del('communities'),
     env.DB.prepare('DELETE FROM markets WHERE id = ?').bind(marketId),
   ]);

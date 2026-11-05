@@ -42,6 +42,8 @@ export * from './sim/accident';
 export * from './sim/commute';
 export * from './sim/company';
 export * from './sim/stores';
+export * from './sim/location';
+export { MUNICIPALITIES, PREFECTURES } from './data/municipalities';
 export * from './sim/manager';
 export * from './sim/ads';
 export * from './sim/metrics';

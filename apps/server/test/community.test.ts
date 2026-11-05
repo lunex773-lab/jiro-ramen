@@ -273,3 +273,21 @@ describe('市場を消す（作った人だけ。ほかの人の会社があっ�
     expect(pub.body.communities.some((x) => x.marketId === m.marketId)).toBe(false);
   });
 });
+
+describe('市場の街（出店マップ。市場は1つの街）', () => {
+  it('作る人が市区町村を選ぶと、全社の店がその街にあり、公開の一覧に街の名前が出る。不正な街は断る', async () => {
+    const a = await newPlayer('街の人');
+    const m = await create(a, '街の店', { visibility: 'public', cityCode: '27100' });
+    const v = await callJson<View & { settings: { cityCode: string | null } }>(`/api/v1/market/${m.marketId}`, { token: a.token });
+    expect(v.body.settings.cityCode).toBe('27100');
+    expect(v.body.mine!.state.company.stores[0]!.location).toBe('27100');
+    const row = await env.DB.prepare('SELECT city_code FROM community_cities WHERE market_id = ?').bind(m.marketId).first<{ city_code: string }>();
+    expect(row!.city_code).toBe('27100');
+    const list = await callJson<{ communities: { marketId: string; cityCode: string; cityName: string }[] }>('/api/v1/communities', { token: a.token });
+    expect(list.body.communities.find((x) => x.marketId === m.marketId)).toMatchObject({ cityCode: '27100', cityName: '大阪府 大阪市' });
+    for (const bad of ['99999', '2710', 27100, '00000']) {
+      const r = await callJson('/api/v1/market/create', { token: a.token, body: { name: 'x', companyName: 'y', settings: { cityCode: bad } } });
+      expect(r.status, String(bad)).toBe(400);
+    }
+  });
+});

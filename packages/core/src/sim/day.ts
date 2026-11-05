@@ -10,6 +10,7 @@ import type { DayReport, GameState } from '../types';
 import { clamp, newId } from '../util';
 import { closeLostItems } from './customers';
 import { activeStore, recordCompanyDay } from './company';
+import { storeRentMult } from './location';
 import { payAds } from './ads';
 import { runAbsentStores } from './stores';
 import { cash, emptyDayStats, finalProfit, foldIntoLastReport, netSales, operatingProfit, recordPL, totalDebt } from './economy';
@@ -52,10 +53,15 @@ export function allCustomersGone(s: GameState): boolean {
   return s.customers.every((c) => c.state === 'left' || c.state === 'abandoned' || c.state === 'smoking' || c.state === 'crew' || c.forLostItem !== null);
 }
 
+/** 今いる店の1日の家賃（広さ × 立地 × 場所の人口） */
+export function storeRent(s: GameState): number {
+  const st = STAGES[s.career.stage]!;
+  return Math.round(st.rent * (s.company ? storeRentMult(activeStore(s)) : 1));
+}
+
 /** 当日の固定費（翌日の予測支出にも使う） */
 export function fixedCosts(s: GameState): { rent: number; wages: number; upkeep: number; utilities: number; loans: number; total: number } {
-  const st = STAGES[s.career.stage]!;
-  const rent = st.rent;
+  const rent = storeRent(s);
   // 給与はシフトどおりに働いた場合の見込み（閉店後は翌日の分）
   const wages = expectedWages(s, s.phase === 'closed' ? s.day + 1 : s.day);
   const upkeep = upkeepTotal(s);
@@ -151,8 +157,10 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
   closeStaffDay(s);
   // 短期バイトはその日だけ（給与は wages に入っている）
   releaseTemps(s);
-  recordPL(s, 'rent', st.rent);
-  payOrAccrue(s, 'rent', st.rent, `家賃（${s.day}日目）`, key('rent'));
+  // 家賃は店の広さ × 立地 × 場所（前は手動で営業している支店で立地の倍率が抜けていた）
+  const rent = storeRent(s);
+  recordPL(s, 'rent', rent);
+  payOrAccrue(s, 'rent', rent, `家賃（${s.day}日目）`, key('rent'));
   recordPL(s, 'wages', wages);
   payOrAccrue(s, 'wage', wages, `給与（${s.day}日目）`, key('wage'));
   const upkeep = upkeepTotal(s);

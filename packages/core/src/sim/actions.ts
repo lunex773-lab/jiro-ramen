@@ -23,7 +23,7 @@ import { forceEvent } from './visitors';
 import { promote, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
 import { answerRequest } from './media';
 import { setCompanyPolicy } from './company';
-import { assignManager, enterStore, openStore, renameShop, renameStore, setStorePolicy, transferEmployee } from './stores';
+import { assignManager, enterStore, openStore, renameShop, renameStore, setStoreLocation, setStorePolicy, transferEmployee } from './stores';
 
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
@@ -77,7 +77,8 @@ export type Action =
   | { type: 'debugEvent'; kind: EventKind }
   // ── 会社と店舗（Phase 2） ──
   /** 出店する（閉店後。物件の候補と、店長にする今の店の社員） */
-  | { type: 'openStore'; propertyId: string; managerId: Id }
+  | { type: 'openStore'; propertyId: string; managerId: Id; location?: string }
+  | { type: 'setStoreLocation'; storeId: Id; location: string }
   /** 店に入る（閉店後。次の営業日からその店で営業する） */
   | { type: 'enterStore'; storeId: Id }
   /** 店長を決める（その店の社員。null で外す） */
@@ -294,7 +295,7 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return expand(s, ctx);
     case 'openStore':
       if (typeof a.propertyId !== 'string' || typeof a.managerId !== 'string') return fail('不正な指定');
-      return openStore(s, ctx, a.propertyId, a.managerId);
+      return openStore(s, ctx, a.propertyId, a.managerId, typeof a.location === 'string' ? a.location : undefined);
     case 'enterStore':
       if (typeof a.storeId !== 'string') return fail('不正な指定');
       return enterStore(s, ctx, a.storeId);
@@ -333,6 +334,10 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
     case 'rename': {
       const r = renameShop(s, a.name);
       return r.ok ? { ok: true } : fail(r.reason ?? '店名を変えられません');
+    }
+    case 'setStoreLocation': {
+      const r = setStoreLocation(s, a.storeId, a.location);
+      return r.ok ? { ok: true } : fail(r.reason ?? '場所を決められません');
     }
     case 'renameStore': {
       const r = renameStore(s, a.storeId, a.name);

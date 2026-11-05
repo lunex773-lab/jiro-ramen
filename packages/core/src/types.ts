@@ -1196,6 +1196,8 @@ export interface StoreEntry {
   name: string;
   /** 物件（data/properties.ts）。1店舗目は 'home' */
   propertyId: string;
+  /** 出店の場所（市区町村のコード5桁。出店マップ）。前のセーブの店・場所を決めていない1店目はない → 倍率 ×1 */
+  location?: string;
   /** 開店した日 */
   openedDay: number;
   /** 店長（社員の id）。プレイヤーがいる店では空でもよい */
