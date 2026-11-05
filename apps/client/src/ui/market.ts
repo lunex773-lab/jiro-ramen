@@ -147,7 +147,32 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
                 'div',
                 { class: `trow${m.ended ? ' ended' : ''}`, 'data-my-market': m.marketId },
                 h('div', { class: 'tname' }, m.name, h('small', null, [`招待コード ${m.code}${m.isOwner ? '・あなたが作った市場' : ''}`, marketState(m)].filter(Boolean).join('・'))),
-                h('button', { class: 'btn', 'data-open-market': m.marketId, onclick: () => open(c.api, c.auth, m.marketId) }, '開く'),
+                h(
+                  'div',
+                  { class: 'row' },
+                  h('button', { class: 'btn', 'data-open-market': m.marketId, onclick: () => open(c.api, c.auth, m.marketId) }, '開く'),
+                  m.isOwner
+                    ? h(
+                        'button',
+                        {
+                          class: 'btn ghost danger',
+                          'data-delete-market': m.marketId,
+                          onclick: async () => {
+                            if (await confirmDeleteMarket(app.root, m.name, m.otherCompanies ?? 0)) {
+                              try {
+                                await c.api.deleteMarket(c.auth.token, m.marketId);
+                                toast(app.root, `「${m.name}」を消しました`, 'good', 2000);
+                              } catch (e) {
+                                toast(app.root, errText(e), 'warn');
+                              }
+                              void refreshList();
+                            }
+                          },
+                        },
+                        '消す',
+                      )
+                    : null,
+                ),
               ),
             ),
       );
@@ -278,6 +303,17 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
     void refreshPublic();
   }
   return el;
+}
+
+/** 市場を消す前の確認（消すと元に戻せない。ほかの人の会社も消える。オーナーの判断） */
+function confirmDeleteMarket(root: HTMLElement, name: string, others: number): Promise<boolean> {
+  return confirmDialog(
+    root,
+    '市場を消す',
+    `「${name}」を消します。\nこの市場の会社・店・お金・記録がすべて消え、元に戻せません。${others > 0 ? `\nほかのプレイヤーの会社 ${others}社も消えます。` : ''}\n受け取った称号は残ります。`,
+    '消す',
+    true,
+  );
 }
 
 /** 自動営業の実行状況（仕様書 8.1）: 同期の最中ならその段階、なければ前回の結果 */
@@ -431,6 +467,7 @@ export class MarketScreen {
             '🏁 この市場の競争期間は終わりました。営業は続けられます（ほかの会社とは同期しません）。上位3社には大会の称号が届きます。会社は「育てた企業も参加できる」別のコミュニティへ持っていけます（入口の「参加する会社」で選びます）。',
           )
         : null,
+      v.isOwner ? h('button', { class: 'btn ghost danger', 'data-delete-this-market': '', onclick: () => void this.deleteMarket(v) }, '🗑 この市場を消す') : null,
       !mine && v.myStatus === 'moved' ? h('p', { class: 'note', 'data-my-status': 'moved' }, 'あなたの会社は別のコミュニティへ移りました（この市場の記録は残ります）') : null,
       !mine && v.myStatus === 'retired' ? h('p', { class: 'note', 'data-my-status': 'retired' }, 'あなたの会社は引退しました（この市場の記録は残ります）') : null,
       h('div', { class: 'market-code' }, h('span', { class: 'note' }, '招待コード'), codeBlock(this.root, v.code)),
@@ -585,6 +622,19 @@ export class MarketScreen {
       h('p', { class: 'note' }, '営業していない間の経営（値段・人・出店）は、この画面で決められます。拡張の工事は、営業の画面で閉店後に決めます。'),
     );
     return h('div', { class: 'market-mine-col' }, finance, rules, this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
+  }
+
+  /** この市場を消す（作った人だけ）。消したら入口へ戻る */
+  private async deleteMarket(v: MarketScreenView): Promise<void> {
+    const others = v.companies.filter((c) => c.kind === 'player' && !c.mine).length;
+    if (!(await confirmDeleteMarket(this.root, v.name, others))) return;
+    try {
+      await this.api.deleteMarket(this.auth.token, this.marketId);
+      toast(this.root, `「${v.name}」を消しました`, 'good', 2000);
+      this.close();
+    } catch (e) {
+      toast(this.root, errText(e), 'warn');
+    }
   }
 
   /** 名前を変える欄（入力と「変更」。Enter でも変える） */

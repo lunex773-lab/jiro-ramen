@@ -42,6 +42,8 @@ export interface MyMarket {
   companyId?: string | null;
   companyName?: string | null;
   companyStatus?: string | null;
+  /** ほかのプレイヤーの会社の数（市場を消すときの確認に出す） */
+  otherCompanies?: number;
 }
 
 /** 公開のコミュニティ */
@@ -171,6 +173,11 @@ export class Api {
   /** 公開のコミュニティの一覧（終わる前・空きのあるもの） */
   publicCommunities(token: string): Promise<{ communities: PublicCommunity[] }> {
     return this.req('/api/v1/communities', { token });
+  }
+
+  /** 自分が作った市場を消す（ほかの人の会社も消える。称号は残る） */
+  deleteMarket(token: string, marketId: string): Promise<{ ok: boolean }> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}`, { method: 'DELETE', token });
   }
 
   /** 会社を引退させる（終わった市場・破産した会社） */

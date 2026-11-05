@@ -68,7 +68,8 @@ function mockCommunities(page: Page) {
             .filter(([, e]) => mineIn(e.m))
             .map(([id, e]) => {
               const c = mineIn(e.m)!;
-              return { marketId: id, code: e.code, name: e.m.name, createdAt: e.m.createdAt, isOwner: e.owner === ME, endsAt: e.m.settings.endsAt, ended: isEnded(e.m, t), entry: e.m.settings.entry, companyId: c.id, companyName: c.name, companyStatus: c.status };
+              const otherCompanies = e.m.companies.filter((x) => x.kind === 'player' && x.ownerId !== ME).length;
+              return { marketId: id, code: e.code, name: e.m.name, createdAt: e.m.createdAt, isOwner: e.owner === ME, endsAt: e.m.settings.endsAt, ended: isEnded(e.m, t), entry: e.m.settings.entry, companyId: c.id, companyName: c.name, companyStatus: c.status, otherCompanies };
             });
           return send({ markets: list });
         }
@@ -117,6 +118,13 @@ function mockCommunities(page: Page) {
           return r.ok ? send({ ok: true }) : send({ error: r.reason, code: 'retire_refused' }, 409);
         }
         const view = /^\/api\/v1\/market\/([^/]+)$/.exec(p);
+        if (view && req.method() === 'DELETE') {
+          const e = markets.get(view[1]!);
+          if (!e) return send({ error: '市場が見つかりません', code: 'market_not_found' }, 404);
+          if (e.owner !== ME) return send({ error: '市場を作った人だけが消せます', code: 'not_owner' }, 403);
+          markets.delete(view[1]!);
+          return send({ ok: true });
+        }
         if (view && markets.has(view[1]!)) {
           const e = markets.get(view[1]!)!;
           return send({
@@ -212,4 +220,34 @@ test('コミュニティ: 終わった市場でも営業でき、会社を引退
   await expect(screen.locator('[data-my-status="retired"]')).toBeVisible();
   await expect(screen.locator('[data-market-play]')).toHaveCount(0);
   expect(mock.markets.get('old2')!.m.companies.find((c) => c.ownerId === ME)!.status).toBe('retired');
+});
+
+test('コミュニティ: 自分が作った市場は、確認してから消せる（ほかの人が作った市場には消すボタンが出ない）', async ({ page }) => {
+  const mock = mockCommunities(page);
+  await mock.install();
+  const lobby = await openLobby(page);
+  // ほかの人が作った市場（入っている）には「消す」が出ない
+  await lobby.locator('[data-join-public="pub1"]').click();
+  const screen = page.locator('.screen.market');
+  await expect(screen.locator('.market-head')).toContainText('みんなの市場');
+  await expect(screen.locator('[data-delete-this-market]')).toHaveCount(0);
+  await screen.getByRole('button', { name: '← 市場から出る' }).click();
+  const lobby2 = await openLobby(page);
+  await expect(lobby2.locator('[data-delete-market="pub1"]')).toHaveCount(0);
+  // 自分が作った市場は消せる（キャンセルすると消えない）
+  await lobby2.locator('[data-delete-market="old2"]').click();
+  const modal = page.locator('.modal');
+  await expect(modal).toContainText('元に戻せません');
+  await modal.getByRole('button', { name: 'キャンセル' }).click();
+  expect(mock.markets.has('old2')).toBe(true);
+  await lobby2.locator('[data-delete-market="old2"]').click();
+  await page.locator('.modal').getByRole('button', { name: '消す' }).click();
+  await expect(lobby2.locator('[data-my-market="old2"]')).toHaveCount(0);
+  expect(mock.markets.has('old2')).toBe(false);
+  // 市場の画面からも消せる
+  await lobby2.locator('[data-open-market="old1"]').click();
+  await screen.locator('[data-delete-this-market]').click();
+  await page.locator('.modal').getByRole('button', { name: '消す' }).click();
+  await expect(page.locator('.market-lobby')).toBeVisible();
+  expect(mock.markets.has('old1')).toBe(false);
 });
