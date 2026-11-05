@@ -691,7 +691,8 @@ export class MarketScreen {
         map.close();
         await this.act({ type: 'openStore', propertyId, managerId, location: city }, '出店しました');
       },
-      onClose: () => void this.refresh(),
+      // 閉じただけなら何も変わっていないので読み直さない（出店したときは出店の操作のあとで読み直す）
+      onClose: () => undefined,
     });
   }
 
