@@ -33,12 +33,36 @@ interface Board {
   prev: Map<string, number>;
 }
 
-async function board(env: Env, b: RankBoard, scope: RankScope, date: string, metric: RankMetric, marketId: string | null): Promise<Board> {
+/** キャッシュ（全体だけ。誰が見ても同じ） */
+function globalCache(b: RankBoard): Cache | null {
+  return b === 'community' ? null : (caches as unknown as { default: Cache }).default;
+}
+
+async function cached<T>(ctx: ExecutionContext, cache: Cache | null, url: string, load: () => Promise<T>): Promise<T> {
+  const key = new Request(url);
+  if (cache) {
+    const hit = await cache.match(key);
+    if (hit) return (await hit.json()) as T;
+  }
+  const v = await load();
+  if (cache) ctx.waitUntil(cache.put(key, new Response(JSON.stringify(v), { headers: { 'Cache-Control': `max-age=${GLOBAL_CACHE_SEC}`, 'Content-Type': 'application/json' } })));
+  return v;
+}
+
+/**
+ * 期間のランキングのもとの行。全体は期間（週・月・年・累計のキー）ごとに数分キャッシュする。
+ * 種別（売上・利益…）や見る日付が違っても同じ行を使うので、D1 の読み出しは全体で「2種類×期間の数」回／数分に収まる
+ */
+function periodRows(env: Env, ctx: ExecutionContext, b: RankBoard, key: string, marketId: string | null): Promise<RankAggRow[]> {
+  return cached(ctx, globalCache(b), `https://cache.jiro/rank-rows/${b}/${key}`, () => rows(env, b, key, marketId));
+}
+
+async function board(env: Env, ctx: ExecutionContext, b: RankBoard, scope: RankScope, date: string, metric: RankMetric, marketId: string | null): Promise<Board> {
   const key = scopeKey(scope, date);
   const prevKey = previousScopeKey(key);
-  const lines = computeRanking(await rows(env, b, key, marketId), b, metric);
+  const lines = computeRanking(await periodRows(env, ctx, b, key, marketId), b, metric);
   const prev = new Map<string, number>();
-  if (prevKey) for (const l of computeRanking(await rows(env, b, prevKey, marketId), b, metric)) prev.set(`${l.marketId}:${l.companyId}`, l.rank);
+  if (prevKey) for (const l of computeRanking(await periodRows(env, ctx, b, prevKey, marketId), b, metric)) prev.set(`${l.marketId}:${l.companyId}`, l.rank);
   return { key, prevKey, lines, prev };
 }
 
@@ -55,19 +79,12 @@ export async function rankingsApi(req: Request, env: Env, ctx: ExecutionContext,
     const row = await env.DB.prepare('SELECT 1 AS ok FROM market_members WHERE market_id = ? AND player_id = ?').bind(marketId, player.id).first();
     if (!row) throw new HttpError(404, 'market_not_found', 'この市場に参加していません');
   }
-  // 全体は数分だけキャッシュ（誰が見ても同じ。自分の企業の行は毎回ここで付ける）
-  const cacheKey = new Request(`https://cache.jiro/rankings/${b}/${scope}/${date}/${metric}`);
-  let data: { key: string; prevKey: string | null; lines: RankLine[]; prev: [string, number][] } | null = null;
-  const cache = b === 'community' ? null : (caches as unknown as { default: Cache }).default;
-  if (cache) {
-    const hit = await cache.match(cacheKey);
-    if (hit) data = (await hit.json()) as typeof data;
-  }
-  if (!data) {
-    const bd = await board(env, b, scope, date, metric, b === 'community' ? marketId : null);
-    data = { key: bd.key, prevKey: bd.prevKey, lines: bd.lines, prev: [...bd.prev.entries()] };
-    if (cache) ctx.waitUntil(cache.put(cacheKey, new Response(JSON.stringify(data), { headers: { 'Cache-Control': `max-age=${GLOBAL_CACHE_SEC}`, 'Content-Type': 'application/json' } })));
-  }
+  // 全体は数分だけキャッシュ（誰が見ても同じ。自分の企業の行は毎回ここで付ける）。順位の計算の結果も期間と種別ごとに置く
+  const sk = scopeKey(scope, date);
+  const data = await cached(ctx, globalCache(b), `https://cache.jiro/rankings/${b}/${sk}/${metric}`, async () => {
+    const bd = await board(env, ctx, b, scope, date, metric, b === 'community' ? marketId : null);
+    return { key: bd.key, prevKey: bd.prevKey, lines: bd.lines, prev: [...bd.prev.entries()] };
+  });
   const prev = new Map(data.prev);
   const withPrev = (l: RankLine) => ({ ...l, prevRank: prev.get(`${l.marketId}:${l.companyId}`) ?? null, mine: l.playerId === player.id, playerId: undefined });
   const mine = data.lines.filter((l) => l.playerId === player.id).map(withPrev);
