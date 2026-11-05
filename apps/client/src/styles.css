@@ -784,7 +784,6 @@ input, select { font: inherit; }
 .app:has(.ui-layer > .manage, .ui-layer > .layout-editor, .ui-layer > .screen:not(.behind)) .toasts {
   top: auto;
   bottom: calc(var(--sab) + 12px);
-  flex-direction: column-reverse;
 }
 .toast {
   background: rgba(20, 16, 12, 0.94);
