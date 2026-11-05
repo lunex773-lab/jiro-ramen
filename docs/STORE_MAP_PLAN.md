@@ -68,5 +68,6 @@
 | --- | --- | --- |
 | M1 地図データ・市区町村の表・人口の倍率と測定 | 済み（`apps/client/public/map/`・`packages/core/src/data/municipalities.ts`・`sim/location.ts`・`test/econ/location-balance.test.ts`） | このコミット |
 | M2 店の場所・場所つきの出店・1店目の場所・市場の街・サーバーの検証 | 済み（`openStore` の `location`・`setStoreLocation`・`CommunitySettings.cityCode`・D1 `community_cities`。テスト: core 8件・サーバー 1件） | このコミット |
-| M3 出店マップの部品 | これから | — |
-| M4 画面につなぐ | これから | — |
+| M3 出店マップの部品 | 済み（`apps/client/src/ui/store-map.ts`。全国→地方→都道府県→市区町村→候補地、拡大縮小・ドラッグ・ピンチ・ホイール、パンくず・戻る、検索、回した表示） | 940af5a |
+| M4 画面につなぐ | 済み（新しく始めるときの1店目の場所・経営メニュー「会社」の出店・場所のない店の場所・共通市場の街の選択と街の地図での出店。E2E: 1店目の場所・会社の出店・市場の街） | このコミット |
+| M5 全体の回帰 | 済み（core 302件・サーバー 95件・E2E 63件成功。負荷で1件落ちた E2E は単独で3回とも成功） | このコミット |

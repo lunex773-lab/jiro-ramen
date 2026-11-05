@@ -132,6 +132,70 @@ test('経営メニューとレイアウト編集が開ける', async ({ page }) 
   await page.getByRole('button', { name: '完了' }).click();
 });
 
+test('出店マップ: 新しく始めるときに1店目の場所を選べる（拡大縮小・戻る・パンくず・検索）', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await closeHomeTip(page);
+  await page.getByText('ひとりで経営する').click();
+  await page.getByRole('button', { name: '新しく始める' }).first().click();
+  await page.locator('.modal input').fill('地図亭');
+  await page.getByRole('button', { name: '決定' }).click();
+  await page.getByRole('button', { name: 'スキップして1日目から' }).click();
+  const map = page.locator('[data-store-map]');
+  await expect(map).toContainText('1店目の場所を選ぶ');
+  await expect(map.locator('[data-pref]')).toHaveCount(47);
+  const svg = map.locator('svg.store-map-svg');
+  const vb = () => svg.getAttribute('viewBox');
+  // 拡大・縮小・全体
+  const v0 = await vb();
+  await map.locator('[data-map-zoom-in]').click();
+  const v1 = await vb();
+  expect(v1).not.toBe(v0);
+  await map.locator('[data-map-reset]').click();
+  expect(await vb()).toBe(v0);
+  if (!test.info().project.use.hasTouch) {
+    // ホイールで拡大、ドラッグで動かす（PC）
+    const box = (await svg.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -300);
+    await expect.poll(vb).not.toBe(v0);
+    const before = (await vb())!.split(' ').map(Number);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2 + 40, { steps: 6 });
+    await page.mouse.up();
+    const after = (await vb())!.split(' ').map(Number);
+    expect(after[0]).toBeLessThan(before[0]!);
+    await map.locator('[data-map-reset]').click();
+  }
+  // 地方 → 戻る → 全国
+  await map.locator('[data-map-region="九州・沖縄"]').click();
+  await expect(map.locator('[data-map-crumbs]')).toContainText('九州・沖縄');
+  await map.locator('[data-map-back]').click();
+  await expect(map.locator('[data-map-region="関東"]')).toBeVisible();
+  // 関東 → 東京都 → 「新宿」で探す → 新宿区 → パンくずで東京都に戻ってから選び直す
+  await map.locator('[data-map-region="関東"]').click();
+  await map.locator('[data-map-pref="13"]').click();
+  await map.locator('[data-map-search]').fill('新宿');
+  await expect(map.locator('[data-map-muni]')).toHaveCount(1);
+  await map.locator('[data-map-muni="13104"]').click();
+  await expect(map.locator('[data-map-crumbs]')).toContainText('新宿区');
+  await map.locator('[data-crumb="2"]').click();
+  await expect(map.locator('[data-map-crumbs]')).not.toContainText('新宿区');
+  await map.locator('[data-map-search]').fill('新宿');
+  await map.locator('[data-map-muni="13104"]').click();
+  await expect(map).toContainText('来客 +');
+  await map.locator('[data-map-confirm]').click();
+  await expect(map).toHaveCount(0);
+  await expect(page.getByText('ラーメンができるまで')).toBeVisible();
+  await page.getByRole('button', { name: '閉じる' }).click();
+  const loc = await page.evaluate(() => (window as unknown as { __jiro: { host: { state: { company: { stores: { location?: string }[] } } } } }).__jiro.host.state.company.stores[0]!.location);
+  expect(loc).toBe('13104');
+  // 経営メニューに本店の場所が出る
+  await page.locator('.chip.menu').click();
+  await expect(page.locator('.manage [data-home-location]')).toHaveText('東京都 新宿区');
+});
+
 test('経営メニューで屋号（店名）を変えられる（空の名前は受け付けない）', async ({ page }) => {
   await startNewGame(page);
   await page.locator('.chip.menu').click();

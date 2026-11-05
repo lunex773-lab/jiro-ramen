@@ -6,6 +6,8 @@
 
 import {
   cleanStoreName,
+  locationLabel,
+  locationProblem,
   STORE_NAME_MAX,
   storeDisplayName,
   adBudgetOf,
@@ -34,6 +36,7 @@ import {
 import type { App } from '../game/app';
 import { Api, ApiError, defaultServerUrl, type Auth, type MyMarket } from '../net/api';
 import { serverUrlNote } from './server-url';
+import { openStoreMap } from './store-map';
 import { confirmDialog, h, replace, stars, toast, yenStr } from './dom';
 import { codeBlock } from './room-code';
 
@@ -96,6 +99,31 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
   const period = sel('data-period', [['30', '30日'], ['90', '90日'], ['180', '180日'], ['365', '365日'], ['', '無期限']], '');
   const entry = sel('data-entry', [['grown', '育てた企業で参加できる'], ['fresh', '新規の企業だけ']], 'grown');
   const visibility = sel('data-visibility', [['invite', '招待制'], ['public', '公開']], 'invite');
+  // 市場の街（市場は1つの街。オーナーの判断）。選ばなければ指定なし（標準の数字）
+  let cityCode: string | null = null;
+  const cityLabel = h('b', { 'data-city-label': '' }, '指定なし');
+  const cityBtn = h(
+    'button',
+    {
+      class: 'btn ghost',
+      'data-pick-city': '',
+      onclick: () => {
+        const map = openStoreMap(app.root, {
+          title: '市場の街を選ぶ',
+          mode: 'city',
+          confirmLabel: 'この街にする',
+          cityInfo: (code) => ({ lines: ['全社の店はこの街の駅前・住宅街・郊外にあります。人口で来客と家賃が少し変わります。'], problem: locationProblem(code) }),
+          onPick: ({ code }) => {
+            cityCode = code;
+            cityLabel.textContent = locationLabel(code);
+            map.close();
+          },
+          onClose: () => undefined,
+        });
+      },
+    },
+    '🗾 地図で選ぶ',
+  );
   const status = h('div', { class: 'note', 'data-lobby-status': '' });
   const list = h('div', { class: 'table market-list' });
   const pubList = h('div', { class: 'table market-public', 'data-public-list': '' }, h('p', { class: 'note' }, '「公開のコミュニティを読み込む」で一覧が出ます'));
@@ -224,7 +252,7 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
                   h(
                     'small',
                     null,
-                    `${m.entry === 'fresh' ? '新規の企業だけ' : '育てた企業も参加できる'}・${m.players}人／${m.maxCompanies}社${m.aiFill ? '（空きは AI 企業）' : ''}・${m.endsAt ? `${endText(m.endsAt)}まで` : '無期限'}`,
+                    `${m.cityName ? `${m.cityName}・` : ''}${m.entry === 'fresh' ? '新規の企業だけ' : '育てた企業も参加できる'}・${m.players}人／${m.maxCompanies}社${m.aiFill ? '（空きは AI 企業）' : ''}・${m.endsAt ? `${endText(m.endsAt)}まで` : '無期限'}`,
                   ),
                   m.description ? h('small', null, m.description) : null,
                 ),
@@ -252,6 +280,7 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
       h('div', { class: 'kv' }, h('span', null, '競争期間'), period),
       h('div', { class: 'kv' }, h('span', null, '参加できる企業'), entry),
       h('div', { class: 'kv' }, h('span', null, '参加の方法'), visibility),
+      h('div', { class: 'kv' }, h('span', null, '市場の街'), h('div', { class: 'row' }, cityLabel, cityBtn)),
       h(
         'button',
         {
@@ -268,6 +297,7 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
                 periodDays: period.value === '' ? null : Number(period.value),
                 entry: entry.value,
                 visibility: visibility.value,
+                ...(cityCode ? { cityCode } : {}),
               });
               open(c.api, c.auth, r.marketId);
             } catch (e) {
@@ -614,6 +644,7 @@ export class MarketScreen {
       { class: 'card market-rules' },
       h('h4', null, 'この市場の決まり'),
       st.description ? h('p', { class: 'note', 'data-description': '' }, st.description) : null,
+      row('街', st.cityCode ? `${locationLabel(st.cityCode)}（全社の店はこの街。人口で来客と家賃が少し変わる）` : '指定なし（標準の数字）'),
       row('参加企業数', `${st.maxCompanies}社まで${st.aiFill ? '（空いた枠は AI 企業）' : '（人だけ）'}`),
       row('競争期間', st.endsAt ? `${PERIOD_LABEL(st.periodDays)}（${new Date(st.endsAt).toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })} 0時まで）` : PERIOD_LABEL(st.periodDays)),
       row('参加できる企業', st.entry === 'fresh' ? '新規の企業だけ' : '育てた企業も参加できる'),
@@ -622,6 +653,46 @@ export class MarketScreen {
       h('p', { class: 'note' }, '営業していない間の経営（値段・人・出店）は、この画面で決められます。拡張の工事は、営業の画面で閉店後に決めます。'),
     );
     return h('div', { class: 'market-mine-col' }, finance, rules, this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
+  }
+
+  /** 市場の街の地図で出店先を選ぶ（市場は1つの街。駅前・住宅街・郊外の物件を全社で取り合う） */
+  private openCityMap(s: GameState, v: MarketScreenView): void {
+    const city = v.settings.cityCode;
+    if (!city) return;
+    const homeFull = s.employees.filter((e) => e.profile.employment === 'full');
+    let managerId = homeFull[0]?.id ?? '';
+    const map = openStoreMap(this.root, {
+      title: `出店先を選ぶ（${locationLabel(city)}）`,
+      mode: 'site',
+      onlyCity: city,
+      confirmLabel: 'ここに出店する',
+      siteInfo: (_code, pid) => {
+        const p = PROPERTIES[pid]!;
+        const free = v.freeSlots[pid] ?? 0;
+        const has = s.company.stores.some((x) => x.propertyId === pid);
+        return {
+          lines: [`空き ${free}件・初期費用 ${yenStr(p.initialCost)}・準備 ${p.openingDays}日`],
+          problem: has ? 'この物件の種類にはもう出店しています' : free <= 0 ? '物件が空いていません（ほかの企業が出店しています）' : !managerId ? '店長にする社員がいません' : openStoreProblem(s, pid, managerId),
+        };
+      },
+      extra: () =>
+        homeFull.length > 0
+          ? h(
+              'div',
+              { class: 'kv' },
+              h('span', null, '店長'),
+              h('select', { 'data-open-mgr': '', onchange: (ev: Event) => (managerId = (ev.target as HTMLSelectElement).value) }, homeFull.map((e) => h('option', { value: e.id, selected: e.id === managerId }, `${e.profile.name}（${ROLE_LABEL[e.profile.role]}）`))),
+            )
+          : null,
+      onPick: async ({ propertyId }) => {
+        if (!propertyId) return;
+        const p = PROPERTIES[propertyId]!;
+        if (!(await confirmDialog(this.root, '出店', `${locationLabel(city)}の${p.area}（${p.name}）に出店します。初期費用 ${yenStr(p.initialCost)}。`, '出店する'))) return;
+        map.close();
+        await this.act({ type: 'openStore', propertyId, managerId, location: city }, '出店しました');
+      },
+      onClose: () => void this.refresh(),
+    });
   }
 
   /** この市場を消す（作った人だけ）。消したら入口へ戻る */
@@ -838,6 +909,9 @@ export class MarketScreen {
       missingSeats.length > 0 ? h('button', { class: 'btn ghost', onclick: async () => { for (const seat of missingSeats) await this.act({ type: 'buySeat', seatIndex: seat.index }); } }, `増えた席の椅子を買う（${missingSeats.length}脚）`) : null,
       s.career.stage >= 1 && fridges < 2 ? h('button', { class: 'btn ghost', onclick: () => void this.act({ type: 'buyEquipment', equipType: 'fridge', autoPlace: true }, '冷蔵庫を買いました') }, '2台目の冷蔵庫を買う（12席で杯数が増えると足りなくなる）') : null,
       h('p', { class: 'note' }, `出店: ${STAGES[BALANCE.company.unlockStage]?.seats.length ?? 12}席以上で評判★${BALANCE.company.unlockReputation.toFixed(1)}以上の店と、店長にする社員（本店から移る）、初期費用＋運転資金 ${yenStr(BALANCE.company.minFundsAfterOpen)} が要ります。物件は全社で取り合います。`),
+      v.settings.cityCode
+        ? h('button', { class: 'btn primary', 'data-market-open-map': '', onclick: () => this.openCityMap(s, v) }, `🗾 ${locationLabel(v.settings.cityCode)}の地図で出店先を選ぶ`)
+        : null,
       h(
         'div',
         { class: 'table' },

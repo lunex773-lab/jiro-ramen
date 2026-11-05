@@ -174,6 +174,15 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   await lobby.locator('input[placeholder="会社（店）の名前"]').fill('テスト亭');
   // 作る人が決める: 参加企業数（AI で埋める）
   await lobby.locator('[data-max-companies]').selectOption('4');
+  // 市場の街を地図で選ぶ（市場は1つの街）
+  await lobby.locator('[data-pick-city]').click();
+  const cityMap = page.locator('[data-store-map]');
+  await cityMap.locator('[data-map-region="近畿"]').click();
+  await cityMap.locator('[data-map-pref="27"]').click();
+  await cityMap.locator('[data-map-muni="27100"]').click();
+  await cityMap.locator('[data-map-confirm]').click();
+  await expect(cityMap).toHaveCount(0);
+  await expect(lobby.locator('[data-city-label]')).toHaveText('大阪府 大阪市');
   await lobby.locator('[data-create-market]').click();
   // 市場の画面
   const screen = page.locator('.screen.market');
@@ -187,6 +196,19 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   expect(mock.market!.settings.maxCompanies).toBe(4);
   await expect(screen.locator('.market-standings .trow.mine')).toContainText('テスト亭（あなた）');
   await expect(screen.locator('.market-rules')).toContainText('4社まで');
+  expect(mock.market!.settings.cityCode).toBe('27100');
+  expect(mock.market!.companies.every((c) => c.state.company.stores[0]!.location === '27100')).toBe(true);
+  await expect(screen.locator('.market-rules')).toContainText('大阪府 大阪市');
+  // 市場の画面: 街の地図で出店先を見る（その街だけ。駅前・住宅街・郊外の3か所）
+  await screen.locator('[data-market-open-map]').click();
+  const siteMap = page.locator('[data-store-map]');
+  await expect(siteMap.locator('[data-muni]')).toHaveCount(1);
+  await expect(siteMap.locator('[data-site]')).toHaveCount(3);
+  await siteMap.locator('[data-map-site="station"] button').click();
+  await expect(siteMap.locator('[data-map-site="station"]')).toContainText('空き');
+  await expect(siteMap.locator('[data-map-confirm]')).toBeDisabled();
+  await siteMap.locator('[data-map-close]').click();
+  await expect(siteMap).toHaveCount(0);
   // 屋号を変える（市場の会社の名前も変わる）
   await screen.locator('[data-rename-shop]').fill('テスト亭 本舗');
   await screen.locator('[data-rename-shop-ok]').click();

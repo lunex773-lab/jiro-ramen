@@ -56,6 +56,8 @@ export interface PublicCommunity {
   maxCompanies: number;
   periodDays: number | null;
   endsAt: number | null;
+  cityCode?: string | null;
+  cityName?: string;
   players: number;
   createdAt: number;
 }
