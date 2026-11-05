@@ -30,7 +30,7 @@ import { receiveDeliveries } from './sim/inventory';
 import { expansionInfo } from './sim/layout';
 import { planManagerDay, runManagerDay, standaloneArrivals } from './sim/manager';
 import { makeCtx } from './sim/notices';
-import { openStoreProblem, runAbsentStores, storeStatus } from './sim/stores';
+import { cleanStoreName, openStoreProblem, runAbsentStores, storeStatus } from './sim/stores';
 
 export const MARKET_SCHEMA = 2;
 
@@ -622,6 +622,9 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
   }
   const valueStart = enterpriseValue(c.state);
   c.state = sanitize(next, o.demand);
+  // 端末の経営メニューで屋号を変えていれば、市場の会社の名前も合わせる
+  c.name = cleanStoreName(c.state.shopName) || c.name;
+  c.state.shopName = c.name;
   c.openDay = null;
   c.progress.stateVersion += 1;
   c.progress.synchronizationStatus = 'idle';
@@ -1155,6 +1158,7 @@ export const MARKET_ACTIONS: ReadonlySet<Action['type']> = new Set<Action['type'
   'payArrears',
   'setAutoOrderMode',
   'rename',
+  'renameStore',
 ]);
 
 /** プレイヤー企業の操作を適用する（市場の規則の確認のあと、ひとりプレイと同じ core の操作で）。状態の版を上げる */
@@ -1173,7 +1177,7 @@ export function marketAction(m: MarketState, ownerId: string, a: Action, now = 0
   c.state.phase = phase;
   if (!r.ok) return r;
   c.progress.stateVersion += 1;
-  if (a.type === 'rename') c.name = c.state.shopName;
+  if (a.type === 'rename' || a.type === 'renameStore') c.name = c.state.shopName;
   if (a.type === 'openStore') {
     const st = c.state.company.stores[c.state.company.stores.length - 1]!;
     st.openedDay = c.progress.lastProcessedGameDate;

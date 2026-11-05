@@ -23,7 +23,7 @@ import { forceEvent } from './visitors';
 import { promote, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
 import { answerRequest } from './media';
 import { setCompanyPolicy } from './company';
-import { assignManager, enterStore, openStore, setStorePolicy, transferEmployee } from './stores';
+import { assignManager, enterStore, openStore, renameShop, renameStore, setStorePolicy, transferEmployee } from './stores';
 
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
@@ -68,6 +68,7 @@ export type Action =
   | { type: 'takeLoan' }
   | { type: 'payArrears' }
   | { type: 'rename'; name: string }
+  | { type: 'renameStore'; storeId: Id; name: string }
   | { type: 'giveUp' }
   | { type: 'tutorial'; op: TutorialOp; stepId?: string }
   /** 爆発事故のあと、事故当日の仕込み開始時点に戻す（accidentId は事故の ID。違えば何もしない） */
@@ -330,10 +331,12 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return paid > 0 ? { ok: true, data: paid } : fail('支払える資金がありません');
     }
     case 'rename': {
-      const name = String(a.name ?? '').trim().slice(0, 20);
-      if (!name) return fail('店名を入力してください');
-      s.shopName = name;
-      return { ok: true };
+      const r = renameShop(s, a.name);
+      return r.ok ? { ok: true } : fail(r.reason ?? '店名を変えられません');
+    }
+    case 'renameStore': {
+      const r = renameStore(s, a.storeId, a.name);
+      return r.ok ? { ok: true } : fail(r.reason ?? '店名を変えられません');
     }
     case 'giveUp': {
       if (s.phase !== 'closed') return fail('閉店後にだけ選べます');

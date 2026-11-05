@@ -20,6 +20,52 @@ export function storeDisplayName(s: GameState, entry: StoreEntry): string {
   return entry.propertyId === 'home' ? s.shopName : entry.name;
 }
 
+/** 店名の長さの上限（文字数） */
+export const STORE_NAME_MAX = 20;
+
+/** 店名に使える形にする（制御文字を除き、空白をまとめ、前後の空白を取り、20文字まで） */
+export function cleanStoreName(v: unknown): string {
+  const t = String(v ?? '')
+    .replace(/[\t\n\r]/g, ' ')
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return Array.from(t).slice(0, STORE_NAME_MAX).join('').trim();
+}
+
+/** 2店目以降に自動で付けた名前（屋号＋地域＋店） */
+function autoStoreName(shopName: string, entry: StoreEntry): string | null {
+  const prop = PROPERTIES[entry.propertyId];
+  return prop ? `${shopName} ${prop.area}店` : null;
+}
+
+/**
+ * 屋号（会社と本店の名前）を変える。2店目以降で自動で付けた名前（屋号＋地域＋店）のままの店は、新しい屋号に合わせる
+ * （自分で名前を付けた店はそのまま）
+ */
+export function renameShop(s: GameState, raw: unknown): { ok: boolean; reason?: string } {
+  const name = cleanStoreName(raw);
+  if (!name) return { ok: false, reason: '店名を入力してください' };
+  const old = s.shopName;
+  s.shopName = name;
+  for (const entry of s.company?.stores ?? []) {
+    if (entry.propertyId === 'home') entry.name = name;
+    else if (entry.name === autoStoreName(old, entry)) entry.name = autoStoreName(name, entry) ?? entry.name;
+  }
+  return { ok: true };
+}
+
+/** 店の名前を変える（本店なら屋号を変える） */
+export function renameStore(s: GameState, storeId: Id, raw: unknown): { ok: boolean; reason?: string } {
+  const entry = s.company?.stores.find((x) => x.id === storeId);
+  if (!entry) return { ok: false, reason: '店が見つかりません' };
+  if (entry.propertyId === 'home') return renameShop(s, raw);
+  const name = cleanStoreName(raw);
+  if (!name) return { ok: false, reason: '店名を入力してください' };
+  entry.name = name;
+  return { ok: true };
+}
+
 /** 店の段階と評判（プレイヤーがいる店は GameState、いない店はしまった中身） */
 export function storeStatus(s: GameState, entry: StoreEntry): { stage: number; reputation: number; employees: Employee[] } {
   if (!entry.snapshot) return { stage: s.career.stage, reputation: s.reputation, employees: s.employees };

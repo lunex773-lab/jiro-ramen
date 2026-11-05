@@ -1,6 +1,8 @@
 // 経営メニュー（設計書 14.6 経営ダッシュボード、19.1 在庫/従業員/設備/拡張/キャリア）。
 
 import {
+  cleanStoreName,
+  STORE_NAME_MAX,
   BALANCE,
   BOWL_PACK,
   CALLS,
@@ -217,6 +219,28 @@ export class ManageMenu {
     return this.host.mode === 'remote' && !this.host.isHost;
   }
 
+  /** 名前を変える欄（入力と「変更」。Enter でも変える）。ゲストは変えられない */
+  private renameRow(label: string, current: string, attr: string, id: string, submit: (name: string) => void): HTMLElement {
+    const can = this.host.isHost;
+    const input = h('input', { class: 'input rename-input', value: current, maxLength: STORE_NAME_MAX, [attr]: id, disabled: !can, 'aria-label': label }) as HTMLInputElement;
+    const go = () => {
+      const v = cleanStoreName(input.value);
+      if (!v) {
+        toast(this.root, '店名を入力してください', 'warn');
+        input.value = current;
+        return;
+      }
+      if (v !== current) submit(v);
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        go();
+      }
+    });
+    return h('div', { class: 'kv rename-row' }, h('span', null, label), h('div', { class: 'row' }, input, h('button', { class: 'btn', [`${attr}-ok`]: id, disabled: !can, onclick: go }, '変更')));
+  }
+
   private async act(a: Action, okMsg?: string): Promise<boolean> {
     if (this.readOnly) {
       toast(this.root, '経営の操作はホストだけができます', 'warn');
@@ -308,6 +332,9 @@ export class ManageMenu {
         'section',
         { class: 'card store-card', 'data-store': entry.id },
         h('h4', null, name),
+        entry.propertyId !== 'home'
+          ? this.renameRow('店名', entry.name, 'data-rename-store', entry.id, (v) => void this.act({ type: 'renameStore', storeId: entry.id, name: v }, `店名を「${v}」にしました`))
+          : null,
         row('状態', status),
         row('立地', `${prop.area}（来客 ×${prop.demand.toFixed(2)}・家賃 ×${prop.rentMult.toFixed(1)}）`),
         row('広さ', STAGES[st.stage]?.name ?? ''),
@@ -590,6 +617,17 @@ export class ManageMenu {
               ),
             )
           : h('p', { class: 'note' }, '営業日の利益の推移がここに表示されます'),
+      ),
+      h(
+        'section',
+        { class: 'card wide rename-card' },
+        h('h4', null, '店名（屋号）'),
+        this.renameRow('屋号', s.shopName, 'data-rename-shop', '', (v) => void this.act({ type: 'rename', name: v }, `店名を「${v}」にしました`)),
+        h(
+          'p',
+          { class: 'note' },
+          `看板・日報・市場の順位に出る名前です（${STORE_NAME_MAX}文字まで）。2店目以降で自動で付けた名前（「〇〇 駅前店」など）も新しい屋号に合わせます。2店目以降の名前は「会社」で1店ずつ変えられます。`,
+        ),
       ),
       s.notices.length > 0
         ? h(

@@ -1012,3 +1012,8 @@ input, select { font: inherit; }
 .ranking-table .move.down { color: var(--bad, #e05050); }
 .ranking-table .trow.mine { outline: 2px solid var(--yellow); }
 
+
+/* 店名を変える欄 */
+.rename-row .row { margin: 0; flex: 1 1 auto; justify-content: flex-end; min-width: 0; }
+.rename-row .rename-input { width: min(240px, 100%); min-width: 0; padding: 6px 8px; margin: 0; }
+.rename-row .btn { flex: 0 0 auto; }

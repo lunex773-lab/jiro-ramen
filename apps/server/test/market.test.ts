@@ -301,6 +301,27 @@ describe('共通市場のサーバー: 端末の1日と0時の同期', () => {
 });
 
 describe('共通市場のサーバー: 操作・保存・移行', () => {
+  it('屋号を変えると市場の会社の名前が変わり、0時の同期で D1 の会社とランキングの名前も変わる', async () => {
+    const a = await newPlayer('改名');
+    const m = await create(a, '旧い名前');
+    const r = await callJson<{ ok: boolean }>(`/api/v1/market/${m.marketId}/act`, { token: a.token, body: { cid: `rn-${newToken()}`, action: { type: 'rename', name: '新しい名前' } } });
+    expect(r.body.ok).toBe(true);
+    const v = await view(a, m.marketId);
+    expect(v.body.companies.find((c) => c.mine)!.name).toBe('新しい名前');
+    expect(v.body.mine!.state.shopName).toBe('新しい名前');
+    await playDay(a, m.marketId);
+    await setClock(m.marketId, 1, 0, 1);
+    await runDurableObjectAlarm(stub(m.marketId));
+    await settleMarketSync(m.marketId);
+    const row = await env.DB.prepare('SELECT name FROM market_companies WHERE market_id = ? AND player_id = ?').bind(m.marketId, a.playerId).first<{ name: string }>();
+    expect(row!.name).toBe('新しい名前');
+    const agg = await env.DB.prepare("SELECT name FROM rank_agg WHERE market_id = ? AND kind = 'player' AND scope_key = 'T'").bind(m.marketId).first<{ name: string }>();
+    expect(agg!.name).toBe('新しい名前');
+    // 空の名前は受け付けない
+    const ng = await callJson<{ ok: boolean }>(`/api/v1/market/${m.marketId}/act`, { token: a.token, body: { cid: `rn-${newToken()}`, action: { type: 'rename', name: '   ' } } });
+    expect(ng.body.ok).toBe(false);
+  });
+
   it('経営の操作は市場の規則で検証し、同じ cid の操作は二度適用しない', async () => {
     const a = await newPlayer('操作');
     const m = await create(a);

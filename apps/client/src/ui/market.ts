@@ -5,6 +5,9 @@
 // 画面は数秒ごとにサーバーから市場の今を読み直す（市場の権威はサーバー。操作は cid つきで送る）。
 
 import {
+  cleanStoreName,
+  STORE_NAME_MAX,
+  storeDisplayName,
   adBudgetOf,
   companyPolicyOf,
   tempHourly,
@@ -378,7 +381,7 @@ export class MarketScreen {
   async refresh(auto = false): Promise<void> {
     if (this.loading) return;
     // 選んでいる最中は描き直さない（自動の読み直しのとき）
-    if (auto && (this.pressing || (this.el.contains(document.activeElement) && document.activeElement?.tagName === 'SELECT'))) return;
+    if (auto && (this.pressing || (this.el.contains(document.activeElement) && (document.activeElement?.tagName === 'SELECT' || document.activeElement?.tagName === 'INPUT')))) return;
     this.loading = true;
     this.lastFetch = Date.now();
     try {
@@ -564,6 +567,7 @@ export class MarketScreen {
       'section',
       { class: 'card market-mine' },
       h('h4', null, `あなたの会社: ${s.shopName}`),
+      bankrupt ? null : this.renameRow('屋号', s.shopName, 'data-rename-shop', '', (v) => void this.act({ type: 'rename', name: v }, `店名を「${v}」にしました`)),
       row('現金', yenStr(s.money), s.money < 50_000 ? 'bad' : ''),
       row('借入・未払金', yenStr(totalDebt(s)), totalDebt(s) > 0 ? 'warn' : ''),
       last ? row(`${last.day}日目の営業利益（全店）`, yenStr(last.operatingProfit), last.operatingProfit < 0 ? 'bad' : 'good') : null,
@@ -587,6 +591,27 @@ export class MarketScreen {
       h('p', { class: 'note' }, '営業していない間の経営（値段・人・出店）は、この画面で決められます。拡張の工事は、営業の画面で閉店後に決めます。'),
     );
     return h('div', { class: 'market-mine-col' }, finance, rules, this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
+  }
+
+  /** 名前を変える欄（入力と「変更」。Enter でも変える） */
+  private renameRow(label: string, current: string, attr: string, id: string, submit: (name: string) => void): HTMLElement {
+    const input = h('input', { class: 'input rename-input', value: current, maxLength: STORE_NAME_MAX, [attr]: id, 'aria-label': label }) as HTMLInputElement;
+    const go = () => {
+      const v = cleanStoreName(input.value);
+      if (!v) {
+        toast(this.root, '店名を入力してください', 'warn');
+        input.value = current;
+        return;
+      }
+      if (v !== current) submit(v);
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        go();
+      }
+    });
+    return h('div', { class: 'kv rename-row' }, h('span', null, label), h('div', { class: 'row' }, input, h('button', { class: 'btn', [`${attr}-ok`]: id, onclick: go }, '変更')));
   }
 
   /** 会社を引退させる（終わった市場・破産した会社。記録は残り、1人が持てる会社の数から外れる） */
@@ -670,7 +695,8 @@ export class MarketScreen {
     return h(
       'section',
       { class: 'card store-card', 'data-store': entry.id },
-      h('h4', null, `${entry.name}（${STAGES[st.stage]?.seats.length ?? 8}席）`),
+      h('h4', null, `${storeDisplayName(s, entry)}（${STAGES[st.stage]?.seats.length ?? 8}席）`),
+      entry.propertyId !== 'home' ? this.renameRow('店名', entry.name, 'data-rename-store', entry.id, (v) => void this.act({ type: 'renameStore', storeId: entry.id, name: v }, `店名を「${v}」にしました`)) : null,
       h('div', { class: 'kv' }, h('span', null, '営業'), h('b', null, entry.snapshot && entry.snapshot.closedForConstruction > 0 ? '🛠 準備・工事中' : leadText)),
       h('div', { class: 'kv' }, h('span', null, '評判'), h('b', null, `${stars(st.reputation)} ${st.reputation.toFixed(2)}`)),
       r ? h('div', { class: 'kv' }, h('span', null, `${r.day}日目`), h('b', null, `${r.served}杯・来客${r.customers}人（帰った客 ${r.lost + r.balked}人）・利益 ${yenStr(r.operatingProfit)}`)) : null,

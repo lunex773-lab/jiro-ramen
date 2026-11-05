@@ -130,6 +130,24 @@ test('経営メニューとレイアウト編集が開ける', async ({ page }) 
   await page.getByRole('button', { name: '完了' }).click();
 });
 
+test('経営メニューで屋号（店名）を変えられる（空の名前は受け付けない）', async ({ page }) => {
+  await startNewGame(page);
+  await page.locator('.chip.menu').click();
+  const manage = page.locator('.manage');
+  await expect(manage.locator('.rename-card')).toBeVisible();
+  const input = manage.locator('[data-rename-shop]');
+  await input.fill('  麺処 テスト二郎  ');
+  await manage.locator('[data-rename-shop-ok]').click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __jiro: { host: { state: { shopName: string } } } }).__jiro.host.state.shopName)).toBe('麺処 テスト二郎');
+  await expect(manage.locator('[data-rename-shop]')).toHaveValue('麺処 テスト二郎');
+  // 空の名前は受け付けない（元の名前に戻る）
+  await manage.locator('[data-rename-shop]').fill('   ');
+  await manage.locator('[data-rename-shop]').press('Enter');
+  await expect(manage.locator('[data-rename-shop]')).toHaveValue('麺処 テスト二郎');
+  expect(await page.evaluate(() => (window as unknown as { __jiro: { host: { state: { shopName: string } } } }).__jiro.host.state.shopName)).toBe('麺処 テスト二郎');
+  await shot(page, '08-rename');
+});
+
 test('保存して再読み込みしても続きから遊べる', async ({ page }) => {
   await startNewGame(page);
   await page.locator('.chip.menu').click();

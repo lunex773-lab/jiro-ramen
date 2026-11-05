@@ -342,7 +342,11 @@ export class MarketRoom extends DurableObject<Env> {
     // プレイヤーの企業の状態（破産など）
     for (const c of m.companies) {
       if (c.kind !== 'player' || !c.ownerId) continue;
-      stmts.push(db.prepare('UPDATE market_companies SET status = ?, name = ?, updated_at = ? WHERE market_id = ? AND company_id = ? AND status != ?').bind(c.status, c.name, now, m.id, c.id, c.status));
+      stmts.push(
+        db
+          .prepare('UPDATE market_companies SET status = ?, name = ?, updated_at = ? WHERE market_id = ? AND company_id = ? AND (status != ? OR name != ?)')
+          .bind(c.status, c.name, now, m.id, c.id, c.status, c.name),
+      );
     }
     await db.batch(stmts);
     // その日で週・月・年が終わるなら、コミュニティ内の上位に称号（同じ順位で二度は渡さない）

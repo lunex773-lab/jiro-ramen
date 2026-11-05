@@ -13,7 +13,7 @@ export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
-  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'giveUp',
+  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
   'accidentReset', 'openStore', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setCompanyPolicy',
 ] as const satisfies readonly ActionType[];
 
@@ -142,6 +142,7 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   takeLoan: {},
   payArrears: {},
   rename: { name: isStr(40) },
+  renameStore: { storeId: isId, name: isStr(40) },
   giveUp: {},
   // 事故の ID（違えばサーバーは何もしない。同時に届いた2回目以降も何もしない）
   accidentReset: { accidentId: isId },

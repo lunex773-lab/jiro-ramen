@@ -176,6 +176,12 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   expect(mock.market!.settings.maxCompanies).toBe(4);
   await expect(screen.locator('.market-standings .trow.mine')).toContainText('テスト亭（あなた）');
   await expect(screen.locator('.market-rules')).toContainText('4社まで');
+  // 屋号を変える（市場の会社の名前も変わる）
+  await screen.locator('[data-rename-shop]').fill('テスト亭 本舗');
+  await screen.locator('[data-rename-shop-ok]').click();
+  await expect.poll(() => mock.market!.companies[0]!.name).toBe('テスト亭 本舗');
+  await expect(screen.locator('.market-standings .trow.mine')).toContainText('テスト亭 本舗（あなた）');
+  expect(mock.acts.map((a) => a.type)).toContain('rename');
   await shot(page, '60-market');
   // 営業していない間の経営: 本店の方針の値段を定価の90%にする（サーバーへ操作を送る）
   const storeId = mock.market!.companies[0]!.state.company.stores[0]!.id;
@@ -253,7 +259,7 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   await screen.locator('[data-open-ranking]').click();
   const rk = page.locator('.screen.ranking');
   await expect(rk.locator('[data-rank-row]')).toHaveCount(4);
-  await expect(rk.locator('.trow.mine')).toContainText('テスト亭（あなた）');
+  await expect(rk.locator('.trow.mine')).toContainText('テスト亭 本舗（あなた）');
   await expect(rk.locator('[data-my-rank]')).toContainText('位');
   await rk.locator('[data-metric]').selectOption('sales');
   await expect(rk.locator('.ranking-mine')).toContainText('sales');
