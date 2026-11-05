@@ -43,7 +43,13 @@ export type MarketScreenView = MarketView & {
 
 const PERIOD_LABEL = (d: number | null) => (d === null ? '無期限' : `${d}日`);
 
-const POLL_MS = 8000;
+/**
+ * 市場の読み直しの間隔。画面が見えているときだけ読み直す（Free の要求数を使いすぎないため）。
+ * 0時の計算中・0時の前後は短くして、計算が済んだらすぐ営業を始められるようにする
+ */
+const POLL_MS = 20_000;
+const POLL_FAST_MS = 8_000;
+const POLL_TICK_MS = 2_000;
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
 function cid(): string {
@@ -327,12 +333,30 @@ export class MarketScreen {
     window.addEventListener('pointerup', this.release);
     replace(this.body, h('p', { class: 'note' }, '市場を読み込んでいます…'));
     void this.refresh();
-    this.timer = window.setInterval(() => void this.refresh(true), POLL_MS);
+    this.timer = window.setInterval(() => this.poll(), POLL_TICK_MS);
+    document.addEventListener('visibilitychange', this.onVisible);
     this.clockTimer = window.setInterval(() => this.renderHead(), 1000);
   }
 
   private release = (): void => {
     this.pressing = false;
+  };
+
+  private lastFetch = 0;
+
+  /** 見えているときだけ、間隔が来たら読み直す */
+  private poll(): void {
+    if (document.hidden) return;
+    const v = this.view;
+    const now = Date.now() + this.offset;
+    // 0時の直前・計算中（0時を過ぎて同期が残っている間）は短く
+    const fast = !!v && (v.clock.syncPending || !!v.sync || v.clock.nextMidnight - now < 60_000);
+    if (Date.now() - this.lastFetch >= (fast ? POLL_FAST_MS : POLL_MS)) void this.refresh(true);
+  }
+
+  /** 画面に戻ってきたら、すぐ読み直す */
+  private onVisible = (): void => {
+    if (!document.hidden && Date.now() - this.lastFetch >= POLL_FAST_MS) void this.refresh(true);
   };
 
   /** 読み直しをやめる（営業を始めるとき・画面を閉じるとき） */
@@ -342,6 +366,7 @@ export class MarketScreen {
     this.timer = null;
     this.clockTimer = null;
     window.removeEventListener('pointerup', this.release);
+    document.removeEventListener('visibilitychange', this.onVisible);
   }
 
   close(): void {
@@ -355,6 +380,7 @@ export class MarketScreen {
     // 選んでいる最中は描き直さない（自動の読み直しのとき）
     if (auto && (this.pressing || (this.el.contains(document.activeElement) && document.activeElement?.tagName === 'SELECT'))) return;
     this.loading = true;
+    this.lastFetch = Date.now();
     try {
       const v = await this.api.viewMarket<MarketScreenView>(this.auth.token, this.marketId);
       this.offset = v.clock.serverNow - Date.now();
