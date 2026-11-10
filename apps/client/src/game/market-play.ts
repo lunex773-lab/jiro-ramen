@@ -3,7 +3,7 @@
 // 送れるまで次の日は始められない（判断 1d）。受け取られなかった日は、サーバーの前の日の状態からやり直す（判断 1b）。
 // 会社の状態はサーバーにあり、端末のセーブのスロットには保存しない。
 
-import { hasPrepSnapshot, takePrepSnapshot, type Action, type ActionResult, type CommitResult, type DayTicket, type GameState } from '@jiro/core';
+import { ensureStartingUnlocks, hasPrepSnapshot, takePrepSnapshot, type Action, type ActionResult, type CommitResult, type DayTicket, type GameState } from '@jiro/core';
 import { Api, ApiError, type Auth } from '../net/api';
 import { LocalHost } from './host';
 
@@ -111,5 +111,7 @@ export class MarketSession {
 export function prepareState(s: GameState, t: DayTicket): void {
   s.marketDemand = { ...t.demand };
   s.tutorial = null;
+  // 前の版で作られた状態を今の規則に直す（仕込み担当 → 接客担当など）
+  ensureStartingUnlocks(s);
   if (s.phase === 'prep' && !hasPrepSnapshot(s)) takePrepSnapshot(s);
 }

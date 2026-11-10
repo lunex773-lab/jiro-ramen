@@ -365,6 +365,7 @@ export function setStorePolicy(s: GameState, storeId: Id, p: Partial<StorePolicy
   if (next.adBudget !== undefined && !(Number.isFinite(next.adBudget) && next.adBudget >= 0 && next.adBudget <= 20_000)) return { ok: false, reason: '広告費は1日0〜20,000円です' };
   if (next.tempWhenShort !== undefined && typeof next.tempWhenShort !== 'boolean') return { ok: false, reason: '短期バイトの方針が不正です' };
   if (next.safetyStock !== undefined && !(Number.isFinite(next.safetyStock) && next.safetyStock >= 0.8 && next.safetyStock <= 2)) return { ok: false, reason: '在庫の安全基準は0.8〜2倍です' };
+  if (next.orderBy !== undefined && next.orderBy !== 'manager' && next.orderBy !== 'self') return { ok: false, reason: '発注する人の指定が不正です' };
   entry.policy = next;
   return { ok: true };
 }

@@ -21,6 +21,7 @@ import { closeStaffDay, expectedWages } from './staff';
 import { expireLots, receiveDeliveries, runAutoOrder, STOCKOUT_SOURCE } from './inventory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { drawAccident, takePrepSnapshot } from './accident';
+import { applyWageFloor } from './wages';
 import { onDayEndEvents, onDayStartEvents, onOpenShopEvents } from './visitors';
 
 /** 開店 */
@@ -368,6 +369,8 @@ export function startNextDay(s: GameState, ctx: SimCtx, takeSnapshot = true): { 
   receiveDeliveries(s, ctx, true);
   // 前のセーブ・共同経営・共通市場の会社も、朝に最初から解放されているもの（採用）を足す
   ensureStartingUnlocks(s);
+  // 給料が店の都道府県の最低賃金を下回っていたら上げる（じろ1 5.7）
+  applyWageFloor(s);
   refreshCandidates(s);
   morningRollCall(s, ctx);
   for (const p of s.players) {

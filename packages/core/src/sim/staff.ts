@@ -244,7 +244,8 @@ export function staffLog(e: Employee, n = 8): StaffLogEntry[] {
 /** 担当の仕事の能力 */
 export function roleSkill(e: Employee): number {
   const sk = e.profile.skills;
-  return e.profile.role === 'cook' || e.profile.role === 'prep' ? sk.cooking : e.profile.role === 'server' ? sk.service : sk.hygiene;
+  if (e.profile.role === 'leader') return (sk.cooking + sk.service + sk.hygiene) / 3;
+  return e.profile.role === 'cook' ? sk.cooking : e.profile.role === 'server' ? sk.service : sk.hygiene;
 }
 
 export interface PromotionCheck {
@@ -867,6 +868,34 @@ export function promote(s: GameState, ctx: SimCtx, employeeId: string): { ok: bo
   if (s.phase === 'prep') reapplyToday(s, e, ctx);
   emit(ctx, { type: 'promote', text: e.profile.name });
   notify(s, ctx, `promote:${e.id}`, 'good', `${e.profile.name}さんを社員にしました（日給 ¥${e.profile.wage.toLocaleString('ja-JP')}）`);
+  return { ok: true };
+}
+
+/** シフトリーダーにできない理由（なれるなら null。じろ1 5.8） */
+export function promoteLeaderProblem(e: Employee): string | null {
+  if (e.profile.role === 'leader') return 'すでにシフトリーダーです';
+  if (e.profile.employment !== 'full') return '社員だけがシフトリーダーになれます（先に社員にしてください）';
+  const L = ST.leader;
+  if (roleSkill(e) < L.minSkill) return `担当の仕事の能力が ${Math.round(L.minSkill * 100)} 以上の社員がなれます（今 ${Math.round(roleSkill(e) * 100)}）`;
+  return null;
+}
+
+/** シフトリーダーの日給（社員の日給 × leaderRaise。下がらない） */
+export function leaderWageFor(e: Employee): number {
+  return Math.max(e.profile.wage, Math.round((e.profile.wage * ST.leader.leaderRaise) / 500) * 500);
+}
+
+/** 社員をシフトリーダーにする（仕入れ・仕込み・調理・接客・清掃を全部する上位の役職） */
+export function promoteLeader(s: GameState, ctx: SimCtx, employeeId: string): { ok: boolean; reason?: string } {
+  const e = s.employees.find((x) => x.id === employeeId);
+  if (!e) return { ok: false, reason: '従業員が見つかりません' };
+  const p = promoteLeaderProblem(e);
+  if (p) return { ok: false, reason: p };
+  e.profile.role = 'leader';
+  e.profile.wage = leaderWageFor(e);
+  logStaff(s, e, 'promoted', `シフトリーダーになった（日給 ¥${e.profile.wage.toLocaleString('ja-JP')}）`);
+  emit(ctx, { type: 'promote', text: e.profile.name });
+  notify(s, ctx, `leader:${e.id}`, 'good', `${e.profile.name}さんをシフトリーダーにしました（日給 ¥${e.profile.wage.toLocaleString('ja-JP')}。全部の仕事をします）`);
   return { ok: true };
 }
 

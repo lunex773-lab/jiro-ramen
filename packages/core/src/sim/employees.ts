@@ -45,6 +45,7 @@ import { evRand } from './events';
 import { unpermittedFilming } from './media';
 import { accidentPanic } from './accident';
 import { moveAlong, staffRoute, walkSpeed } from './walk';
+import { marketHourly, storeMinWage } from './wages';
 import { updateCommute } from './commute';
 import { attendHireDay, checkQuits, dailyWageOf, fullDayShift, initNewHire, isPartTime, isSlacking, rollCall, rollPostpone, wagesDueToday } from './staff';
 
@@ -52,12 +53,12 @@ export const ROLE_LABEL: Record<EmployeeRole, string> = {
   cook: '調理担当',
   server: '接客担当',
   cleaner: '清掃・洗い場担当',
-  prep: '仕込み担当',
+  leader: 'シフトリーダー',
 };
 
 /** 仕事の種類と基本優先度（設計書 13.4 の初期優先順位に対応） */
 export const TASK_KINDS: Record<string, { label: string; base: number; roles: EmployeeRole[] }> = {
-  spill: { label: 'こぼれの清掃（安全）', base: 100, roles: ['cleaner', 'server', 'cook', 'prep'] },
+  spill: { label: 'こぼれの清掃（安全）', base: 100, roles: ['cleaner', 'server', 'cook'] },
   complaint: { label: 'クレーム対応', base: 96, roles: ['server', 'cook'] },
   noodlesUp: { label: '麺上げ', base: 92, roles: ['cook'] },
   discard: { label: 'ゆですぎ麺の処分', base: 90, roles: ['cook'] },
@@ -73,15 +74,16 @@ export const TASK_KINDS: Record<string, { label: string; base: number; roles: Em
   tare: { label: 'タレ', base: 72, roles: ['cook'] },
   soup: { label: 'スープ', base: 71, roles: ['cook'] },
   setBowls: { label: '丼を並べる', base: 68, roles: ['cook'] },
-  prepUrgent: { label: '食材補充（急ぎ）', base: 66, roles: ['cook', 'prep'] },
+  // 仕込みは調理担当と接客担当の仕事（じろ1 5.8: 仕込み担当をなくし、接客の手が空いたときに仕込む）
+  prepUrgent: { label: '食材補充（急ぎ）', base: 66, roles: ['cook', 'server'] },
   collect: { label: '食器回収', base: 58, roles: ['cleaner', 'server'] },
   wipe: { label: 'テーブル清掃', base: 52, roles: ['cleaner', 'server'] },
   wash: { label: '洗浄', base: 50, roles: ['cleaner'] },
-  prep: { label: '仕込み', base: 42, roles: ['cook', 'prep'] },
+  prep: { label: '仕込み', base: 42, roles: ['cook', 'server'] },
   trash: { label: 'ゴミ処理', base: 36, roles: ['cleaner'] },
   lost: { label: '忘れ物の保管', base: 34, roles: ['cleaner', 'server'] },
   mop: { label: '床の清掃', base: 30, roles: ['cleaner'] },
-  tidyHand: { label: '片付け', base: 20, roles: ['cook', 'server', 'cleaner', 'prep'] },
+  tidyHand: { label: '片付け', base: 20, roles: ['cook', 'server', 'cleaner'] },
 };
 
 /** その食材を仕込みで補充できる見込みがあるか（材料と設備がある、または工程中） */
@@ -136,12 +138,38 @@ export function prepUseRate(s: GameState, itemId: string): number {
  */
 export function restockTarget(s: GameState, r: { id: string; time: number; restockBelow?: { itemId: string; qty: number } }): number {
   if (!r.restockBelow) return 0;
+  // プレイヤーが決めた仕込みの目安（じろ1 5.8）があればそれを使う
+  const manual = s.prepTargets?.[r.restockBelow.itemId];
+  if (manual !== undefined && manual >= 0) return manual;
   const P = BALANCE.prepPlan;
   const rate = prepUseRate(s, r.restockBelow.itemId);
   const lead = r.time + P.leadMarginSec + (r.id === 'braise_pork' ? (PREP_RECIPES.slice_pork?.time ?? 0) : 0);
   let want = rate * P.peakFactor * lead * P.safety;
   if (s.phase === 'open') want = Math.min(want, rate * Math.max(0, BALANCE.openDuration - s.openT) * P.safety);
   return Math.max(r.restockBelow.qty, want);
+}
+
+/** 仕込みの目安を決められる品（仕込みで作る品）と、自動のときの最低の量 */
+export function prepTargetItems(): { itemId: string; minQty: number }[] {
+  const out = new Map<string, number>();
+  for (const r of Object.values(PREP_RECIPES)) {
+    if (!r.restockBelow) continue;
+    out.set(r.restockBelow.itemId, Math.max(out.get(r.restockBelow.itemId) ?? 0, r.restockBelow.qty));
+  }
+  return [...out].map(([itemId, minQty]) => ({ itemId, minQty }));
+}
+
+/** 仕込みの目安を決める（qty: 作った品の量。null で自動に戻す）。0〜自動の最低の量の20倍まで */
+export function setPrepTarget(s: GameState, itemId: string, qty: number | null): { ok: boolean; reason?: string } {
+  const item = prepTargetItems().find((x) => x.itemId === itemId);
+  if (!item) return { ok: false, reason: '仕込みで作る品ではありません' };
+  if (qty === null) {
+    if (s.prepTargets) delete s.prepTargets[itemId];
+    return { ok: true };
+  }
+  if (!Number.isFinite(qty) || qty < 0 || qty > item.minQty * 20) return { ok: false, reason: `目安は0〜${(item.minQty * 20).toLocaleString('ja-JP')}の範囲で決めてください` };
+  (s.prepTargets ??= {})[itemId] = Math.round(qty);
+  return { ok: true };
 }
 
 /** 1杯盛るのに最低限必要な量（これを下回ったら補充を最優先） */
@@ -164,8 +192,9 @@ function skill(s: GameState, mean: number): number {
 
 export function generateCandidate(s: GameState): Candidate {
   const role = pick(s, ['cook', 'cook', 'server', 'cleaner'] as EmployeeRole[]);
-  // 仕込み担当の候補（乱数の並びを変えないよう、イベント用の乱数で一部の調理担当を仕込み担当にする）
-  const finalRole: EmployeeRole = role === 'cook' && evRand(s) < BALANCE.staff.prepRoleShare ? 'prep' : role;
+  // 以前は一部の調理担当の候補を仕込み担当にしていた（じろ1 で仕込み担当はなくなった）。乱数の並びを変えないよう、抽選だけ残す
+  if (role === 'cook') evRand(s);
+  const finalRole: EmployeeRole = role;
   const talent = randRange(s, 0.25, 0.8);
   const skills: EmployeeSkills = {
     speed: skill(s, talent),
@@ -181,20 +210,24 @@ export function generateCandidate(s: GameState): Candidate {
   const sc = (skills.speed + skills.movement + (role === 'cook' ? skills.cooking : role === 'server' ? skills.service : skills.hygiene)) / 3;
   const st = BALANCE.staff;
   // 能力と給与は相関するが、掘り出し物（安くて有能）や割高な人もいる
-  const wage = Math.round((st.wageMin + (st.wageMax - st.wageMin) * clamp01(sc * 0.75 + randRange(s, -0.15, 0.3))) / 500) * 500;
+  // 給料の高さのばらつき（以前の日給の抽選と同じ乱数の引き方。安くて有能な人・割高な人もいる）
+  const wageU = clamp01((randRange(s, -0.15, 0.3) + 0.15) / 0.45);
   const hireFee = Math.round((st.hireFeeMin + (st.hireFeeMax - st.hireFeeMin) * clamp01(sc + randRange(s, -0.2, 0.2))) / 1000) * 1000;
   const profile: EmployeeProfile = {
     name: `${pick(s, SURNAMES)} ${pick(s, GIVEN_NAMES)}`,
     role: finalRole,
     skills,
-    wage,
+    wage: 0,
     hireFee,
     experience: randRange(s, 0, 0.1),
     employment: BALANCE.staff.employment.hireAs,
-    hourly: Math.round(wage / BALANCE.staff.employment.fullShiftHours / 10) * 10,
+    hourly: 0,
     diligence,
     patience: clamp01(P.mean + (2 * evRand(s) - 1) * P.spread),
   };
+  // 時給は店の都道府県の最低賃金から（じろ1 5.7）。日給は仕込みから閉店まで働いた額
+  profile.hourly = marketHourly(storeMinWage(s), finalRole, sc, profile.experience, wageU);
+  profile.wage = Math.round((profile.hourly * BALANCE.staff.employment.fullShiftHours) / 10) * 10;
   const id = newId(s, 'cand');
   // 見た目の番号は乱数を使わずに決める（ゲームの乱数の並びを変えない）
   profile.look = hashString(`${s.seed}:${id}`) % 1_000_000;
@@ -223,7 +256,25 @@ export function wishDaysFor(key: string): boolean[] {
 export const STARTING_UNLOCKS: readonly string[] = ['hiring'];
 
 /** 最初から解放されているものを足す（前のセーブ・共同経営・共通市場の会社）。足したら true */
+/**
+ * 前のセーブの担当を今の担当に直す（じろ1: 仕込み担当 → 接客担当）。プレイヤーがいる店と、ほかの店の中身の両方。何度呼んでもよい
+ */
+export function migrateStaffRoles(s: GameState): void {
+  const fix = (list: { profile: { role: string } }[] | undefined) => {
+    for (const x of list ?? []) if (x.profile.role === 'prep') x.profile.role = 'server';
+  };
+  fix(s.employees);
+  fix(s.candidates);
+  for (const st of s.company?.stores ?? []) {
+    const snap = st.snapshot as { employees?: { profile: { role: string } }[]; candidates?: { profile: { role: string } }[] } | null | undefined;
+    fix(snap?.employees);
+    fix(snap?.candidates);
+  }
+}
+
 export function ensureStartingUnlocks(s: GameState): boolean {
+  // 前のセーブの担当を直す（読み込み・毎朝・共通市場の日の始めに通る）
+  migrateStaffRoles(s);
   let added = false;
   for (const u of STARTING_UNLOCKS) {
     if (!s.career.unlocked.includes(u)) {
@@ -292,6 +343,8 @@ export function hire(s: GameState, ctx: SimCtx, candidateId: string): { ok: bool
   if (!cash(s, 'hire', -c.profile.hireFee, `${c.profile.name}さんを採用`, `hire:${c.id}`)) return { ok: false, reason: '採用費が足りません' };
   recordPL(s, 'hiring', c.profile.hireFee);
   const e = makeEmployee(s, c);
+  // 採用したときの能力（伸びた分を色で分けて見せる）
+  e.profile.initialSkills = { ...e.profile.skills };
   // アルバイトとして採用（初めのシフトは希望の曜日・仕込みから閉店まで。経営メニューで変えられる）
   initNewHire(e);
   // 通常の採用は、採用の2日後から出勤できる（すぐに人手が要るときは短期バイト。チュートリアルの練習はすぐ）
@@ -384,6 +437,8 @@ export function fire(s: GameState, ctx: SimCtx, employeeId: string): { ok: boole
 export function setRole(s: GameState, employeeId: string, role: EmployeeRole): boolean {
   const e = s.employees.find((x) => x.id === employeeId);
   if (!e || !Object.hasOwn(ROLE_LABEL, role)) return false;
+  // シフトリーダーは昇格（promoteLeader）でなる。担当の変更ではなれない（シフトリーダーから別の担当には変えられる）
+  if (role === 'leader') return false;
   e.profile.role = role;
   releaseTask(e);
   return true;
@@ -592,8 +647,9 @@ function canTake(s: GameState, e: Employee, t: Task): boolean {
   if (!kind) return false;
   const override = e.priorities[t.kind];
   if (override !== undefined && override <= -100) return false;
-  // 店長は担当に関係なく店の仕事を何でもする（店長の営業の計算と同じ前提。Phase 2）
+  // 店長は担当に関係なく店の仕事を何でもする（店長の営業の計算と同じ前提。Phase 2）。シフトリーダーも全部の仕事をする（じろ1 5.8）
   if (s.company && activeStore(s).managerId === e.id) return true;
+  if (e.profile.role === 'leader') return true;
   if (kind.roles.includes(e.profile.role)) {
     // 調理担当の接客系は、接客担当がいないときだけ
     if (e.profile.role === 'cook' && (t.kind === 'serve' || t.kind === 'askCall' || t.kind === 'complaint' || t.kind === 'manner' || t.kind === 'linger' || t.kind === 'film')) {

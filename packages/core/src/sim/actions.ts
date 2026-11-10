@@ -10,7 +10,7 @@ import type { CompanyPolicy, EmployeeRole, EventKind, GameState, Id, Rot, ShiftD
 import { dist, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipment';
-import { fire, hire, hireTemp, setPriority, setRole } from './employees';
+import { fire, hire, hireTemp, setPrepTarget, setPriority, setRole } from './employees';
 import { nextDay, openShop, payArrears, takeLoan, declareBankruptcy, updateFinanceWarnings } from './day';
 import { cancelWork, dropHand, getActor, interact, type Args } from './interact';
 import { placeOrder } from './inventory';
@@ -20,7 +20,7 @@ import { currentTutorialStep, inBasicsTutorial, tutorialAction, updateTutorial, 
 import { accidentHalted, EVENT_KINDS } from './events';
 import { accidentFainted, resetAccident } from './accident';
 import { forceEvent } from './visitors';
-import { promote, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
+import { promote, promoteLeader, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
 import { answerRequest } from './media';
 import { setCompanyPolicy } from './company';
 import { assignManager, enterStore, openStore, renameShop, renameStore, setStoreLocation, setStorePolicy, transferEmployee } from './stores';
@@ -60,6 +60,10 @@ export type Action =
   | { type: 'setDateShift'; employeeId: Id; days: number[]; shift: ShiftDay | null; mode: DateShiftMode }
   /** アルバイトを社員にする */
   | { type: 'promote'; employeeId: Id }
+  /** 社員をシフトリーダーにする（じろ1 5.8） */
+  | { type: 'promoteLeader'; employeeId: Id }
+  /** 仕込みの目安（作った品の量。null で自動。じろ1 5.8） */
+  | { type: 'setPrepTarget'; itemId: string; qty: number | null }
   /** ホストへの確認（YouTuber の撮影の許可・テレビ取材）に答える */
   | { type: 'answerRequest'; requestId: Id; accept: boolean }
   | { type: 'expand' }
@@ -289,6 +293,10 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return setDateShift(s, ctx, a.employeeId, a.days, a.shift, a.mode);
     case 'promote':
       return promote(s, ctx, a.employeeId);
+    case 'promoteLeader':
+      return promoteLeader(s, ctx, a.employeeId);
+    case 'setPrepTarget':
+      return setPrepTarget(s, a.itemId, a.qty === null ? null : Number(a.qty));
     case 'answerRequest':
       return answerRequest(s, ctx, a.requestId, a.accept === true);
     case 'expand':

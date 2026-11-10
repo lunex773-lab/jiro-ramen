@@ -132,7 +132,11 @@ export interface Player extends ActorBase {
 }
 
 /** 担当。prep（仕込み担当）はオーナーの判断で追加（拡張して杯数が増えたときに仕込みを専門にする） */
-export type EmployeeRole = 'cook' | 'server' | 'cleaner' | 'prep';
+/**
+ * 担当。仕込み担当はなくなり（じろ1 5.8。オーナーの指示）、仕込みは接客担当の仕事に入った。古いセーブの仕込み担当は接客担当にする（save.ts）。
+ * シフトリーダーは仕入れ・仕込み・調理・接客・清掃を全部する上位の役職（社員から昇格）
+ */
+export type EmployeeRole = 'cook' | 'server' | 'cleaner' | 'leader';
 
 export interface EmployeeSkills {
   speed: number;
@@ -225,6 +229,8 @@ export interface EmployeeProfile {
   name: string;
   role: EmployeeRole;
   skills: EmployeeSkills;
+  /** 採用したときの能力（伸びた分を色で分けて見せる。じろ1 5.7。古いセーブにはない） */
+  initialSkills?: EmployeeSkills;
   /** 日給（社員）。古いセーブの従業員は社員として扱うのでこの値をそのまま使う */
   wage: number;
   hireFee: number;
@@ -721,6 +727,8 @@ export interface DayStats {
   stockoutItems?: Record<string, number>;
   /** 仕入れる食材の使用量（その日に使った分。「売れ行きに合わせる」自動発注に使う）。古い日報にはない */
   usedItems?: Record<string, number>;
+  /** 店長が閉店後に発注した翌朝便（じろ1 5.8。店長に任せた店だけ） */
+  managerOrder?: { spent: number; packs: number; skipped: number };
   /** 店内外のトラブル（食べ方・居座り・喫煙・店員の口論など）と、そのうち対応したもの（第2版 10。古いセーブにはない） */
   troubles?: number;
   troublesHandled?: number;
@@ -1070,6 +1078,8 @@ export interface GameState {
    * 古い状態にはない → manual
    */
   autoOrderMode?: 'manual' | 'sales';
+  /** 仕込みの目安（作った品の量。品の id → 量）。ない品は自動（売れ行きから。じろ1 5.8） */
+  prepTargets?: Record<string, number>;
 
   equipment: Equipment[];
   seats: Seat[];
@@ -1178,6 +1188,8 @@ export interface StorePolicy {
   tempWhenShort?: boolean;
   /** 食材の在庫の安全基準（見込みの杯数に対する仕入れの余裕の倍率。古いデータにはない → 1） */
   safetyStock?: number;
+  /** 翌朝便の発注をだれがするか（じろ1 5.8）: 'manager' = 店長がいれば店長が需要の見込みから発注する（ない → manager）、'self' = 自分の発注の設定 */
+  orderBy?: 'manager' | 'self';
 }
 
 /**

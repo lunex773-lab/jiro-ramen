@@ -8,6 +8,8 @@ import { PREP_RECIPES } from '../data/prep';
 import type { GameState, Lot } from '../types';
 import { clamp01, newId } from '../util';
 import { cash, recordPL } from './economy';
+import { activeStore } from './company';
+import { calendarDemand } from './calendar';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 
 export function stockOf(s: GameState, itemId: string): number {
@@ -156,6 +158,44 @@ export function autoOrderTarget(s: GameState, itemId: string): number {
   return Math.round(Math.max(manual * A.floorOfManual, batch, want));
 }
 
+/**
+ * 店長に発注を任せているか（じろ1 5.8「店長は自動で仕入れも行う」）。店長がいて、方針で「自分で発注する」にしていない店
+ */
+export function managerOrders(s: GameState): boolean {
+  if (!s.company) return false;
+  const st = activeStore(s);
+  if (!st.managerId || st.policy.orderBy === 'self') return false;
+  return s.employees.some((e) => e.id === st.managerId);
+}
+
+/**
+ * 店長の発注の目安: 売れ行き（最近の使用量）に、明日の曜日・季節の需要と最近の日の需要の比を掛ける（土日の前は多め、平日の前は少なめ）。
+ * 発注をしない設定（目安0）の食材は発注しない
+ */
+export function managerOrderTarget(s: GameState, itemId: string): number {
+  const keep = s.autoOrderMode;
+  s.autoOrderMode = 'sales';
+  const base = autoOrderTarget(s, itemId);
+  s.autoOrderMode = keep;
+  if (base <= 0 || s.tutorial) return base;
+  let recent = 0;
+  let n = 0;
+  for (let i = s.history.length - 1; i >= 0 && n < BALANCE.autoOrderSales.days; i--) {
+    const r = s.history[i]!;
+    if (r.served <= 0) continue;
+    recent += calendarDemand(r.day);
+    n += 1;
+  }
+  const ratio = n > 0 ? calendarDemand(s.day + 1) / (recent / n) : 1;
+  return Math.round(base * Math.max(0.8, Math.min(1.3, ratio)));
+}
+
+/** 店長が発注に使ってよい額: 手元の資金から、翌日の固定費（家賃・維持費・光熱費の基本）の2日分を残した額 */
+export function managerOrderBudget(s: GameState): number {
+  const fixed = (s.history.at(-1)?.rent ?? 8_000) + (s.history.at(-1)?.upkeep ?? 0) + BALANCE.utilitiesBase;
+  return Math.max(0, s.money - fixed * 2);
+}
+
 /** 仕込みのレシピ1回に使う、その食材の量（レシピの中の最大） */
 const PREP_BATCH: Record<string, number> = {};
 for (const r of Object.values(PREP_RECIPES)) for (const i of r.inputs) PREP_BATCH[i.itemId] = Math.max(PREP_BATCH[i.itemId] ?? 0, i.qty);
@@ -288,8 +328,9 @@ const ESSENTIAL_ITEMS = ['noodle', 'bones'];
 export function runAutoOrder(s: GameState, ctx: SimCtx): void {
   type Need = { itemId: string; packs: number; full: number; kgPerPack: number; coverage: number; fridge: boolean };
   const needs: Need[] = [];
+  const mgr = managerOrders(s);
   for (const itemId of Object.keys(s.autoOrder)) {
-    const target = autoOrderTarget(s, itemId);
+    const target = mgr ? managerOrderTarget(s, itemId) : autoOrderTarget(s, itemId);
     const def = INGREDIENTS[itemId];
     if (!def || !def.purchasable || target <= 0) continue;
     if (def.unlock && !s.career.unlocked.includes(def.unlock)) continue;
@@ -338,12 +379,35 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
   }
   // 残りが少ない食材から先に発注する（資金が足りないときも必要な物を先に）
   needs.sort((a, b) => a.coverage - b.coverage);
+  // 店長の発注は、手元の資金から翌日の固定費の分を残した額まで（資金が足りないときに無制限に仕入れない。じろ1 5.8）
+  let budget = mgr ? managerOrderBudget(s) : Number.POSITIVE_INFINITY;
+  const summary = { spent: 0, packs: 0, skipped: 0 };
   for (const n of needs) {
     if (n.packs <= 0) continue;
     const def = INGREDIENTS[n.itemId]!;
+    if (mgr) {
+      const afford = Math.floor(budget / def.packPrice);
+      if (afford < n.packs) summary.skipped += n.packs - Math.max(0, afford);
+      n.packs = Math.max(0, Math.min(n.packs, afford));
+      if (n.packs <= 0) continue;
+    }
     const r = placeOrder(s, ctx, n.itemId, Math.min(50, n.packs), false);
+    if (r.ok && mgr) {
+      const cost = Math.min(50, n.packs) * def.packPrice;
+      budget -= cost;
+      summary.spent += cost;
+      summary.packs += Math.min(50, n.packs);
+    }
     if (!r.ok) notify(s, ctx, `autoorder:${n.itemId}`, 'warn', `自動発注できません: ${def.name}（${r.reason}）`);
     else clearNotice(s, `autoorder:${n.itemId}`);
+  }
+  if (mgr) {
+    // 店長の発注の実績（日報に入れる。閉店後の精算で日報はもう作られているので、最後の日報にも書く）
+    s.today.managerOrder = summary;
+    const last = s.history.at(-1);
+    if (last && last.day === s.day) last.managerOrder = { ...summary };
+    if (summary.skipped > 0) notify(s, ctx, 'autoorder:budget', 'warn', `店長: 資金が少ないため、翌朝便を${summary.skipped}パック減らしました（手元に翌日の固定費の2日分を残す）`);
+    else clearNotice(s, 'autoorder:budget');
   }
   if (reduced.length > 0) {
     notify(

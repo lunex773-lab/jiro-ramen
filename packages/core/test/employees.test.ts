@@ -90,10 +90,10 @@ describe('従業員', () => {
     expect(s.seats[0]!.dirt).toBe(1);
     expect(buildTasks(s).some((t) => t.kind === 'wipe')).toBe(true);
   });
-  it('仕込み担当は仕込み（と片付け）だけをして、麺上げ・盛り付け・提供はしない', () => {
+  it('接客担当は仕込みもする（じろ1: 仕込み担当をなくし、接客の仕事に入れた）。麺上げ・盛り付けはしない', () => {
     const { s, ctx } = newGame(71);
     addBot(s, 'cook');
-    const p = addBot(s, 'prep');
+    const p = addBot(s, 'server');
     s.reputation = 4;
     applyAction(s, 'p1', { type: 'openShop' }, ctx);
     const kinds = new Set<string>();
@@ -103,11 +103,11 @@ describe('従業員', () => {
       if (p.ai.taskId && p.ai.note) kinds.add(byLabel.get(p.ai.note) ?? p.ai.note);
     }
     expect(kinds.size).toBeGreaterThan(0);
-    for (const k of kinds) expect(['prep', 'prepUrgent', 'tidyHand', 'spill']).toContain(k);
+    for (const k of ['noodlesUp', 'noodlesIn', 'toppings', 'tare', 'soup']) expect(kinds.has(k)).toBe(false);
     expect(kinds.has('prep') || kinds.has('prepUrgent')).toBe(true);
   });
 
-  it('採用の候補に仕込み担当が出る', () => {
+  it('採用の候補に仕込み担当は出ない（じろ1）。シフトリーダーは昇格だけ', () => {
     const roles = new Set<string>();
     for (let seed = 1; seed <= 12; seed++) {
       const { s } = newGame(seed);
@@ -115,7 +115,8 @@ describe('従業員', () => {
       refreshCandidates(s);
       for (const c of s.candidates) roles.add(c.profile.role);
     }
-    expect(roles.has('prep')).toBe(true);
-    expect(ROLE_LABEL.prep).toBe('仕込み担当');
+    expect(roles.has('prep')).toBe(false);
+    expect(roles.has('leader')).toBe(false);
+    expect(ROLE_LABEL.leader).toBe('シフトリーダー');
   });
 });

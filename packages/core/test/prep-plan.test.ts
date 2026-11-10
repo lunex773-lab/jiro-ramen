@@ -37,7 +37,7 @@ describe('従業員の仕込みの目安（売れ行きに合わせる）', () =
     s.inventory = s.inventory.filter((l) => l.itemId !== 'buta' && l.itemId !== 'pork_block');
     addLot(s, 'pork_raw', 12, 800);
     addLot(s, 'soy', 10_000, 1);
-    addBot(s, 'prep');
+    addBot(s, 'server');
     const pots = s.equipment.filter((e) => e.type === 'braise_pot');
     expect(pots).toHaveLength(2);
     let both = false;

@@ -13,7 +13,7 @@ export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
-  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'promote', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
+  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'promote', 'promoteLeader', 'setPrepTarget', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
   'accidentReset', 'openStore', 'setStoreLocation', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setCompanyPolicy',
 ] as const satisfies readonly ActionType[];
 
@@ -53,7 +53,8 @@ const isRot = (v: unknown): boolean => v === 0 || v === 1 || v === 2 || v === 3;
 const isSmall = (v: unknown): boolean => isFiniteNum(v) && Math.abs(v) <= 2;
 const isVec = (v: unknown): boolean => isObj(v) && isSmall(v.x) && isSmall(v.z) && Object.keys(v).length === 2;
 const optVec = (v: unknown): boolean => v === undefined || isVec(v);
-const isRole = (v: unknown): boolean => v === 'cook' || v === 'server' || v === 'cleaner' || v === 'prep';
+// 担当（じろ1: 仕込み担当はなくなった。シフトリーダーは昇格の操作でなる）
+const isRole = (v: unknown): boolean => v === 'cook' || v === 'server' || v === 'cleaner';
 /** シフト（null はその曜日を休みにする）。中身の範囲は core の shiftProblem でも確かめる */
 function isShift(v: unknown): boolean {
   if (v === null) return true;
@@ -138,6 +139,8 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   setAutoOrderMode: { mode: (v: unknown) => v === 'manual' || v === 'sales' },
   setDateShift: { employeeId: isId, days: isDayList, shift: isShift, mode: (v: unknown) => v === 'once' || v === 'weekly' || v === 'reset' },
   promote: { employeeId: isId },
+  promoteLeader: { employeeId: isId },
+  setPrepTarget: { itemId: isId, qty: (v: unknown) => v === null || (isNum(v) && (v as number) >= 0) },
   answerRequest: { requestId: isId, accept: isBool },
   expand: {},
   setPrice: { menuId: isId, price: isNum },

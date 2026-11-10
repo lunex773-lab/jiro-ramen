@@ -79,7 +79,7 @@ export const BALANCE = {
       /** 店長が一人で出せる杯数（能力0.65のとき） */
       leadPoints: 42,
       /** ほかの従業員が増やす杯数（担当ごと。能力0.65のとき） */
-      rolePoints: { cook: 24, server: 28, cleaner: 14, prep: 12 } as Record<string, number>,
+      rolePoints: { cook: 24, server: 34, cleaner: 14, leader: 34 } as Record<string, number>,
       /** 2人目以降の従業員の効き方の減り（人数が増えるほど1人あたりは減る） */
       extraDiminish: 0.08,
       /** 能力の効き方: 倍率 = skillBase + skillSlope × 能力 */
@@ -352,11 +352,23 @@ export const BALANCE = {
    * 設計書 14.2 の仮値（日給12,000〜20,000円＝終日勤務相当）から変更（docs/BALANCE.md 参照）。
    */
   staff: {
-    /** 採用の候補のうち、調理担当の候補を仕込み担当にする割合（仕込み担当はオーナーの判断で追加） */
+    /** 採用の候補のうち、調理担当の候補を仕込み担当にしていた割合（じろ1 で仕込み担当はなくなった。乱数の並びを変えないよう抽選だけ残す） */
     prepRoleShare: 0.35,
-    /** 日給の範囲。6,000〜10,000円 → 5,000〜8,500円（調理担当を1人雇うと利益が増えるように。経済の調整 Phase 1-5） */
+    /** 日給の範囲。6,000〜10,000円 → 5,000〜8,500円（調理担当を1人雇うと利益が増えるように。経済の調整 Phase 1-5）。じろ1 で時給は pay の式に変わった（解雇手当などの目安に残す） */
     wageMin: 5_000,
     wageMax: 8_500,
+    /**
+     * 給料（じろ1 5.7）。時給 = 都道府県の最低賃金 × 担当 ×（1 + abilitySlope × 能力 + experienceSlope × 経験）×（1 ± spread）。
+     * 最低賃金を下回らない。調理は少し高め、シフトリーダーは2割高。能力0.5の人は最低賃金の約1.15倍
+     */
+    pay: {
+      roleFactor: { cook: 1.06, server: 1.0, cleaner: 1.0, leader: 1.2 } as Record<string, number>,
+      abilitySlope: 0.3,
+      experienceSlope: 0.5,
+      spread: 0.05,
+    },
+    /** シフトリーダー（社員から昇格。日給は社員の日給 × leaderRaise） */
+    leader: { leaderRaise: 1.15, minDaysFullTime: 5, minSkill: 0.6 },
     hireFeeMin: 10_000,
     hireFeeMax: 25_000,
     candidatesPerDay: 4,

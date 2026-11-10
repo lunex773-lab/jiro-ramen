@@ -9,7 +9,7 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 interface Config {
   seed: number;
   stage: number;
-  staff: ('cook' | 'server' | 'prep' | 'cleaner')[];
+  staff: ('cook' | 'server' | 'cleaner')[];
   fridges: number;
 }
 

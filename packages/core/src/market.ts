@@ -1252,6 +1252,8 @@ export const MARKET_ACTIONS: ReadonlySet<Action['type']> = new Set<Action['type'
   'fire',
   'setRole',
   'promote',
+  'promoteLeader',
+  'setPrepTarget',
   'takeLoan',
   'payArrears',
   'setAutoOrderMode',

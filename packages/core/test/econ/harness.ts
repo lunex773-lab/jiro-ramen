@@ -170,16 +170,16 @@ export function hireCheapest(s: GameState, ctx: SimCtx, role?: EmployeeRole): bo
   return applyAction(s, 'p1', { type: 'hire', candidateId: c.id }, ctx).ok;
 }
 
-/** 仕込み担当を雇う（候補に仕込み担当がいなければ調理担当を雇って担当を仕込みに変える） */
+/** 仕込みもする人を雇う（じろ1 で仕込み担当はなくなり、仕込みは接客担当の仕事になった。いちばん安い接客か調理の候補を接客担当で雇う） */
 function hirePrep(s: GameState, ctx: SimCtx): boolean {
   if (!readyToHire(s)) return false;
   if (s.candidates.length === 0) refreshCandidates(s);
-  const list = s.candidates.filter((c) => c.profile.role === 'prep' || c.profile.role === 'cook').sort((a, b) => a.profile.wage - b.profile.wage);
+  const list = s.candidates.filter((c) => c.profile.role === 'server' || c.profile.role === 'cook').sort((a, b) => a.profile.wage - b.profile.wage);
   const c = list[0];
   if (!c) return false;
   if (!applyAction(s, 'p1', { type: 'hire', candidateId: c.id }, ctx).ok) return false;
   const e = s.employees[s.employees.length - 1]!;
-  if (e.profile.role !== 'prep') applyAction(s, 'p1', { type: 'setRole', employeeId: e.id, role: 'prep' }, ctx);
+  if (e.profile.role !== 'server') applyAction(s, 'p1', { type: 'setRole', employeeId: e.id, role: 'server' }, ctx);
   return true;
 }
 
