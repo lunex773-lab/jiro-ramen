@@ -33,10 +33,12 @@ import {
   runSync,
   startDay,
   syncPending,
+  updateMarketSettings,
   type Action,
   type ActionResult,
   type CommunitySettings,
   type ExportedCompany,
+  type MarketSettingsPatch,
   type GameState,
   type MarketCompany,
   type MarketState,
@@ -431,6 +433,17 @@ export class MarketRoom extends DurableObject<Env> {
       if (!r.ok) return json({ error: 'retire_refused', message: r.reason ?? '引退できません' }, 409);
       this.save();
       return json({ ok: true, companyId: before?.id ?? null });
+    }
+    // 設定を変える（作った人だけ。Worker が確かめてから呼ぶ）
+    if (url.pathname === '/internal/settings' && req.method === 'POST') {
+      if (this.syncBusy) return json({ error: 'market_syncing', message: '0時の計算中です。少しあとでもう一度お試しください' }, 409);
+      const body = safeJsonParse(await req.text());
+      if (!isObj(body)) return json({ error: 'bad_request', message: '形式が不正です' }, 400);
+      const r = updateMarketSettings(m, body as MarketSettingsPatch);
+      if (!r.ok) return json({ error: 'settings_refused', message: r.reason ?? '変えられません' }, 409);
+      this.markAll();
+      this.save();
+      return json({ ok: true, name: m.name, settings: m.settings, changed: r.changed });
     }
     if (url.pathname === '/internal/view' && req.method === 'GET') {
       return json(this.viewFor(playerId, now));

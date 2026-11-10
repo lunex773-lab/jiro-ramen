@@ -62,6 +62,13 @@ export function buzzLeftMinutes(s: GameState): number | null {
   return Math.max(1, Math.ceil((b.endT - s.openT) * perSec));
 }
 
+/** 速さのボタンを押したときの次の速さ */
+export const SPEEDS = [1, 2, 3, 5] as const;
+export function nextSpeed(cur: number): number {
+  const i = SPEEDS.findIndex((v) => v === cur);
+  return SPEEDS[(i + 1) % SPEEDS.length] ?? 1;
+}
+
 export class Hud {
   readonly el: HTMLElement;
   private top: HTMLElement;
@@ -220,7 +227,8 @@ export class Hud {
                     this.lastTopKey = '';
                     return;
                   }
-                  this.host.speed = this.host.speed >= 3 ? 1 : this.host.speed + 1;
+                  // ×1 → ×2 → ×3 → ×5 → ×1（オーナーの指示で5倍速を足した）
+                  this.host.speed = nextSpeed(this.host.speed);
                   this.lastTopKey = '';
                 },
               },

@@ -248,5 +248,16 @@ export function arrivalBound(prev: GameState, next: GameState, demand: number, a
   // その日に払った広告費の分も入れる（開店の前の状態では、まだ払っていない）
   const base = expectedDailyArrivals(prev, { events: true }) * adFactor(ads);
   const priceUp = Math.max(1, priceDemandFactor(next) / Math.max(0.05, priceDemandFactor(prev)));
-  return base * priceUp * Math.max(0, demand) * V().arrivalMult + V().arrivalSlack;
+  return base * priceUp * buzzAllowance(next, prev.day) * Math.max(0, demand) * V().arrivalMult + V().arrivalSlack;
+}
+
+/**
+ * その日に SNS のバズが起きていたら、バズの分の来客の余裕（朝の状態の見込みには入らない）。
+ * バズは1〜3時間（じろ1 5.9）なので、いちばん長いときの倍率まで許す: 1 + (倍率 − 1) × 最長の時間 ÷ 営業時間
+ */
+function buzzAllowance(next: GameState, day: number): number {
+  const B = BALANCE.events.buzz;
+  if (next.events?.stats.sns_buzz?.lastDay !== day) return 1;
+  const dayMin = (BALANCE.closeHour - BALANCE.openHour) * 60;
+  return 1 + (B.arrivalMult - 1) * Math.min(1, B.durationMinTo / dayMin);
 }

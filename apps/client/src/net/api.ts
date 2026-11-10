@@ -182,6 +182,15 @@ export class Api {
     return this.req(`/api/v1/market/${encodeURIComponent(marketId)}`, { method: 'DELETE', token });
   }
 
+  /** 市場の設定を変える（作った人だけ） */
+  updateMarketSettings(
+    token: string,
+    marketId: string,
+    patch: { name?: string; description?: string; visibility?: 'public' | 'invite'; aiFill?: boolean; maxCompanies?: number },
+  ): Promise<{ ok: boolean; name: string }> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/settings`, { method: 'POST', token, body: JSON.stringify(patch) });
+  }
+
   /** 会社を引退させる（終わった市場・破産した会社） */
   retireCompany(token: string, marketId: string): Promise<{ ok: boolean }> {
     return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/retire`, { method: 'POST', token, body: '{}' });

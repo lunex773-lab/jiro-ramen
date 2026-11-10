@@ -4,7 +4,7 @@
 import { BALANCE } from '../data/balance';
 import { BUZZ_POSTS, BUZZ_SAYS, CRITIC_ITEMS, CRITIC_NOTES, RARE_LINES } from '../data/events';
 import type { CriticItem, CriticReport, Customer, EventKind, GameState, Review } from '../types';
-import { clamp, clamp01, dist, newId, pick, randRange } from '../util';
+import { clamp, clamp01, dist, newId, pick, randInt, randRange } from '../util';
 import { makeCustomer, sayEvent } from './customers';
 import { addDaily, cooledDown, dailyCount, ensureEvents, eventsAllowed, evRand, noteDraw, noteFire, takeForced } from './events';
 import { forceAccident } from './accident';
@@ -87,12 +87,30 @@ function updateBuzz(s: GameState, ctx: SimCtx): void {
   startBuzz(s, ctx, forced);
 }
 
+/** ゲームの1分あたりの営業の秒数（営業 11〜15時 = 540秒 → 2.25秒） */
+const SIM_SEC_PER_MIN = () => BALANCE.openDuration / ((BALANCE.closeHour - BALANCE.openHour) * 60);
+
+/** バズの長さ（ゲームの分）を、1時間〜3時間の30分刻みから等しい確率で選ぶ（イベント専用の乱数） */
+export function buzzMinutes(ev: { rng: number }): number {
+  const B = E.buzz;
+  const steps = Math.floor((B.durationMinTo - B.durationMinFrom) / B.durationStepMin);
+  return B.durationMinFrom + randInt(ev, 0, steps) * B.durationStepMin;
+}
+
+/** 「1時間30分」のような長さの文字 */
+export function buzzLengthLabel(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h > 0 ? `${h}時間` : ''}${m > 0 ? `${m}分` : ''}`;
+}
+
 export function startBuzz(s: GameState, ctx: SimCtx, forced = false): void {
   const ev = ensureEvents(s);
   const post = pick(ev, BUZZ_POSTS).replace('{shop}', s.shopName);
-  ev.buzz = { id: newId(s, 'ev'), startT: s.openT, endT: Math.min(BALANCE.openDuration, s.openT + E.buzz.duration), mult: E.buzz.arrivalMult, post };
+  const minutes = buzzMinutes(ev);
+  ev.buzz = { id: newId(s, 'ev'), startT: s.openT, endT: Math.min(BALANCE.openDuration, s.openT + minutes * SIM_SEC_PER_MIN()), mult: E.buzz.arrivalMult, post, minutes };
   noteFire(s, 'sns_buzz', forced);
-  notify(s, ctx, 'buzz', 'good', `📱 SNSでバズっています！「${post}」 しばらくお客さんが増えます`);
+  notify(s, ctx, 'buzz', 'good', `📱 SNSでバズっています！「${post}」 ${buzzLengthLabel(minutes)}ほどお客さんが増えます`);
   emit(ctx, { type: 'buzzStart', text: post });
 }
 

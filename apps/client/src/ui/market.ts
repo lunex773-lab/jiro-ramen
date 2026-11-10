@@ -37,7 +37,7 @@ import type { App } from '../game/app';
 import { Api, ApiError, defaultServerUrl, type Auth, type MyMarket } from '../net/api';
 import { serverUrlNote } from './server-url';
 import { openStoreMap } from './store-map';
-import { confirmDialog, h, replace, stars, toast, yenStr } from './dom';
+import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { codeBlock } from './room-code';
 
 export type MarketScreenView = MarketView & {
@@ -497,6 +497,7 @@ export class MarketScreen {
             '🏁 この市場の競争期間は終わりました。営業は続けられます（ほかの会社とは同期しません）。上位3社には大会の称号が届きます。会社は「育てた企業も参加できる」別のコミュニティへ持っていけます（入口の「参加する会社」で選びます）。',
           )
         : null,
+      v.isOwner ? h('button', { class: 'btn ghost', 'data-edit-market': '', onclick: () => void this.editSettings(v) }, '⚙ 市場の設定を変える') : null,
       v.isOwner ? h('button', { class: 'btn ghost danger', 'data-delete-this-market': '', onclick: () => void this.deleteMarket(v) }, '🗑 この市場を消す') : null,
       !mine && v.myStatus === 'moved' ? h('p', { class: 'note', 'data-my-status': 'moved' }, 'あなたの会社は別のコミュニティへ移りました（この市場の記録は残ります）') : null,
       !mine && v.myStatus === 'retired' ? h('p', { class: 'note', 'data-my-status': 'retired' }, 'あなたの会社は引退しました（この市場の記録は残ります）') : null,
@@ -694,6 +695,48 @@ export class MarketScreen {
       // 閉じただけなら何も変わっていないので読み直さない（出店したときは出店の操作のあとで読み直す）
       onClose: () => undefined,
     });
+  }
+
+  /**
+   * 市場の設定を変える（作った人だけ。オーナーの指示）。名前・説明・公開・AI で埋めるか・会社の数の上限。
+   * 期間・街・参加の種類は途中で変えない（公平のため）
+   */
+  private async editSettings(v: MarketScreenView): Promise<void> {
+    const humans = v.companies.filter((c) => c.kind === 'player' && c.status === 'active').length;
+    const name = h('input', { class: 'input', value: v.name, maxLength: 20, 'data-edit-name': '' }) as HTMLInputElement;
+    const desc = h('textarea', { class: 'input', rows: 2, maxLength: 200, 'data-edit-desc': '' }) as HTMLTextAreaElement;
+    desc.value = v.settings.description ?? '';
+    const sel = (attr: string, opts: [string, string][], value: string) =>
+      h('select', { class: 'select', [attr]: '' }, opts.map(([val, label]) => h('option', { value: val, selected: val === value }, label))) as HTMLSelectElement;
+    const vis = sel('data-edit-visibility', [['invite', '招待コードだけ'], ['public', '公開（一覧に出す）']], v.settings.visibility);
+    const ai = sel('data-edit-ai', [['1', '空きは AI 企業で埋める'], ['0', '人だけ（AI なし）']], v.settings.aiFill ? '1' : '0');
+    const opts: [string, string][] = [];
+    for (let n = Math.max(BALANCE.market.minCompanies, humans); n <= BALANCE.market.maxCompanies; n++) opts.push([String(n), `${n}社まで`]);
+    const max = sel('data-edit-max', opts, String(Math.max(v.settings.maxCompanies, humans)));
+    const body = h(
+      'div',
+      { class: 'edit-market' },
+      h('label', null, '市場の名前', name),
+      h('label', null, '説明', desc),
+      h('label', null, '公開', vis),
+      h('label', null, 'AI 企業', ai),
+      h('label', null, '会社の数の上限', max),
+      h('p', { class: 'note' }, `上限はプレイヤーの会社の数（今 ${humans}社）より少なくできません。上限を下げると、市場シェアの小さい AI 企業から撤退します。期間・街・参加の種類は途中では変えられません。`),
+    );
+    if (!(await confirmNode(this.root, '市場の設定', body, '保存する'))) return;
+    try {
+      await this.api.updateMarketSettings(this.auth.token, this.marketId, {
+        name: name.value.trim(),
+        description: desc.value,
+        visibility: vis.value === 'public' ? 'public' : 'invite',
+        aiFill: ai.value === '1',
+        maxCompanies: Number(max.value),
+      });
+      toast(this.root, '市場の設定を保存しました', 'good', 2000);
+      void this.refresh();
+    } catch (e) {
+      toast(this.root, errText(e), 'warn');
+    }
   }
 
   /** この市場を消す（作った人だけ）。消したら入口へ戻る */

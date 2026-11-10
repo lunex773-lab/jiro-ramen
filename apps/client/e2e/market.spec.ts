@@ -6,6 +6,7 @@ import {
   addDays,
   commitDay,
   createMarket,
+  updateMarketSettings,
   finishSync,
   jstDateKey,
   jstMidnight,
@@ -100,6 +101,10 @@ function mockMarket(page: Page) {
           const b = JSON.parse(req.postData() ?? '{}') as { name?: string; companyName: string; settings?: Record<string, unknown> };
           market = createMarket({ id: 'mk1', name: b.name || 'テストの市場', seed: 4242, now: now(), settings: b.settings ?? {}, creator: { ownerId: 'u1', companyName: b.companyName } });
           return send({ marketId: 'mk1', code: 'MKT234', name: market.name }, 201);
+        }
+        if (p === '/api/v1/market/mk1/settings') {
+          const r = updateMarketSettings(market!, JSON.parse(req.postData() ?? '{}'));
+          return r.ok ? send({ ok: true, name: market!.name, settings: market!.settings, changed: r.changed }) : send({ error: r.reason, code: 'settings_refused' }, 409);
         }
         if (p === '/api/v1/market/mk1/act') {
           const b = JSON.parse(req.postData() ?? '{}') as { cid: string; action: Action };
@@ -330,4 +335,32 @@ test('共通市場: 0時を過ぎて計算が済んでいない間は、新し�
   await page.locator('.market-lobby [data-open-market="mk1"]').click();
   await expect(screen.locator('[data-sync]')).toHaveAttribute('data-sync', 'pending');
   await expect(screen.locator('[data-market-play]')).toBeDisabled();
+});
+
+test('共通市場: 作った人は、あとから市場の名前・公開・会社の数の上限を変えられる', async ({ page }) => {
+  const mock = mockMarket(page);
+  await mock.install();
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  const ok = page.getByRole('button', { name: 'わかった' });
+  if (await ok.isVisible()) await ok.click();
+  await page.evaluate((u) => localStorage.setItem('jiro.serverUrl', u), SERVER);
+  await page.getByRole('button', { name: /オンライン市場/ }).click();
+  const lobby = page.locator('.market-lobby');
+  await lobby.locator('input[placeholder="会社（店）の名前"]').fill('設定亭');
+  await lobby.locator('[data-create-market]').click();
+  const screen = page.locator('.screen.market');
+  await expect(screen.locator('[data-edit-market]')).toBeVisible();
+  await screen.locator('[data-edit-market]').click();
+  const dlg = page.locator('.modal');
+  await dlg.locator('[data-edit-name]').fill('名前を変えた市場');
+  await dlg.locator('[data-edit-visibility]').selectOption('public');
+  await dlg.locator('[data-edit-max]').selectOption('4');
+  await expect(dlg.getByRole('button', { name: '保存する' })).toBeInViewport({ ratio: 1 });
+  await dlg.getByRole('button', { name: '保存する' }).click();
+  await expect(screen.locator('.market-head h2')).toHaveText('名前を変えた市場');
+  expect(mock.market!.settings).toMatchObject({ visibility: 'public', maxCompanies: 4 });
+  // AI で埋める市場なので、上限を4社にすると AI 企業が撤退して4社になる
+  expect(mock.market!.companies.filter((c) => c.status === 'active').length).toBe(4);
 });

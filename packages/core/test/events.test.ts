@@ -122,7 +122,7 @@ describe('SNS でバズる', () => {
     expect(s.notices.some((n) => n.code === 'buzz' && n.level === 'good')).toBe(true);
     run(s, ctx, 30);
     expect(s.customers.some((c) => c.fromBuzz)).toBe(true);
-    run(s, ctx, BALANCE.events.buzz.duration);
+    run(s, ctx, s.events!.buzz!.endT - s.openT);
     expect(s.events!.buzz).toBeNull();
     expect(s.openT).toBeGreaterThan(buzz.endT);
     runDay(s, ctx);

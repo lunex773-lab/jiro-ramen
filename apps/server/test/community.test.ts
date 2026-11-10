@@ -274,6 +274,41 @@ describe('市場を消す（作った人だけ。ほかの人の会社があっ�
   });
 });
 
+describe('市場の設定をあとから変える（作った人だけ。オーナーの指示）', () => {
+  it('名前・説明・公開・AI で埋めるか・会社の数の上限を変えられ、一覧にも出る。ほかの人は変えられない。上限はプレイヤーの会社の数より下げられない', async () => {
+    const a = await newPlayer('設定する人');
+    const b = await newPlayer('入った人2');
+    const m = await create(a, '設定の店', { visibility: 'invite', aiFill: false, maxCompanies: 4 });
+    expect((await callJson('/api/v1/market/join', { token: b.token, body: { code: m.code, companyName: 'となりの店' } })).status).toBe(200);
+    // ほかの人は変えられない
+    const ng = await callJson(`/api/v1/market/${m.marketId}/settings`, { token: b.token, body: { name: '乗っ取り' } });
+    expect(ng.status, JSON.stringify(ng.body)).toBe(403);
+    expect(code(ng)).toBe('not_owner');
+    // プレイヤーの会社（2社）より少なくはできない
+    const low = await callJson(`/api/v1/market/${m.marketId}/settings`, { token: a.token, body: { maxCompanies: 1 } });
+    expect(low.status).toBe(409);
+    // 変える
+    const ok = await callJson<{ name: string; settings: { description: string; visibility: string; aiFill: boolean; maxCompanies: number }; changed: string[] }>(`/api/v1/market/${m.marketId}/settings`, {
+      token: a.token,
+      body: { name: '新しい名前の市場', description: '誰でもどうぞ', visibility: 'public', aiFill: true, maxCompanies: 5 },
+    });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body.name).toBe('新しい名前の市場');
+    expect(ok.body.settings).toMatchObject({ description: '誰でもどうぞ', visibility: 'public', aiFill: true, maxCompanies: 5 });
+    // AI で埋めると、空いた3枠に AI 企業が入る
+    const v = await view(a, m.marketId);
+    expect((v.body as { companies: { kind: string }[] }).companies.filter((c) => c.kind === 'ai').length).toBe(3);
+    // 公開の一覧（D1）にも新しい名前・説明で出る
+    const pub = await callJson<{ communities: { marketId: string; name: string; description: string; maxCompanies: number }[] }>('/api/v1/communities', { token: b.token });
+    expect(pub.body.communities.find((x) => x.marketId === m.marketId)).toMatchObject({ name: '新しい名前の市場', description: '誰でもどうぞ', maxCompanies: 5 });
+    // 上限を下げると、市場シェアの小さい AI 企業から撤退する
+    const down = await callJson(`/api/v1/market/${m.marketId}/settings`, { token: a.token, body: { maxCompanies: 3 } });
+    expect(down.status).toBe(200);
+    const v2 = await view(a, m.marketId);
+    expect((v2.body as { companies: { kind: string; status: string }[] }).companies.filter((c) => c.kind === 'ai' && c.status === 'active').length).toBe(1);
+  });
+});
+
 describe('市場の街（出店マップ。市場は1つの街）', () => {
   it('作る人が市区町村を選ぶと、全社の店がその街にあり、公開の一覧に街の名前が出る。不正な街は断る', async () => {
     const a = await newPlayer('街の人');

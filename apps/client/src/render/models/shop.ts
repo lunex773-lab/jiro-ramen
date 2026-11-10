@@ -10,6 +10,8 @@ import { canvasTexture, JP_FONT } from './textures';
 export interface ShopShell extends Disposable {
   group: THREE.Group;
   setShopName(name: string): void;
+  /** 立て看板を「営業中」（true）か「準備中」（false）にする */
+  setOpen(open: boolean): void;
   /** 照明を置くとよい位置（天井の照明パネルの少し下） */
   lightSpots: THREE.Vector3[];
 }
@@ -455,27 +457,37 @@ export function createShopShell(stage: StageDef, shopName: string): ShopShell {
     b.box(MAT.steelDark(), 0.03, 0.03, 0.45, { x, y: signY0 + signH + 0.12, z: -WALL_T - 0.4, rx: 0.4 });
     b.cyl(MAT.black(), 0.06, 0.05, 0.12, 10, { x, y: signY0 + signH + 0.05, z: -WALL_T - 0.62, rx: 1.2 });
   }
-  // 立て看板「営業中」
-  const standTex = shopTextMat(
-    'standsign',
-    cached('tex:standsign', () =>
+  // 立て看板: 営業中は「営業中」、開店前・中休み・閉店後は「準備中」（オーナーの指示。setOpen で切り替える）
+  const standTex = (open: boolean) =>
+    cached(open ? 'tex:standsign' : 'tex:standsign-prep', () =>
       canvasTexture(128, 256, (c, w, h) => {
-        c.fillStyle = '#f2c200';
+        c.fillStyle = open ? '#f2c200' : '#f4efe6';
         c.fillRect(0, 0, w, h);
-        c.fillStyle = '#111';
+        c.strokeStyle = open ? '#111' : '#8a1f12';
+        c.lineWidth = 6;
+        c.strokeRect(6, 6, w - 12, h - 12);
+        c.fillStyle = open ? '#111' : '#8a1f12';
         c.font = `900 52px ${JP_FONT}`;
         c.textAlign = 'center';
         c.textBaseline = 'middle';
-        ['営', '業', '中'].forEach((t, i) => c.fillText(t, w / 2, 50 + i * 72));
+        (open ? ['営', '業', '中'] : ['準', '備', '中']).forEach((t, i) => c.fillText(t, w / 2, 50 + i * 72));
       }),
-    ),
-    0.25,
-  );
+    );
+  const standMat = new THREE.MeshStandardMaterial({ map: standTex(false), roughness: 0.6, emissive: '#ffffff', emissiveMap: standTex(false), emissiveIntensity: 0.25 });
   const ax = door.x1 + 0.6;
   const az = -0.9;
-  b.add(standTex, new THREE.PlaneGeometry(0.4, 0.8), { x: ax, y: 0.45, z: az - 0.12, rx: -0.25, ry: Math.PI });
-  b.add(standTex, new THREE.PlaneGeometry(0.4, 0.8), { x: ax, y: 0.45, z: az + 0.12, rx: 0.25 });
+  const standGeo = cached('standsign-geo', () => new THREE.PlaneGeometry(0.4, 0.8));
+  const standBack = new THREE.Mesh(standGeo, standMat);
+  standBack.position.set(ax, 0.45, az - 0.12);
+  standBack.rotation.set(-0.25, Math.PI, 0, 'YXZ');
+  const standFront = new THREE.Mesh(standGeo, standMat);
+  standFront.position.set(ax, 0.45, az + 0.12);
+  standFront.rotation.set(0.25, 0, 0);
+  standBack.name = standFront.name = 'stand-sign';
+  group.add(standBack, standFront);
+  owned.push(standMat);
   b.box(SM.facadeTrim(), 0.42, 0.04, 0.05, { x: ax, y: 0.85, z: az });
+  let standOpen = false;
 
   const parts = b.merged();
   for (const { geo, mat } of parts) {
@@ -556,6 +568,13 @@ export function createShopShell(stage: StageDef, shopName: string): ShopShell {
     lightSpots,
     setShopName(name) {
       redraw(name);
+    },
+    setOpen(open) {
+      if (open === standOpen) return;
+      standOpen = open;
+      standMat.map = standTex(open);
+      standMat.emissiveMap = standMat.map;
+      standMat.needsUpdate = true;
     },
     dispose() {
       for (const o of owned) o.dispose();

@@ -396,6 +396,84 @@ export function joinMarket(m: MarketState, ownerId: string, companyName: string,
   return { ok: true, company: c };
 }
 
+/** 作った人があとから変えられる設定（オーナーの指示。期間・街・参加の種類・値段の決まりは途中で変えない） */
+export interface MarketSettingsPatch {
+  name?: string;
+  description?: string;
+  visibility?: 'public' | 'invite';
+  aiFill?: boolean;
+  maxCompanies?: number;
+}
+
+/**
+ * 市場の設定を変える（作った人かどうかはサーバーが確かめる）。会社の数の上限は、参加しているプレイヤーの会社の数より下げられない。
+ * 上限を下げて会社が多すぎるときは、市場シェアがいちばん小さい AI 企業から撤退する。AI で埋める設定で空きがあれば、AI 企業が参加する
+ * （次の営業日から）。AI で埋めるのをやめても、今いる AI 企業はそのまま
+ */
+export function updateMarketSettings(m: MarketState, patch: MarketSettingsPatch): { ok: boolean; reason?: string; changed: string[] } {
+  const changed: string[] = [];
+  const st = m.settings;
+  if (patch.name !== undefined) {
+    const name = String(patch.name).replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 24);
+    if (name.length === 0) return { ok: false, reason: '市場の名前を入れてください', changed };
+    if (name !== m.name) {
+      m.name = name;
+      changed.push('name');
+    }
+  }
+  if (patch.description !== undefined) {
+    const d = String(patch.description).trim().slice(0, 200);
+    if (d !== st.description) {
+      st.description = d;
+      changed.push('description');
+    }
+  }
+  if (patch.visibility !== undefined) {
+    const v = patch.visibility === 'public' ? 'public' : 'invite';
+    if (v !== st.visibility) {
+      st.visibility = v;
+      changed.push('visibility');
+    }
+  }
+  let max = st.maxCompanies;
+  if (patch.maxCompanies !== undefined) {
+    max = Math.round(Number(patch.maxCompanies));
+    if (!Number.isFinite(max) || max < B().minCompanies || max > B().maxCompanies) return { ok: false, reason: `会社の数の上限は${B().minCompanies}〜${B().maxCompanies}社です`, changed };
+    const humans = activeCompanies(m).filter((c) => c.kind === 'player').length;
+    if (max < humans) return { ok: false, reason: `参加しているプレイヤーの会社（${humans}社）より少なくはできません`, changed };
+  }
+  const aiFill = patch.aiFill === undefined ? st.aiFill : patch.aiFill !== false;
+  if (aiFill !== st.aiFill) {
+    st.aiFill = aiFill;
+    changed.push('aiFill');
+  }
+  if (max !== st.maxCompanies) {
+    st.maxCompanies = max;
+    changed.push('maxCompanies');
+  }
+  // 多すぎる AI 企業は撤退する（市場シェアの小さい順）
+  while (activeCompanies(m).length > st.maxCompanies) {
+    const ai = activeCompanies(m)
+      .filter((c) => c.kind === 'ai')
+      .sort((a, b) => marketShare(m, a.id) - marketShare(m, b.id) || b.joinedDay - a.joinedDay)[0];
+    if (!ai) break;
+    ai.status = 'retired';
+    ai.bankruptDay = ai.progress.lastProcessedGameDate;
+    log(m, ai.id, `市場の会社の数の上限が${st.maxCompanies}社になり、市場から撤退しました`);
+  }
+  // AI で埋める: 空いた枠に、まだいない AI 企業が参加する
+  if (st.aiFill && (changed.includes('aiFill') || changed.includes('maxCompanies'))) {
+    const used = new Set(activeCompanies(m).map((c) => c.name));
+    for (const a of AI_COMPANIES) {
+      if (activeCompanies(m).length >= st.maxCompanies) break;
+      if (used.has(a.name)) continue;
+      const c = addCompany(m, 'ai', a.name, null, a.strategy);
+      log(m, c.id, `${c.name}が市場に参加しました（${c.joinedDay}日目から）`);
+    }
+  }
+  return { ok: true, changed };
+}
+
 function log(m: MarketState, companyId: Id, text: string, day?: number): void {
   const c = m.companies.find((x) => x.id === companyId);
   m.decisions.push({ day: day ?? (c ? c.progress.lastProcessedGameDate : m.commonMarketDate), companyId, text });

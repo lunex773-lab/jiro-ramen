@@ -326,6 +326,7 @@ export class World {
         this.shell.setShopName(name);
         this.shellName = name;
       }
+      this.shell.setOpen(s.phase === 'open');
       return;
     }
     if (this.shell) {
@@ -338,6 +339,7 @@ export class World {
     this.shell = createShopShell(stage, name);
     this.shellStage = st;
     this.shellName = name;
+    this.shell.setOpen(s.phase === 'open');
     this.scene.add(this.shell.group);
     const spots = (this.shell as ShopShell & { lightSpots?: THREE.Vector3[] }).lightSpots ?? [];
     const maxLights = this.quality === 'low' ? 2 : 4;

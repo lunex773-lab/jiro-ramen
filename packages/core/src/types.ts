@@ -863,6 +863,8 @@ export interface BuzzState {
   mult: number;
   /** 拡散している投稿 */
   post: string;
+  /** 続く長さ（ゲームの分。1〜3時間の30分刻み。前のセーブにはない） */
+  minutes?: number;
 }
 
 export type CriticItem = 'taste' | 'speed' | 'service' | 'cleanliness' | 'accuracy';

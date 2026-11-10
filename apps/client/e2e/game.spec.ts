@@ -101,6 +101,13 @@ test('開店すると時計が進み、客が来店する', async ({ page }) => 
   // 速度ボタンが効くこと
   await page.locator('.chip', { hasText: '×1' }).click();
   await expect(page.locator('.chip', { hasText: '×2' })).toBeVisible();
+  // ×2 → ×3 → ×5（5倍速）→ ×1 → ×2
+  await page.locator('.chip', { hasText: '×2' }).click();
+  await page.locator('.chip', { hasText: '×3' }).click();
+  await expect(page.locator('.chip', { hasText: '×5' })).toBeVisible();
+  await page.locator('.chip', { hasText: '×5' }).click();
+  await page.locator('.chip', { hasText: '×1' }).click();
+  await expect(page.locator('.chip', { hasText: '×2' })).toBeVisible();
   // 客を待つ。CI では描画が遅く実時間あたりのゲーム内時間が短いので、ゲーム内時間を直接進める（最大 240 秒）
   const arrived = await page.evaluate(() => {
     const app = (window as unknown as { __jiro: { host: { state: { orders: { status: string }[] }; tick(dt: number): void; speed: number } } }).__jiro;

@@ -65,6 +65,15 @@ export function explosionUnavailable(s: GameState): string | null {
   return null;
 }
 
+/**
+ * その日の爆発の確率。オンライン市場の会社（marketDemand がある）で、まだ一度も爆発が起きていなければ初回の確率（0.1%）、
+ * それ以外（ひとりの経営・一度起きたあと）は通常の確率
+ */
+export function accidentChance(s: GameState): number {
+  const firstInMarket = !!s.marketDemand && !((s.events?.stats.explosion?.fired ?? 0) > 0);
+  return firstInMarket ? X.marketFirstChancePerDay : X.chancePerDay;
+}
+
 /** 開店の操作の中で1日1回だけ呼ぶ */
 export function drawAccident(s: GameState): void {
   const ev = ensureEvents(s);
@@ -75,7 +84,7 @@ export function drawAccident(s: GameState): void {
   const forced = takeForced(s, 'explosion');
   if (!forced) {
     noteDraw(s, 'explosion');
-    if (evRand(s) >= X.chancePerDay) return;
+    if (evRand(s) >= accidentChance(s)) return;
   }
   ev.accidentPlan = { id: newId(s, 'ev'), day: s.day, atOpenT: forced ? 3 : randRange(ev, X.atFrom, X.atTo) * BALANCE.openDuration };
   if (forced) ev.forced.push('explosion'); // 発生したときに「強制」として記録する

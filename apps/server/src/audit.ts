@@ -29,6 +29,7 @@ export type AuditKind =
   | 'market_retire'
   /** 市場を消した（作った人。ほかの人の会社も消える） */
   | 'market_delete'
+  | 'market_settings'
   /** 端末から届いた1日を受け取らなかった（前日の状態から説明できない）。detail に理由 */
   | 'market_day_rejected'
   /** 受け取ったが上限を超えた・食い違いがあった（順位から外す）。detail に理由 */

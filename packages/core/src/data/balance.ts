@@ -287,7 +287,11 @@ export const BALANCE = {
 
   /** 調理 */
   cooking: {
-    /** 理想のゆで時間（秒）。極太麺 */
+    /**
+     * 理想のゆで時間（秒）。極太麺（ゲームの約8分）。品質の幅（±3秒で最高・±12秒で0.25）。
+     * じろ1 5.4（オーナーの指示「もう少し短く」）: 16秒（約7分）への短縮を測った。ボットでは18秒と15秒で提供の数に差がなく、
+     * 16秒にすると店長の営業の計算の合わせ（test/manager-model）と拡張の日数が変わるため、営業時間・行列と一緒に P5 で合わせ直してから変える
+     */
     noodleIdeal: 18,
     /** この差以内なら最高品質 */
     noodlePerfectWindow: 3,
@@ -338,6 +342,8 @@ export const BALANCE = {
     weightPerReview: 0.015,
     maxWeight: 0.25,
     regularThreshold: 0.72,
+    /** 常連の上限（人）。60 → 150（オーナーの指示「常連の上限アップ」）。常連による来客の増え方の上限（+60%）は変えない */
+    maxRegulars: 150,
   },
 
   /** 従業員 */
@@ -609,8 +615,13 @@ export const BALANCE = {
       reputationExponent: 2,
       /** 直近の口コミとして見る件数 */
       recentReviews: 20,
-      /** 続く時間（営業の経過秒。営業時間は 540 秒） */
-      duration: 120,
+      /**
+       * 続く時間（ゲームの分。オーナーの指示: 1時間〜3時間のあいだで30分刻みにランダム）。起きたときに
+       * durationMinFrom〜durationMinTo の durationStepMin 刻みから等しい確率で1つ選ぶ（閉店の時刻を超えた分は閉店で終わる）
+       */
+      durationMinFrom: 60,
+      durationMinTo: 180,
+      durationStepMin: 30,
       /** 来客の倍率 */
       arrivalMult: 2.2,
       /** 営業時間のこの割合を過ぎたら始まらない */
@@ -753,6 +764,11 @@ export const BALANCE = {
     explosion: {
       minDay: 2,
       chancePerDay: 0.00001,
+      /**
+       * オンライン市場の会社で、まだ一度も爆発が起きていない間の1日の確率（オーナーの指示: 2日目以降の初回は 0.1%、
+       * 一度起きたあとは通常の chancePerDay）。ひとりの経営は通常の確率のまま
+       */
+      marketFirstChancePerDay: 0.001,
       /** 起きる時刻の範囲（営業時間に対する割合） */
       atFrom: 0.2,
       atTo: 0.8,

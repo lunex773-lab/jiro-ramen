@@ -1099,7 +1099,7 @@ export function finalizeVisit(s: GameState, c: Customer, _ctx: SimCtx, failed: b
       loyalty: 0.4 + 0.3 * sat,
       rating: sat,
     });
-    if (s.regulars.length > 60) s.regulars.sort((a, b) => b.loyalty - a.loyalty).splice(60);
+    if (s.regulars.length > BALANCE.reputation.maxRegulars) s.regulars.sort((a, b) => b.loyalty - a.loyalty).splice(BALANCE.reputation.maxRegulars);
   }
 }
 

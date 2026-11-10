@@ -340,6 +340,64 @@ export async function deleteMarketApi(env: Env, ctx: ExecutionContext, player: A
   return json({ ok: true });
 }
 
+/**
+ * POST /api/v1/market/:id/settings → 市場の設定を変える（作った人だけ。オーナーの指示）。
+ * 変えられるのは 名前・説明・公開/非公開・AI で埋めるか・会社の数の上限。期間・街・参加の種類は途中で変えない
+ */
+export async function updateMarketSettingsApi(req: Request, env: Env, ctx: ExecutionContext, player: AuthedPlayer, marketId: string): Promise<Response> {
+  if (!isUuid(marketId)) throw new HttpError(404, 'market_not_found', '市場が見つかりません');
+  const body = await readJson(req, MARKET_BODY_LIMIT);
+  if (!isObj(body)) throw new HttpError(400, 'bad_request', '形式が不正です');
+  const patch: Record<string, unknown> = {};
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string') throw new HttpError(400, 'bad_settings', '名前が不正です');
+    const name = cleanName(body.name);
+    if (!name) throw new HttpError(400, 'bad_settings', '市場の名前は1〜20文字で入れてください');
+    patch.name = name;
+  }
+  if (body.description !== undefined) {
+    if (typeof body.description !== 'string' || body.description.length > 200) throw new HttpError(400, 'bad_settings', '説明は200文字までです');
+    patch.description = body.description;
+  }
+  if (body.visibility !== undefined) {
+    if (body.visibility !== 'public' && body.visibility !== 'invite') throw new HttpError(400, 'bad_settings', '公開の設定が不正です');
+    patch.visibility = body.visibility;
+  }
+  if (body.aiFill !== undefined) {
+    if (typeof body.aiFill !== 'boolean') throw new HttpError(400, 'bad_settings', 'AI の設定が不正です');
+    patch.aiFill = body.aiFill;
+  }
+  if (body.maxCompanies !== undefined) {
+    if (typeof body.maxCompanies !== 'number' || !Number.isInteger(body.maxCompanies)) throw new HttpError(400, 'bad_settings', '会社の数の上限が不正です');
+    patch.maxCompanies = body.maxCompanies;
+  }
+  if (Object.keys(patch).length === 0) throw new HttpError(400, 'bad_settings', '変える設定がありません');
+  const row = await env.DB.prepare("SELECT owner_id FROM markets WHERE id = ? AND status = 'open'").bind(marketId).first<{ owner_id: string }>();
+  if (!row) throw new HttpError(404, 'market_not_found', '市場が見つかりません');
+  if (row.owner_id !== player.id) throw new HttpError(403, 'not_owner', '市場を作った人だけが設定を変えられます');
+  const r = await readBody(
+    await stub(env, marketId).fetch('https://market/internal/settings', {
+      method: 'POST',
+      headers: { ...identity(player), 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  );
+  const st = (isObj(r.settings) ? r.settings : {}) as Record<string, unknown>;
+  // 一覧（D1）も同じ値にする（中身の権威は Durable Object）
+  await env.DB.batch([
+    env.DB.prepare('UPDATE markets SET name = ? WHERE id = ?').bind(typeof r.name === 'string' ? r.name : '', marketId),
+    env.DB.prepare('UPDATE communities SET description = ?, visibility = ?, ai_fill = ?, max_companies = ? WHERE market_id = ?').bind(
+      typeof st.description === 'string' ? st.description : '',
+      st.visibility === 'public' ? 'public' : 'invite',
+      st.aiFill === false ? 0 : 1,
+      typeof st.maxCompanies === 'number' ? st.maxCompanies : BALANCE.market.maxCompanies,
+      marketId,
+    ),
+  ]);
+  ctx.waitUntil(audit(env.DB, { kind: 'market_settings', playerId: player.id, detail: { marketId, changed: Array.isArray(r.changed) ? r.changed : [] } }));
+  return json({ ok: true, name: r.name, settings: st, changed: r.changed });
+}
+
 /** GET /api/v1/markets → 参加している市場の一覧（自分の会社の状態・競争期間が終わったか） */
 export async function listMarketsApi(env: Env, player: AuthedPlayer): Promise<Response> {
   const rows = await env.DB.prepare(
