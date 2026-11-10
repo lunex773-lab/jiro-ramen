@@ -1118,3 +1118,24 @@ input, select { font: inherit; }
 /* 市場の設定（作った人だけ） */
 .edit-market { display: grid; gap: 8px; white-space: normal; }
 .edit-market label { display: grid; gap: 4px; color: var(--text); font-size: 14px; }
+
+/* 能力のバー: 採用したときの能力（灰色）と伸びた分（緑） */
+.skill-meter { display: flex; overflow: hidden; }
+.skill-meter .meter-fill { flex: none; border-radius: 0; }
+.skill-meter .meter-fill.base.initial { background: #8d8173; }
+.skill-meter .meter-fill.grown { background: var(--good); }
+.skill .grown-num { color: var(--good); font-weight: 700; margin-left: 4px; font-size: 11px; }
+
+/* みんなの勤務のカレンダー（じろ1 5.8） */
+.team-calendar { margin: 8px 0 12px; }
+.team-calendar h5 { margin: 4px 0 6px; color: var(--yellow); }
+.team-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.team-day { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 64px; padding: 6px; border-radius: 10px; border: 1px solid var(--line); background: #1d1814; color: var(--text); text-align: left; overflow: hidden; }
+.team-day.weekend { border-color: rgba(242, 194, 0, 0.35); }
+.team-day.on { border-color: var(--yellow); background: #2d2516; }
+.team-day .td-date { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.team-day .td-count { font-size: 15px; }
+.team-day .td-names { font-size: 10px; color: var(--muted); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; width: 100%; }
+.team-edit { margin-top: 8px; padding: 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); }
+.team-edit h5 { margin: 0 0 6px; }
+.team-edit .select { max-width: 55%; }

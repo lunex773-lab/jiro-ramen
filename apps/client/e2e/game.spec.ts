@@ -602,6 +602,42 @@ test('従業員: 新しく始めた1日目から、採用の候補がいて雇�
   await expect(body.locator('.emp[data-emp]').first()).toContainText('3日目から出勤');
 });
 
+test('従業員: みんなの勤務のカレンダーで日を選んでシフトを変え、仕込みの目安を決め、社員をシフトリーダーにできる（じろ1）', async ({ page }) => {
+  await startNewGame(page);
+  type S = { day: number; employees: { id: string; profile: { role: string; employment: string; wage: number; skills: Record<string, number>; initialSkills?: Record<string, number> }; dateShifts?: Record<string, unknown> }[]; prepTargets?: Record<string, number> };
+  const state = () => page.evaluate(() => (window as unknown as { __jiro: { host: { state: S } } }).__jiro.host.state);
+  await page.locator('.chip.menu').click();
+  await page.getByRole('button', { name: '従業員', exact: true }).click();
+  const body = page.locator('.manage-body');
+  await body.getByRole('button', { name: '採用する' }).first().click();
+  await expect.poll(async () => (await state()).employees.length).toBe(1);
+  const s1 = await state();
+  expect(s1.employees[0]!.profile.initialSkills).toBeTruthy();
+  // 2週間のカレンダー。3日目（出勤できる最初の日）を選んで「休み」にする
+  await expect(body.locator('.team-cal .team-day')).toHaveCount(14);
+  await body.locator('[data-team-day="3"]').click();
+  const edit = body.locator('[data-team-edit="3"]');
+  await expect(edit).toBeVisible();
+  const empId = s1.employees[0]!.id;
+  await edit.locator(`[data-team-shift="${empId}"]`).selectOption({ label: '→ 休み' });
+  await expect(body.locator('[data-team-day="3"] .td-count')).toHaveText('0人');
+  // 仕込みの目安（在庫・発注のタブ）
+  await page.getByRole('button', { name: '在庫・発注', exact: true }).click();
+  await body.locator('[data-prep-target="yasai"]').selectOption({ index: 2 });
+  await expect.poll(async () => (await state()).prepTargets?.yasai ?? 0).toBeGreaterThan(0);
+  // 社員にして、能力が足りればシフトリーダーにできる
+  await page.evaluate(() => {
+    const e = (window as unknown as { __jiro: { host: { state: S } } }).__jiro.host.state.employees[0]!;
+    e.profile.employment = 'full';
+    for (const k of Object.keys(e.profile.skills)) e.profile.skills[k] = 0.8;
+  });
+  await page.getByRole('button', { name: '従業員', exact: true }).click();
+  await body.locator(`[data-promote-leader="${empId}"]`).click();
+  await page.locator('.modal').getByRole('button', { name: 'シフトリーダーにする' }).click();
+  await expect.poll(async () => (await state()).employees[0]!.profile.role).toBe('leader');
+  await expect(body.locator('.emp[data-emp]').first()).toContainText('シフトリーダー');
+});
+
 test('従業員: アルバイトとして採用し、カレンダーで日にちごと・毎週のシフトを決め、記録を見て社員にできる（勤怠・辛抱の数値は出ない）', async ({ page }) => {
   await startNewGame(page);
   // 採用を解放し、候補者を1人入れる（隠しパラメータの値は画面に出てはいけない）
