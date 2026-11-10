@@ -270,6 +270,12 @@ async function walk(page: Page, p: Profile): Promise<{ issues: Issue[]; shots: s
   });
   await page.waitForTimeout(500);
   await check('hud-actions');
+  // アルバイトを1人雇っておく（従業員のタブ・社員にする確認の画面を調べるため。採用は仕込みの時間にできる）
+  await page.evaluate(async () => {
+    const app = (window as unknown as J).__jiro;
+    const c = (app.host.state.candidates as { id: string }[])[0];
+    if (c) await app.host.act({ type: 'hire', candidateId: c.id });
+  });
   // 開店して客を呼ぶ
   await page.getByRole('button', { name: /開店する/ }).click();
   await page.evaluate(() => {
@@ -288,6 +294,20 @@ async function walk(page: Page, p: Profile): Promise<{ issues: Issue[]; shots: s
     await page.locator('.manage .tabs .tab', { hasText: t }).first().click();
     await page.waitForTimeout(200);
     await check(`manage-${t.replace(/[・\s]/g, '')}`);
+  }
+  // 社員にする確認の画面（中身が長くても、下のボタンが画面の中にあって押せる）
+  await page.locator('.manage .tabs .tab', { hasText: '従業員' }).first().click();
+  const promote = page.locator('.manage').getByRole('button', { name: '社員にする' }).first();
+  if (await promote.isVisible().catch(() => false)) {
+    await promote.click();
+    const dlg = page.locator('.modal-overlay .modal');
+    await expect(dlg).toBeVisible();
+    await check('promote-dialog');
+    await expect(dlg.getByRole('button', { name: '社員にする' })).toBeInViewport({ ratio: 1 });
+    await expect(dlg.getByRole('button', { name: 'キャンセル' })).toBeInViewport({ ratio: 1 });
+    await dlg.getByRole('button', { name: 'キャンセル' }).click();
+  } else {
+    throw new Error('従業員のタブに「社員にする」がない');
   }
   // 設定（店の中から）
   await page.locator('.manage .tabs .tab', { hasText: 'セーブ・設定' }).first().click();

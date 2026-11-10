@@ -260,9 +260,15 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
     const worked = scheduled && (plan.open || e.profile.employment === 'full');
     endOfDayWellbeing(s, e, worked, worked ? 1 : 0);
   }
-  // 常連は少しずつ離れる（店長の店では新しい常連の計算はしない）
-  for (const r of s.regulars) if (day - r.lastVisitDay > 5) r.loyalty = Math.max(0, r.loyalty - 0.03);
-  s.regulars = s.regulars.filter((r) => r.loyalty > 0.02);
+  // 常連: 店が開いている日は、店長の店にも通い続ける（来た日として数え、離れない）。休んだ日だけ少しずつ離れる。
+  // 以前は営業した日も来なかったことになり、自動営業が5日を超えると常連が離れていなくなっていた（オーナーの報告。来客の常連の倍率も下がった）。
+  // 店長の店では新しい常連の計算はしない
+  if (plan.open && served > 0) {
+    for (const r of s.regulars) r.lastVisitDay = day;
+  } else {
+    for (const r of s.regulars) if (day - r.lastVisitDay > 5) r.loyalty = Math.max(0, r.loyalty - 0.03);
+    s.regulars = s.regulars.filter((r) => r.loyalty > 0.02);
+  }
   const report: DayReport = {
     ...t,
     wasteItems: { ...t.wasteItems },

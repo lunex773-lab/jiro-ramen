@@ -69,7 +69,7 @@ html, body {
   }
 }
 /* 表示を回しているときのスクロールはブラウザに任せず自分で動かす（ui/rotated-scroll.ts） */
-.app.rotated .screen, .app.rotated .manage-body, .app.rotated .layout-side, .app.rotated .tabs { touch-action: none; }
+.app.rotated .screen, .app.rotated .manage-body, .app.rotated .layout-side, .app.rotated .tabs, .app.rotated .modal-body, .app.rotated .modal { touch-action: none; }
 .game-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .overlay3d { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .ui-layer { position: absolute; inset: 0; pointer-events: none; }
@@ -762,10 +762,20 @@ input, select { font: inherit; }
 .room-wait .row { margin-top: 12px; }
 
 /* モーダル・トースト */
-.modal-overlay { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
-.modal { background: var(--panel-2); border: 1px solid var(--line); border-radius: 16px; padding: 16px; width: min(420px, 100%); }
+.modal-overlay {
+  position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; z-index: 50;
+  padding: calc(var(--sat) + 8px) calc(var(--sar) + 12px) calc(var(--sab) + 8px) calc(var(--sal) + 12px);
+}
+/* 中身が長くても（横向きの低い画面でも）下のボタンが画面の外に出ないように、中身だけをスクロールする */
+.modal {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 16px; padding: 16px; width: min(420px, 100%);
+  max-height: 100%; display: flex; flex-direction: column; overflow-y: auto;
+}
+.modal > * { flex-shrink: 0; }
 .modal h3 { margin: 0 0 8px; color: var(--yellow); }
 .modal-body { color: var(--muted); line-height: 1.6; white-space: pre-line; }
+.modal > .modal-body { flex-shrink: 1; min-height: 3em; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
+.modal > .row:last-child { margin-bottom: 0; }
 .toasts {
   position: absolute;
   left: 50%;

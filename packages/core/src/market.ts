@@ -26,7 +26,7 @@ import { bankruptcyCheck, checkGoals, declareBankruptcy, loanAvailable, payArrea
 import { cash, finalProfit, totalDebt } from './sim/economy';
 import { refreshCandidates } from './sim/employees';
 import { employeeSatisfaction, enterpriseValue, storeQuality } from './sim/metrics';
-import { receiveDeliveries } from './sim/inventory';
+import { receiveDeliveries, runAutoOrder } from './sim/inventory';
 import { expansionInfo } from './sim/layout';
 import { planManagerDay, runManagerDay, standaloneArrivals } from './sim/manager';
 import { makeCtx } from './sim/notices';
@@ -717,6 +717,9 @@ export function autoPlayDay(s: GameState, day: number, demand: Record<string, nu
     if (active.openedDay < day) runManagerDay(s, active, day, ctx, { demandMult: demand[active.id] ?? 1 });
     s.prices = keepPrices;
     s.autoOrderMode = keepMode;
+    // 翌朝便の自動発注（手動の営業の精算と同じ。プレイヤーの発注の設定で）。以前は自動営業の日に発注しなかったため、
+    // 自動営業のあとの朝に納品がなく、在庫が減ったまま・仕込んだ品が期限切れでなくなった状態で営業を始めていた（オーナーの報告）
+    if (active.openedDay < day) runAutoOrder(s, ctx);
     settleLoans(s, day);
     s.career.daysPlayed += 1;
     checkGoals(s, ctx);
