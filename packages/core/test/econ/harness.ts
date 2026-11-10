@@ -120,7 +120,7 @@ function rowOf(s: GameState, r: DayReport): DayRow {
 /** 1つのケースを days 日まで回す */
 export function runCase(policy: CasePolicy, days: number, seed = 777): { rows: DayRow[]; s: GameState } {
   const { s, ctx } = newGame(seed);
-  addSoloBot(s, 0.65);
+  addSoloBot(s, Number(process.env.ECON_BOT_SKILL ?? 0.65));
   policy.setup?.(s, ctx);
   const rows: DayRow[] = [];
   for (let d = 1; d <= days; d++) {
