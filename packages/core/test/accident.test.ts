@@ -311,3 +311,28 @@ describe('発火から爆発までの火事（オーナーの指示: 3倍の時�
     }
   });
 });
+
+describe('イベントの記録（じろ2: 改修設計書05。ID・日時・会社・店・確率・状態・結果・復元の記録）', () => {
+  it('爆発は記録に残り（会社・店・結果）、仕込み開始時点に戻すと「戻した」になる。記録は戻しても消えない', () => {
+    const { s, ctx } = day2(4711);
+    explode(s, ctx);
+    const rec = s.events!.log!.find((r) => r.kind === 'explosion')!;
+    expect(rec).toMatchObject({ day: s.day, company: s.shopName, storeId: s.company.activeStoreId, forced: true, chance: null, state: 'done' });
+    expect(rec.result).toContain('爆発');
+    expect(applyAction(s, 'p1', { type: 'accidentReset', accidentId: s.events!.accident!.id }, ctx).ok).toBe(true);
+    const after = s.events!.log!.find((r) => r.id === rec.id)!;
+    expect(after.state).toBe('restored');
+    expect(after.restores).toHaveLength(1);
+  });
+
+  it('抽選で起きた爆発は、その日の確率も記録する', () => {
+    const { s, ctx } = day2(4712);
+    setBal(X, 'chancePerDay', 1);
+    applyAction(s, 'p1', { type: 'openShop' }, ctx);
+    for (let i = 0; i < 4000 && !s.events?.accident; i++) step(s, 0.1, ctx);
+    const rec = s.events!.log!.find((r) => r.kind === 'explosion')!;
+    expect(rec.forced).toBe(false);
+    expect(rec.chance).toBe(1);
+    expect(rec.state).toBe('happening');
+  });
+});

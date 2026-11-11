@@ -219,7 +219,7 @@ export function onCustomerArrive(s: GameState, c: Customer, ctx: SimCtx): Custom
   const forcedCouple = takeForced(s, 'rare_couple');
   if (forcedCouple || drawRare(s, 'rare_couple', r.coupleChance)) {
     addDaily(s, 'rare_couple');
-    noteFire(s, 'rare_couple', forcedCouple);
+    noteFire(s, 'rare_couple', forcedCouple, { chance: forcedCouple ? null : r.coupleChance });
     const id = newId(s, 'ev');
     const him = makeCustomer(s, null);
     c.look = 'blonde_woman';
@@ -238,7 +238,7 @@ export function onCustomerArrive(s: GameState, c: Customer, ctx: SimCtx): Custom
   const forcedLover = takeForced(s, 'rare_lover');
   if (forcedLover || drawRare(s, 'rare_lover', r.loverChance)) {
     addDaily(s, 'rare_lover');
-    noteFire(s, 'rare_lover', forcedLover);
+    noteFire(s, 'rare_lover', forcedLover, { chance: forcedLover ? null : r.loverChance });
     c.special = { kind: 'ramen_lover', eventId: newId(s, 'ev'), spoken: false };
     emit(ctx, { type: 'rareArrive', targetId: c.id, text: 'lover' });
   }

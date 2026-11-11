@@ -38,6 +38,7 @@ import {
 import type { GameHost } from '../game/host';
 import { targetName, type FocusResult } from '../game/targeting';
 import { h, replace, stars, toast, yenStr } from './dom';
+import { openArmoryPanel } from './armory-panel';
 import { showRoomCode } from './room-code';
 import { verbFace } from './verb-face';
 
@@ -359,7 +360,9 @@ export class Hud {
     // クレームの対応（最大5つ）は先に出す
     // お客さんへの対応（クレーム・居座り・食べ方・喫煙）は先に出す
     const urgent = (v: string) => Number(/^(complaint_|linger_|manner_|smoke_|film_)/.test(v));
-    const enabled = this.verbs.filter((v) => v.enabled).sort((a, b) => urgent(b.verb) - urgent(a.verb));
+    // 武器の棚の「持つ・買う・弾を買う」は棚の一覧で選ぶ（ボタンに入りきらないため）
+    const inPanel = (v: string) => /^(weapon:|buy_weapon:|buy_ammo:)/.test(v);
+    const enabled = this.verbs.filter((v) => v.enabled && !inPanel(v.verb)).sort((a, b) => urgent(b.verb) - urgent(a.verb));
     const shown = enabled.slice(0, 5);
     const first = this.verbs[0];
     const explain = me.hand.kind !== 'none' || t?.kind === 'equipment';
@@ -447,6 +450,12 @@ export class Hud {
     if (!this.focus) return;
     if (down) {
       if (this.holding) return;
+      // 武器の棚を見る: 棚の一覧を開く（買う・持つはそこで。じろ2）
+      if (v.verb === 'armory_look') {
+        const me = this.me();
+        if (me) openArmoryPanel(this.root, this.host, me.id);
+        return;
+      }
       this.holding = v.verb;
       void this.host.act({ type: 'interact', targetId: this.focus.id, verb: v.verb, args: argsFor(this.host.state, v.verb, this.focus) }).then((r) => {
         if (!r.ok && r.reason) toast(this.root, r.reason, 'warn', 1800);

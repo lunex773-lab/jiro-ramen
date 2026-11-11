@@ -11,7 +11,7 @@
 import { clockMinuteAt, clockMinuteAtEnd, clockText, DEFAULT_HOURS, SEC_PER_MIN, isClosedDay, lateNightShare, openDurationOf, openMinutesOf, paidHoursWithPremium, storeHours, todayHours } from './hours';
 import { BALANCE } from '../data/balance';
 import { stageOf } from '../geometry';
-import type { StoreHours, Attendance, Employee, EmployeeSkills, Employment, GameState, ShiftDay, StaffLogEntry, StaffLogKind, StaffRecord } from '../types';
+import type { StoreHours, Attendance, AttendanceRecord, Employee, EmployeeSkills, Employment, GameState, ShiftDay, StaffLogEntry, StaffLogKind, StaffRecord } from '../types';
 import { clamp01, hashString } from '../util';
 import { startArrive, startLeave } from './commute';
 import { dropHand } from './interact';
@@ -810,9 +810,26 @@ export function rollPostpone(s: GameState, e: Employee): boolean {
   return true;
 }
 
+/** 残す実際の勤務の日数 */
+const ATT_LOG_DAYS = 35;
+
+/** その日の実際の勤務を記録する（予定があった日・呼び出した日。じろ2: 勤務のカレンダーの「実際」） */
+function recordAttendance(s: GameState, e: Employee): void {
+  const a = e.att;
+  if (!a || a.day !== s.day || (a.shift === null && !a.calledIn) || a.status === 'closed') return;
+  const openMin = openMinutesOf(todayHours(s));
+  const plannedMin = a.shift ? Math.round(shiftPaidHours({ ...a.shift, fromPrep: false }, openMin) * 60) : 0;
+  const workedMin = a.absent ? 0 : Math.round(a.workedSec / SEC_PER_MIN);
+  const rec = { day: s.day, plannedMin, workedMin, lateMin: a.absent ? 0 : a.lateMin, absent: a.absent, overtimeMin: Math.max(0, workedMin - plannedMin), calledIn: a.calledIn };
+  const log = (e.attLog ??= []).filter((r) => r.day !== s.day);
+  log.push(rec);
+  e.attLog = log.slice(-ATT_LOG_DAYS);
+}
+
 /** 閉店後の精算のときの記録（勤務日数・経験） */
 export function closeStaffDay(s: GameState): void {
   for (const e of s.employees) {
+    recordAttendance(s, e);
     const a = e.att;
     const worked = a && a.day === s.day ? !a.absent && (a.workedSec > 0 || a.prepWorked || (a.status === 'closed' && !isPartTime(e))) : e.presentToday;
     const share = a && a.day === s.day ? clamp01((a.workedSec + (a.prepWorked ? openDurationOf(s) * 0.1 : 0)) / openDurationOf(s)) : worked ? 1 : 0;
@@ -1082,4 +1099,58 @@ export function noteTemper(s: GameState, e: Employee, kind: 'rude' | 'abandon'):
 
 export function noteServed(e: Employee): void {
   ensureRecord(e).served += 1;
+}
+
+// ───────────────────────── 勤務の予定のおかしさ（じろ2: 改修設計書02） ─────────────────────────
+
+export interface ShiftIssue {
+  employeeId: string;
+  day: number;
+  level: 'warn' | 'bad';
+  text: string;
+}
+
+/** 7日続けて働くと注意する */
+const MAX_STREAK = 7;
+
+/**
+ * 勤務の予定のおかしさを見つける（from から days 日）: 6時間を超えるのに休憩が45分ない・8時間を超えるのに60分ない、
+ * 休憩が勤務の外、営業時間の外まで、定休日の予定（アルバイト）、7日以上続けて勤務。
+ * 1人の1日の予定は1つ（くりかえしと日にちごとの予定は同じデータ）なので、同じ人の予定が重なることはない
+ */
+export function shiftIssues(s: GameState, from: number, days: number): ShiftIssue[] {
+  const out: ShiftIssue[] = [];
+  const hours = storeHours(s);
+  const openMin = openMinutesOf(hours);
+  for (const e of s.employees) {
+    if (e.profile.temp) continue;
+    let streak = 0;
+    // 続けて働いた日数は、少し前の日から数える
+    for (let d = from - (MAX_STREAK - 1); d < from + days; d++) {
+      const sh = shiftFor(e, d);
+      const closed = isClosedDay(hours, d);
+      const works = !!sh && !closed;
+      streak = works ? streak + 1 : 0;
+      if (d < from) continue;
+      if (works && streak === MAX_STREAK) out.push({ employeeId: e.id, day: d, level: 'warn', text: `${MAX_STREAK}日続けて勤務の予定です` });
+      if (!sh) continue;
+      if (closed) {
+        if (isPartTime(e) && hasDateShift(e, d)) out.push({ employeeId: e.id, day: d, level: 'warn', text: '定休日に予定が入っています（出勤しません）' });
+        continue;
+      }
+      if (isFullShift(sh)) continue;
+      const span = Math.min(sh.end, openMin) - sh.start;
+      const work = span - (sh.breakLen > 0 ? sh.breakLen : 0);
+      if (sh.end > openMin) out.push({ employeeId: e.id, day: d, level: 'bad', text: '営業時間の外まで予定が入っています' });
+      if (sh.breakLen > 0 && (sh.breakAt <= sh.start || sh.breakAt + sh.breakLen >= sh.end)) out.push({ employeeId: e.id, day: d, level: 'bad', text: '休憩が勤務の外にあります' });
+      if (work > 8 * 60 && sh.breakLen < 60) out.push({ employeeId: e.id, day: d, level: 'bad', text: '8時間を超える勤務なのに休憩が60分ありません' });
+      else if (work > 6 * 60 && sh.breakLen < 45) out.push({ employeeId: e.id, day: d, level: 'bad', text: '6時間を超える勤務なのに休憩が45分ありません' });
+    }
+  }
+  return out;
+}
+
+/** 過ぎた日の実際の勤務 */
+export function attendanceOn(e: Employee, day: number): AttendanceRecord | null {
+  return e.attLog?.find((r) => r.day === day) ?? null;
 }

@@ -120,10 +120,28 @@ test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を
   await press(push);
   await expect.poll(async () => (await state()).armory?.doorOpen ?? false).toBe(true);
   await faceId('armory_rack');
-  const take = page.locator('.act[aria-label^="拳銃を持つ"]');
-  await expect(take).toBeVisible();
-  await shot(page, 'armory-open');
-  await press(take);
+  // 武器は買う（じろ2: 値段は案の2倍。高い買い物なので確かめてから）
+  await page.evaluate(() => {
+    (window as unknown as { __jiro: { host: { state: { money: number } } } }).__jiro.host.state.money = 5_000_000;
+  });
+  const look = page.locator('.act[aria-label^="武器の棚を見る"]');
+  await expect(look).toBeVisible();
+  await press(look);
+  const panel = page.locator('[data-armory-panel]');
+  await expect(panel.locator('[data-armory-weapon]')).toHaveCount(7);
+  await shot(page, 'armory-buy');
+  await panel.locator('[data-armory-verb="buy_weapon:pistol"]').click();
+  await expect(page.locator('.modal').last()).toContainText('¥2,000,000');
+  await page.locator('.modal').last().getByRole('button', { name: '買う' }).click();
+  await expect.poll(async () => ((await state()) as unknown as { money: number }).money).toBe(3_000_000);
+  await panel.locator('[data-armory-verb="buy_ammo:pistol"]').click();
+  await page.locator('.modal').last().getByRole('button', { name: '買う' }).click();
+  await expect.poll(async () => ((await state()) as unknown as { money: number }).money).toBe(2_900_000);
+  await expect(panel.locator('[data-armory-weapon="pistol"]')).toContainText('弾 1発');
+  const take = panel.locator('[data-armory-verb="weapon:pistol"]');
+  await expect(take).toBeEnabled();
+  await take.click();
+  await expect(panel).toHaveCount(0);
   await expect(page.locator('.hud-hand')).toContainText('拳銃');
   // 席の客を撃つ
   const rep = (await state()).reputation;

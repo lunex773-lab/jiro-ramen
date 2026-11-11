@@ -148,6 +148,19 @@ function lockControls(root: HTMLElement): void {
   }
 }
 
+/** イベントの記録の種類の名前 */
+const EVENT_LOG_LABEL: Record<string, string> = {
+  sns_buzz: '📱 SNSのバズ',
+  critic: '🕵️ 覆面調査員',
+  rare_couple: '💑 珍しいカップル',
+  rare_lover: '🍜 ラーメン好きの客',
+  complaint_unreasonable: '😤 理不尽なクレーム',
+  explosion: '🔥 爆発',
+  youtuber: '🎥 YouTuber',
+  tv: '📺 テレビ取材',
+  incident: '🚨 客を襲った事件',
+};
+
 export class ManageMenu {
   readonly el: HTMLElement;
   private body: HTMLElement;
@@ -1842,6 +1855,7 @@ export class ManageMenu {
         h('h4', null, `常連客（${s.regulars.length}人）`),
         s.regulars.slice().sort((a, b) => b.loyalty - a.loyalty).slice(0, 10).map((r) => h('div', { class: 'kv' }, h('span', null, `${r.name}（${MENU[r.favoriteMenu]?.short ?? ''}）`), h('b', null, `来店${r.visits}回・常連度${Math.round(r.loyalty * 100)}%`))),
       ),
+      this.eventLogCard(s),
       h(
         'section',
         { class: 'card wide' },
@@ -1850,6 +1864,27 @@ export class ManageMenu {
         h('div', { class: 'kv' }, h('span', null, '1日の最高提供数'), h('b', null, `${s.career.bestDayServed}杯`)),
         h('div', { class: 'kv' }, h('span', null, '営業日数'), h('b', null, `${s.career.daysPlayed}日`)),
       ),
+    );
+  }
+
+  /** イベントの記録（じろ2: 改修設計書05。いつ・どの店で・何が起き、どうなったか。確率がわかるものは確率も） */
+  private eventLogCard(s: GameState): HTMLElement {
+    const log = (s.events?.log ?? []).slice().reverse().slice(0, 20);
+    const stateText = { happening: '起きている', done: '終わった', restored: '仕込み開始時点に戻した' } as const;
+    return h(
+      'section',
+      { class: 'card wide', 'data-event-log': '' },
+      cardHead('イベントの記録（最近20件）', 'SNSのバズ・覆面調査員・珍しい客・クレーム・YouTuber・テレビ取材・爆発・事件の記録です。確率は、抽選で起きたときのその日の確率です（強制発生・確率のないものは出しません）。'),
+      log.length === 0
+        ? h('p', { class: 'note' }, 'まだ記録はありません')
+        : log.map((r) =>
+            h(
+              'div',
+              { class: 'kv', 'data-event': r.kind },
+              h('span', null, `${r.day}日目 ${EVENT_LOG_LABEL[r.kind] ?? r.kind}${r.chance !== null ? `（確率 ${(r.chance * 100).toFixed(r.chance < 0.01 ? 2 : 1)}%）` : ''}${r.forced ? '（テスト）' : ''}`),
+              h('b', null, `${stateText[r.state]}${r.result ? `・${r.result}` : ''}${r.restores?.length ? `・戻した${r.restores.length}回` : ''}`),
+            ),
+          ),
     );
   }
 

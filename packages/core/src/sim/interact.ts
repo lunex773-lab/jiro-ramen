@@ -9,7 +9,7 @@ import { NOODLE_SOURCES, INGREDIENTS } from '../data/ingredients';
 import { PREP_RECIPES, type PrepRecipe } from '../data/prep';
 import { accessPoint, armoryDoorPos, equipmentCenter, seatKitchenPoint, seatPos, stageOf } from '../geometry';
 import { WEAPONS, WEAPON_IDS } from '../data/weapons';
-import { ARMORY_DOOR_ID, ARMORY_RACK_ID, armoryDoorProblem, armoryOf, attack, attackable, incidentToday, toggleArmoryDoor, weaponOf } from './armory';
+import { ammoOf, ARMORY_DOOR_ID, ARMORY_RACK_ID, armoryDoorProblem, armoryOf, attack, attackable, buyAmmo, buyWeapon, incidentToday, returnWeapon, takeWeapon, toggleArmoryDoor, weaponOf, weaponOwned } from './armory';
 import type {
   Bowl,
   Customer,
@@ -988,25 +988,85 @@ const VERBS: VerbDef[] = [
     },
     applyUnit: (s, _a, _t, _args, ctx) => toggleArmoryDoor(s, ctx),
   },
+  // 武器の棚を見る（画面で棚の一覧を開く。武器の種類が多く、操作のボタンに入りきらないため。状態は変えない）
+  {
+    id: 'armory_look',
+    match: (t) => t.kind === 'fixture' && t.id === ARMORY_RACK_ID,
+    phases: ALL_PHASES,
+    skill: 'general',
+    visible: (s) => armoryOf(s).doorOpen,
+    plan: (s, a) => {
+      const why = armoryDoorProblem(s, a);
+      return why ? no('武器の棚を見る', why) : ok('武器の棚を見る', 0, 1);
+    },
+    applyUnit: () => undefined,
+  },
+  // 買った武器を持つ（じろ2: 武器は買う。一度買った武器は武器庫に残る。爆弾は武器庫の数だけ）
   ...WEAPON_IDS.map(
     (id): VerbDef => ({
       id: `weapon:${id}`,
       match: (t) => t.kind === 'fixture' && t.id === ARMORY_RACK_ID,
       phases: ALL_PHASES,
       skill: 'general',
-      visible: (s) => armoryOf(s).doorOpen,
+      visible: (s) => armoryOf(s).doorOpen && weaponOwned(s, id),
       plan: (s, a) => {
-        const label = `${WEAPONS[id]!.name}を持つ`;
+        const w = WEAPONS[id]!;
+        const label = id === 'bomb' ? `爆弾を持つ（残り${armoryOf(s).bombStock ?? 0}個）` : w.kind === 'gun' ? `${w.name}を持つ（弾${ammoOf(s, id)}発）` : `${w.name}を持つ`;
         if (!armoryOf(s).doorOpen) return no(label, '扉が閉まっています');
         const why = armoryDoorProblem(s, a);
         if (why) return no(label, why);
+        if (!weaponOwned(s, id)) return no(label, id === 'bomb' ? '爆弾がありません' : 'まだ買っていません');
         if (incidentToday(s)?.police) return no(label, '警察に取り上げられました');
         if (a.hand.kind !== 'none') return no(label, '手がふさがっています');
         return ok(label, 0, 1);
       },
-      applyUnit: (_s, a, _t, _args, ctx) => {
-        a.hand = { kind: 'weapon', weaponId: id };
+      applyUnit: (s, a, _t, _args, ctx) => {
+        takeWeapon(s, a, id);
         emit(ctx, { type: 'weaponTake', actorId: a.id, text: id });
+      },
+    }),
+  ),
+  // 武器を買う（爆弾は1個ずつ。買っていない武器と爆弾だけ出る）
+  ...WEAPON_IDS.map(
+    (id): VerbDef => ({
+      id: `buy_weapon:${id}`,
+      match: (t) => t.kind === 'fixture' && t.id === ARMORY_RACK_ID,
+      phases: ALL_PHASES,
+      skill: 'general',
+      visible: (s) => armoryOf(s).doorOpen && (id === 'bomb' || !weaponOwned(s, id)),
+      plan: (s, a) => {
+        const w = WEAPONS[id]!;
+        const label = `${w.name}を買う（¥${w.price.toLocaleString('ja-JP')}${w.consumable ? '・1個' : ''}）`;
+        if (!armoryOf(s).doorOpen) return no(label, '扉が閉まっています');
+        const why = armoryDoorProblem(s, a);
+        if (why) return no(label, why);
+        if (!w.consumable && weaponOwned(s, id)) return no(label, 'もう持っています');
+        if (s.money < w.price) return no(label, 'お金が足りません');
+        return ok(label, 0, 1);
+      },
+      applyUnit: (s, _a, _t, _args, ctx) => {
+        buyWeapon(s, ctx, id);
+      },
+    }),
+  ),
+  // 銃の弾を1発買う（持っている銃だけ）
+  ...WEAPON_IDS.filter((id) => WEAPONS[id]!.kind === 'gun').map(
+    (id): VerbDef => ({
+      id: `buy_ammo:${id}`,
+      match: (t) => t.kind === 'fixture' && t.id === ARMORY_RACK_ID,
+      phases: ALL_PHASES,
+      skill: 'general',
+      visible: (s) => armoryOf(s).doorOpen && weaponOwned(s, id),
+      plan: (s, a) => {
+        const w = WEAPONS[id]!;
+        const label = `${w.name}の弾を買う（1発 ¥${(w.ammoPrice ?? 0).toLocaleString('ja-JP')}・今${ammoOf(s, id)}発）`;
+        const why = armoryDoorProblem(s, a);
+        if (why) return no(label, why);
+        if (s.money < (w.ammoPrice ?? 0)) return no(label, 'お金が足りません');
+        return ok(label, 0, 1);
+      },
+      applyUnit: (s, _a, _t, _args, ctx) => {
+        buyAmmo(s, ctx, id);
       },
     }),
   ),
@@ -1021,8 +1081,8 @@ const VERBS: VerbDef[] = [
       if (!armoryOf(s).doorOpen) return no('武器を戻す', '扉が閉まっています');
       return ok(`${WEAPONS[a.hand.weaponId]?.name ?? '武器'}を戻す`, 0, 1);
     },
-    applyUnit: (_s, a) => {
-      a.hand = { kind: 'none' };
+    applyUnit: (s, a) => {
+      returnWeapon(s, a);
     },
   },
   {
@@ -1036,8 +1096,9 @@ const VERBS: VerbDef[] = [
       const w = weaponOf(a);
       if (!w) return no('襲う', '武器を持っていません');
       const c = t.kind === 'customer' ? t.c : s.customers.find((x) => x.id === (t as { seat: Seat }).seat.customerId);
-      const label = `${w.name}で${w.verb}`;
+      const label = w.kind === 'gun' ? `${w.name}で${w.verb}（弾${ammoOf(s, w.id)}発）` : `${w.name}で${w.verb}`;
       if (!c || !attackable(c)) return no(label, '襲える客がいません');
+      if (w.kind === 'gun' && ammoOf(s, w.id) <= 0) return no(label, '弾がありません（武器庫で買えます）');
       return ok(label, 0, 1);
     },
     applyUnit: (s, a, t, _args, ctx) => {

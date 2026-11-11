@@ -22,7 +22,7 @@ import { FIRE_LINES } from '../data/events';
 import type { AccidentState, GameState, Id, ShopEvents } from '../types';
 import { dist, newId, randRange } from '../util';
 import { defOf } from './equipment';
-import { ensureEvents, evRand, noteDraw, noteFire, takeForced } from './events';
+import { ensureEvents, evRand, finishEvent, noteDraw, noteFire, restoreEvent, takeForced } from './events';
 import { dropHand } from './interact';
 import { eventSayTime, sayEvent } from './customers';
 import { emit, notify, type SimCtx } from './notices';
@@ -129,7 +129,9 @@ function startWarning(s: GameState, ctx: SimCtx, ev: ShopEvents): void {
   ev.accident = { id: plan.id, day: s.day, stage: 'warning', t: 0, sourceId: src.id, pos: src.pos, burning: src.id ? [{ id: src.id, at: 0 }] : [], panicked: {} };
   ev.accident.nextSpread = nextSpreadAt(s, ev.accident);
   ev.accidentPlan = null;
-  noteFire(s, 'explosion', takeForced(s, 'explosion'));
+  const forced = takeForced(s, 'explosion');
+  const rec = noteFire(s, 'explosion', forced, { chance: forced ? null : accidentChance(s), happening: true });
+  ev.accident.eventId = rec.id;
   notify(s, ctx, 'accident', 'danger', '🔥 寸胴から火が出た！ガスのにおいがする…');
   emit(ctx, { type: 'accidentWarning', targetId: src.id ?? undefined, pos: src.pos });
 }
@@ -139,6 +141,7 @@ function blast(s: GameState, ctx: SimCtx, ev: ShopEvents): void {
   const acc = ev.accident!;
   acc.stage = 'destroyed';
   acc.t = 0;
+  if (acc.eventId) finishEvent(s, acc.eventId, `店が爆発した（燃えた設備 ${acc.burning?.length ?? 0}台）`);
   for (const p of s.players) dropHand(s, p, ctx);
   for (const e of s.employees) {
     dropHand(s, e, ctx);
@@ -295,7 +298,8 @@ export function resetAccident(s: GameState, actorId: Id, accidentId: unknown, ct
     rng: s.rng,
     paused: s.paused,
   };
-  const kept = { rng: ev.rng, stats: ev.stats, resets: ev.resets + 1 };
+  const kept = { rng: ev.rng, stats: ev.stats, resets: ev.resets + 1, log: ev.log };
+  if (acc.eventId) restoreEvent(s, acc.eventId, s.day, s.t);
   const restored = clone(snap.state) as Partial<GameState>;
   for (const k of Object.keys(s) as (keyof GameState)[]) {
     if (!(k in restored) && !(k in keep)) delete (s as unknown as Record<string, unknown>)[k];
@@ -305,6 +309,7 @@ export function resetAccident(s: GameState, actorId: Id, accidentId: unknown, ct
   nev.rng = kept.rng;
   nev.stats = kept.stats;
   nev.resets = kept.resets;
+  if (kept.log) nev.log = kept.log;
   // 同じ日に二度抽選しない（控えは抽選の前の状態なので、ここで記録し直す）
   nev.accidentDrawDay = s.day;
   nev.accidentPlan = null;

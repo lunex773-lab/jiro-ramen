@@ -52,6 +52,7 @@ const FACES: Record<string, [icon: string, short: string]> = {
   'prep:make_noodles': ['🍝', '製麺'],
   // 隠し扉と武器庫（じろ1 5.12）
   armory_door: ['🚪', '押す'],
+  armory_look: ['🗄️', '棚を見る'],
   'weapon:katana': ['🗡️', '日本刀'],
   'weapon:knife': ['🔪', '包丁'],
   'weapon:bat': ['🏏', 'バット'],
@@ -76,9 +77,24 @@ export function verbFace(verb: string, label: string): VerbFace {
   // 丼を持っているときの「丼を置く」
   if (verb === 'bowls_place' && label.startsWith('丼を置く')) short = '置く';
   // 武器の操作は「〇〇で斬る / 撃つ / 投げる」の動詞を出す
-  if (verb === 'attack') short = label.replace(/^.*で/, '') || short;
+  if (verb === 'attack') short = label.replace(/^.*で/, '').replace(/（.*$/, '') || short;
+  // 武器を買う・弾を買う（じろ2）
+  const buy = /^buy_(weapon|ammo):(.+)$/.exec(verb);
+  if (buy) short = buy[1] === 'ammo' ? '弾' : (FACES[`weapon:${buy[2]}`]?.[1] ?? short);
   const m = /（(?:見込み|汚れ)?(\d+)(玉|杯|枚|%|秒)）/.exec(label);
-  const badge = m ? `${m[1]}${m[2] === '%' || m[2] === '秒' ? m[2] : ''}` : null;
-  const icon = verb === 'attack' ? (label.includes('撃つ') ? '🔫' : label.includes('投げる') ? '💣' : label.includes('斬る') || label.includes('刺す') ? '🗡️' : '🏏') : (f?.[0] ?? '👉');
+  // 弾・爆弾の数（「弾2発」「残り2個」）
+  const ammo = /(?:弾|残り)(\d+)(?:発|個)/.exec(label);
+  const badge = m ? `${m[1]}${m[2] === '%' || m[2] === '秒' ? m[2] : ''}` : ammo && !buy ? (ammo[1] ?? null) : null;
+  const icon = buy
+    ? '🛒'
+    : verb === 'attack'
+      ? label.includes('撃つ')
+        ? '🔫'
+        : label.includes('投げる')
+          ? '💣'
+          : label.includes('斬る') || label.includes('刺す')
+            ? '🗡️'
+            : '🏏'
+      : (f?.[0] ?? '👉');
   return { icon, short, badge };
 }

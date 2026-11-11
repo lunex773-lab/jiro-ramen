@@ -202,6 +202,20 @@ export interface StaffRecord {
 
 export type AttendanceStatus = 'off' | 'scheduled' | 'late' | 'working' | 'break' | 'left' | 'absent' | 'closed';
 
+/** 過ぎた日の実際の勤務（じろ2: 改修設計書02。予定と実際・遅刻・欠勤・残業。勤務のカレンダーに出す） */
+export interface AttendanceRecord {
+  day: number;
+  /** 予定の勤務（分。休憩を除く。予定のない日は 0） */
+  plannedMin: number;
+  /** 実際に働いた分（営業中。休憩を除く） */
+  workedMin: number;
+  lateMin: number;
+  absent: boolean;
+  /** 予定より長く働いた分（閉店のあと並んだ客に提供した分など） */
+  overtimeMin: number;
+  calledIn: boolean;
+}
+
 /** その日の出勤の状況（毎朝の出勤確認で作る） */
 export interface Attendance {
   day: number;
@@ -310,6 +324,8 @@ export interface Employee extends ActorBase {
   dateShifts?: Record<string, ShiftDay | null>;
   /** その日の出勤の状況 */
   att?: Attendance;
+  /** 過ぎた日の実際の勤務（新しいものが後ろ。35日分。古いセーブにはない） */
+  attLog?: AttendanceRecord[];
   /** 勤務の記録 */
   record?: StaffRecord;
   /** サボり・私的な休憩の状況（営業中の sim 秒） */
@@ -402,6 +418,12 @@ export interface ArmoryState {
   doorOpen: boolean;
   /** 投げた爆弾（爆発する営業の秒） */
   bombs: { id: Id; pos: Vec2; at: number }[];
+  /** 買った武器（一度買うと武器庫に残る。じろ2。古いセーブにはない → 何も持っていない） */
+  owned?: string[];
+  /** 銃の弾の数（武器の id → 発） */
+  ammo?: Record<string, number>;
+  /** 爆弾の数（武器庫にある分） */
+  bombStock?: number;
 }
 
 export interface IncidentState {
@@ -411,6 +433,8 @@ export interface IncidentState {
   policeAt: number;
   police: boolean;
   victims: number;
+  /** イベントの記録の id（じろ2） */
+  eventId?: Id;
 }
 
 export interface DirtSpot {
@@ -702,6 +726,8 @@ export type TxnType =
   | 'relocation'
   /** 出店（物件の初期費用） */
   | 'store'
+  /** 武器・弾・爆弾（隠し扉の武器庫。じろ2） */
+  | 'weapon'
   /** 広告費（共通市場の仕様書 4.3。オーナーの判断 14） */
   | 'advertising'
   /** 企業間の貸し借り（共通市場。サーバーだけが動かす。じろ2: 改修設計書04）: 借りた・貸した・返した・返してもらった */
@@ -899,6 +925,28 @@ export interface TutorialState {
 /** イベントの種類（安定した ID。設定値・記録・強制発生のキー） */
 export type EventKind = 'sns_buzz' | 'critic' | 'rare_couple' | 'rare_lover' | 'complaint_unreasonable' | 'explosion' | 'youtuber' | 'tv';
 
+/** イベントの記録（じろ2: 改修設計書05。ID・日時・会社・店・確率・状態・結果・復元の記録） */
+export interface EventRecord {
+  id: Id;
+  /** イベントの種類（incident = 客を襲った事件） */
+  kind: EventKind | 'incident';
+  day: number;
+  /** その日の時刻（ゲームの秒） */
+  t: number;
+  /** 会社（屋号） */
+  company: string;
+  storeId: Id;
+  /** 抽選の確率（わかるもの。強制・確率のないものは null） */
+  chance: number | null;
+  /** テスト用に強制発生した */
+  forced: boolean;
+  /** happening = 続いている、done = 終わった、restored = 仕込み開始時点に戻した */
+  state: 'happening' | 'done' | 'restored';
+  result?: string;
+  /** 仕込み開始時点に戻した記録 */
+  restores?: { day: number; t: number }[];
+}
+
 export interface EventStat {
   /** 抽選した回数 */
   draws: number;
@@ -1030,6 +1078,8 @@ export interface AccidentState {
   nextSpread?: number;
   /** 騒いだ回数（人の ID ごと。同じ人が何度も同じことを言わない） */
   panicked?: Record<Id, number>;
+  /** イベントの記録の id（じろ2） */
+  eventId?: Id;
 }
 
 export interface ShopEvents {
@@ -1070,6 +1120,8 @@ export interface ShopEvents {
   tv?: TvVisit | null;
   /** 芸能人のサイン（壁に飾る順） */
   signs?: CelebritySign[];
+  /** イベントの記録（新しいものが後ろ。じろ2。古いセーブにはない） */
+  log?: EventRecord[];
 }
 
 /** 仕込み開始時点の状態の控え。日報・口コミ（営業中は変わらない）と、プレイヤー（接続で変わる）は入れない */

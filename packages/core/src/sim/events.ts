@@ -6,8 +6,8 @@
 //
 // 注意: client の共同経営の複製（サーバーから配られた状態）では ensureEvents を呼ばないこと（状態がずれる）。読むだけなら s.events?.… を使う。
 
-import type { EventKind, EventStat, GameState, ShopEvents } from '../types';
-import { hashString, rand } from '../util';
+import type { EventKind, EventRecord, EventStat, GameState, ShopEvents } from '../types';
+import { hashString, newId, rand } from '../util';
 import { BALANCE } from '../data/balance';
 
 /** イベントの種類（設定値・記録・強制発生のキー） */
@@ -59,12 +59,58 @@ export function noteDraw(s: GameState, kind: EventKind): void {
   stat(ensureEvents(s), kind).draws += 1;
 }
 
-/** 発生を記録する（forced = テスト用の強制発生） */
-export function noteFire(s: GameState, kind: EventKind, forced = false): void {
+/**
+ * 発生を記録する（forced = テスト用の強制発生）。イベントの記録（ID・日時・会社・店・確率・状態・結果）にも1件足す。
+ * chance: 抽選の確率（わかるもの）。happening: 続くイベント（爆発など。終わったら finishEvent）
+ */
+export function noteFire(s: GameState, kind: EventKind, forced = false, opts: { chance?: number | null; happening?: boolean; result?: string } = {}): EventRecord {
   const st = stat(ensureEvents(s), kind);
   st.fired += 1;
   if (forced) st.forced += 1;
   st.lastDay = s.day;
+  return recordEvent(s, kind, { forced, chance: opts.chance ?? null, state: opts.happening ? 'happening' : 'done', result: opts.result });
+}
+
+/** 残すイベントの記録の数 */
+const EVENT_LOG_KEEP = 80;
+
+/**
+ * イベントの記録を1件足す（じろ2: 改修設計書05「イベントの状態の記録」。今のイベントの仕組みはそのままで、記録だけを1つにまとめる）。
+ * 仕込み開始時点に戻しても消えない（accident.ts の resetAccident が引き継ぐ）
+ */
+export function recordEvent(s: GameState, kind: EventRecord['kind'], o: { forced?: boolean; chance?: number | null; state?: EventRecord['state']; result?: string } = {}): EventRecord {
+  const ev = ensureEvents(s);
+  const r: EventRecord = {
+    id: newId(s, 'evr'),
+    kind,
+    day: s.day,
+    t: Math.round(s.t * 10) / 10,
+    company: s.shopName,
+    storeId: s.company?.activeStoreId ?? 'home',
+    chance: o.chance ?? null,
+    forced: !!o.forced,
+    state: o.state ?? 'done',
+    ...(o.result ? { result: o.result } : {}),
+  };
+  (ev.log ??= []).push(r);
+  if (ev.log.length > EVENT_LOG_KEEP) ev.log.splice(0, ev.log.length - EVENT_LOG_KEEP);
+  return r;
+}
+
+/** 続いていたイベントが終わった（結果を書く） */
+export function finishEvent(s: GameState, id: string, result: string): void {
+  const r = s.events?.log?.find((x) => x.id === id);
+  if (!r) return;
+  r.state = 'done';
+  r.result = result;
+}
+
+/** 仕込み開始時点に戻した（爆発のリセット）。記録に戻した日時を足す */
+export function restoreEvent(s: GameState, id: string, day: number, t: number): void {
+  const r = s.events?.log?.find((x) => x.id === id);
+  if (!r) return;
+  r.state = 'restored';
+  (r.restores ??= []).push({ day, t: Math.round(t * 10) / 10 });
 }
 
 /** 最後に起きた日から days 日より後か（一度も起きていなければ true） */
