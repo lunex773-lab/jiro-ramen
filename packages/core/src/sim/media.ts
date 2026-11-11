@@ -8,6 +8,7 @@
 // - サイン: 取材が完了したら出演者のサインをもらい、壁の決まった場所に自動で飾る（同じ人は1枚で、来店の回数を数える。収益への効果はない）
 // - 抽選はイベント専用の乱数。チュートリアル中は起きない
 
+import { openDurationOf } from './hours';
 import { BALANCE } from '../data/balance';
 import { CELEBRITIES, TV_LINES, TV_SHOWS, YOUTUBER_LINES } from '../data/events';
 import { seatPos, stageOf } from '../geometry';
@@ -73,12 +74,12 @@ export function drawMediaPlans(s: GameState): void {
   const fy = takeForced(s, 'youtuber');
   if (fy || (eventsAllowed(s, Y.minDay) && cooledDown(s, 'youtuber', Y.cooldownDays))) {
     noteDraw(s, 'youtuber');
-    if (fy || evRand(s) < Y.chancePerDay) ev.youtuberPlan = { day: s.day, afterOpenT: fy ? 0 : (Y.arriveFrom + (Y.arriveTo - Y.arriveFrom) * evRand(s)) * BALANCE.openDuration, forced: fy };
+    if (fy || evRand(s) < Y.chancePerDay) ev.youtuberPlan = { day: s.day, afterOpenT: fy ? 0 : (Y.arriveFrom + (Y.arriveTo - Y.arriveFrom) * evRand(s)) * openDurationOf(s), forced: fy };
   }
   const ft = takeForced(s, 'tv');
   if (ft || (eventsAllowed(s, T.minDay) && cooledDown(s, 'tv', T.cooldownDays))) {
     noteDraw(s, 'tv');
-    if (ft || evRand(s) < T.chancePerDay) ev.tvPlan = { day: s.day, afterOpenT: ft ? 2 : (T.arriveFrom + (T.arriveTo - T.arriveFrom) * evRand(s)) * BALANCE.openDuration, forced: ft };
+    if (ft || evRand(s) < T.chancePerDay) ev.tvPlan = { day: s.day, afterOpenT: ft ? 2 : (T.arriveFrom + (T.arriveTo - T.arriveFrom) * evRand(s)) * openDurationOf(s), forced: ft };
   }
 }
 

@@ -12,6 +12,25 @@ export const BALANCE = {
   /** 光熱費等: 1日の基本料金と1杯あたりの追加 */
   utilitiesBase: 2_500,
   utilitiesPerBowl: 25,
+  /**
+   * 営業時間（じろ1 5.1）。光熱費の基本は「1日の固定分 + 営業1時間あたり」に分ける（11〜15時の4時間なら今までと同じ 2,500円）。
+   * 定休日は固定分だけ
+   */
+  hours: {
+    maxSessions: 3,
+    stepMin: 30,
+    minSessionMin: 60,
+    minBreakMin: 30,
+    maxOpenMin: 18 * 60,
+    utilitiesFixed: 1_000,
+    utilitiesPerHour: 375,
+    /** 給料: 1日8時間を超えた分・深夜（22:00〜翌5:00）の分の割り増し、6時間を超える勤務の休憩（給与なし）の分 */
+    overtimeAfterH: 8,
+    overtimeRate: 0.25,
+    lateNightRate: 0.25,
+    breakOver6h: 0.75,
+    breakOver8h: 1,
+  },
 
   /** 設備の摩耗と定期メンテ（統合進化設計書 v2.1 の経済の調整） */
   equipment: {
@@ -74,12 +93,13 @@ export const BALANCE = {
      * プレイヤーがいない店の「店長の営業」（1日単位の計算）。係数は細かいシミュレーション（test/econ）の結果に合わせる
      */
     model: {
-      /** 席1つあたりの1日の提供の上限（人手が足りているとき） */
-      seatTurns: 8.2,
+      /** 席1つあたりの1日の提供の上限（人手が足りているとき）。じろ1 P3 の行列（食券が先・外で待つ）で席の回転が上がったので測り直した */
+      seatTurns: 9.0,
       /** 店長が一人で出せる杯数（能力0.65のとき） */
       leadPoints: 42,
-      /** ほかの従業員が増やす杯数（担当ごと。能力0.65のとき） */
-      rolePoints: { cook: 24, server: 34, cleaner: 14, leader: 34 } as Record<string, number>,
+      /** ほかの従業員が増やす杯数（担当ごと。能力0.65のとき）。
+       *  接客担当（仕込みも受け持つ）は、店長と調理担当の店の詰まり（食券・案内・下げ物・仕込み）をまとめてほどくので大きい（じろ1 P3 で測り直し） */
+      rolePoints: { cook: 24, server: 58, cleaner: 14, leader: 58 } as Record<string, number>,
       /** 2人目以降の従業員の効き方の減り（人数が増えるほど1人あたりは減る） */
       extraDiminish: 0.08,
       /** 能力の効き方: 倍率 = skillBase + skillSlope × 能力 */
@@ -98,7 +118,7 @@ export const BALANCE = {
       /** 冷蔵庫の容量1kgあたりで回せる1日の杯数（12席で1日90杯を超えると冷蔵庫1台では足りない） */
       bowlsPerFridgeKg: 0.75,
       /** 光熱費 = utilitiesBase + 1杯あたり（設備の使用を含む） */
-      utilitiesPerBowl: 38.5,
+      utilitiesPerBowl: 44,
       /** 修理費（1杯あたり。定期メンテを予約しないと増える） */
       repairPerBowl: 25,
       /** 客単価の見込みに掛ける倍率（返金・作り直しなど） */
@@ -270,6 +290,11 @@ export const BALANCE = {
       anchor: 'menu' as 'reference' | 'menu',
     },
     maxCustomers: 60,
+    /**
+     * 閉店の時刻のあと、店の外の列（食券を買った客）が待つ時間（営業の sim 秒。約45分）。その間に入れた客には提供する。
+     * 入れなかった客は帰る（店の評価には影響しない。じろ1 5.3「すぐに解散しない」）
+     */
+    afterCloseWaitSec: 100,
     walkSpeed: 1.25,
     ticketTime: 2,
     /** 標準の食事時間（秒）。量・食事速度で増減 */

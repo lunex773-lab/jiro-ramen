@@ -8,9 +8,10 @@ import type { GameState } from '../types';
 import { clamp01, rand } from '../util';
 import { coolBowl } from './cooking';
 import { addDirt, spawnLostItemOwners, updateArrivals, updateCustomers } from './customers';
-import { allCustomersGone, checkGoals, settleDay, startClosing } from './day';
+import { allCustomersGone, checkGoals, settleDay, startBreak, startClosing } from './day';
+import { sessionEndT } from './hours';
 import { onEmployeeWorkDone, updateEmployees } from './employees';
-import { sendStaffHome, updateAttendance } from './staff';
+import { afterHoursService, sendStaffHome, updateAttendance } from './staff';
 import { defOf, effectSum, updateRepairs } from './equipment';
 import { assignBowls, completeProcess, progressWork, roleOf } from './interact';
 import { receiveDeliveries, stockOf } from './inventory';
@@ -81,9 +82,13 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
     periodicChecks(s, ctx);
   }
 
-  if (s.phase === 'open' && s.openT >= BALANCE.openDuration) startClosing(s, ctx);
+  if (s.phase === 'open' && s.openT >= sessionEndT(s)) startClosing(s, ctx);
+  // 閉店の時刻のあと、並んだ客に提供している時間（光熱費に入る）
+  else if (afterHoursService(s)) s.today.afterHoursSec = (s.today.afterHoursSec ?? 0) + dt;
+  // 中休みの前: 店内のお客さんがいなくなったら、仕込みの時間に戻る（従業員は帰らない。じろ1 5.1）
+  if (s.phase === 'closing' && s.breakPending && allCustomersGone(s)) startBreak(s, ctx);
   // お客さんがいなくなったら、従業員が「お疲れ様でした！」と言って帰るのを待ってから精算する
-  if (s.phase === 'closing' && allCustomersGone(s) && sendStaffHome(s, ctx)) {
+  else if (s.phase === 'closing' && allCustomersGone(s) && sendStaffHome(s, ctx)) {
     settleDay(s, ctx);
   }
   if (s.tutorial) updateTutorial(s, ctx);

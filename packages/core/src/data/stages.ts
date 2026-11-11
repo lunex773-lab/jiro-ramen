@@ -160,10 +160,19 @@ export const STARTING_LAYOUT: DefaultPlacement[] = [
 export const STARTING_SEATS = 8;
 export const STARTING_BOWLS = 14;
 
-/** 店外の行列位置（歩道） */
+/** 店外の行列の列の数（2列に並ぶ。じろ1 5.3: 並べる人数を増やす） */
+export const STREET_QUEUE_ROWS = 2;
+
+/** 店外の行列位置（歩道。食券を買った客が2列で並ぶ） */
 export function streetQueueSpot(i: number): { x: number; z: number } {
   const perRow = 22;
-  const row = Math.floor(i / perRow);
-  const col = i % perRow;
-  return { x: 2.0 + col * 0.6, z: -0.9 - row * 0.7 };
+  const block = Math.floor(i / (STREET_QUEUE_ROWS * perRow));
+  const col = Math.floor(i / STREET_QUEUE_ROWS) % perRow;
+  const row = (i % STREET_QUEUE_ROWS) + block * STREET_QUEUE_ROWS;
+  return { x: 2.0 + col * 0.6, z: -0.9 - row * 0.55 };
+}
+
+/** 券売機の順番を待つ位置（入口の前から、行列と反対の左へ） */
+export function ticketLineSpot(doorX: number, i: number): { x: number; z: number } {
+  return i === 0 ? { x: doorX, z: -0.75 } : { x: doorX - 0.55 * Math.min(i, 8), z: -0.95 - 0.5 * Math.floor(i / 9) };
 }

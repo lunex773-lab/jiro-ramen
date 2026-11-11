@@ -2,6 +2,7 @@
 // AI の流れ: 仕事候補の取得 → 優先度計算 → 担当範囲の確認 → 予約 → 経路探索 → 移動 → 作業 → 結果確認 → 次の仕事
 // 同じ仕事は予約（taskId）で一人だけが担当する。担当者が離脱した仕事は予約が外れ、他の人が引き継げる。
 
+import { openDurationOf } from './hours';
 import { BALANCE } from '../data/balance';
 import { EQUIPMENT } from '../data/equipment';
 import { GIVEN_NAMES, SURNAMES } from '../data/names';
@@ -118,7 +119,7 @@ function inProcessOutput(s: GameState, itemId: string): number {
 
 /** その物の、営業1秒あたりの使用量の見込み（最近の日の使用量の最大と、今日のここまでの速さの大きいほう。品切れがあった日は多めに見る） */
 export function prepUseRate(s: GameState, itemId: string): number {
-  const D = BALANCE.openDuration;
+  const D = openDurationOf(s);
   let best = 0;
   let n = 0;
   for (let i = s.history.length - 1; i >= 0 && n < BALANCE.prepPlan.days; i--) {
@@ -145,7 +146,7 @@ export function restockTarget(s: GameState, r: { id: string; time: number; resto
   const rate = prepUseRate(s, r.restockBelow.itemId);
   const lead = r.time + P.leadMarginSec + (r.id === 'braise_pork' ? (PREP_RECIPES.slice_pork?.time ?? 0) : 0);
   let want = rate * P.peakFactor * lead * P.safety;
-  if (s.phase === 'open') want = Math.min(want, rate * Math.max(0, BALANCE.openDuration - s.openT) * P.safety);
+  if (s.phase === 'open') want = Math.min(want, rate * Math.max(0, openDurationOf(s) - s.openT) * P.safety);
   return Math.max(r.restockBelow.qty, want);
 }
 

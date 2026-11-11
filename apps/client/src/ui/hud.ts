@@ -29,6 +29,10 @@ import {
   gameDate,
   calendarDemand,
   seasonName,
+  clockMinuteAt,
+  clockText as clockLabel,
+  SEC_PER_MIN,
+  todayHours,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 import { targetName, type FocusResult } from '../game/targeting';
@@ -43,23 +47,23 @@ export interface HudCallbacks {
 }
 
 export function clockText(s: GameState): string {
-  if (s.phase === 'prep') return '仕込み中';
-  if (s.phase === 'closing') return '閉店作業中';
+  // 2つ目以降の枠の前（中休み）は、次の開店の時刻を出す（じろ1 5.1）
+  if (s.phase === 'prep') {
+    const next = (s.sessionIdx ?? 0) > 0 ? todayHours(s).sessions[s.sessionIdx ?? 0] : undefined;
+    return next ? `中休み（${clockLabel(next.open)}開店）` : '仕込み中';
+  }
+  if (s.phase === 'closing') return s.breakPending ? '中休みの準備' : '閉店作業中';
   if (s.phase === 'closed') return '閉店';
   if (s.phase === 'bankrupt') return '破産';
-  const r = Math.min(1, s.openT / BALANCE.openDuration);
-  const mins = BALANCE.openHour * 60 + r * (BALANCE.closeHour - BALANCE.openHour) * 60;
-  const hh = Math.floor(mins / 60);
-  const mm = Math.floor(mins % 60);
-  return `${hh}:${String(mm).padStart(2, '0')}`;
+  // 営業の時刻は、その日の営業時間の枠から（日をまたぐと「翌1:30」）。分は切り捨て
+  return clockLabel(Math.floor(clockMinuteAt(todayHours(s), s.openT)));
 }
 
 /** SNS バズの残り時間（ゲーム内の分）。バズっていなければ null */
 export function buzzLeftMinutes(s: GameState): number | null {
   const b = s.events?.buzz;
   if (!b || s.phase !== 'open' || s.openT >= b.endT) return null;
-  const perSec = ((BALANCE.closeHour - BALANCE.openHour) * 60) / BALANCE.openDuration;
-  return Math.max(1, Math.ceil((b.endT - s.openT) * perSec));
+  return Math.max(1, Math.ceil((b.endT - s.openT) / SEC_PER_MIN));
 }
 
 /** 速さのボタンを押したときの次の速さ */
@@ -524,7 +528,7 @@ export class Hud {
   private updateCta(s: GameState): void {
     // チュートリアル中は「開店」の手順になるまで開店ボタンを出さない
     const tutStep = s.tutorial && !s.tutorial.finished ? currentTutorialStep(s)?.id ?? '' : '';
-    const key = `${s.phase}|${this.host.isHost}|${s.paused}|${tutStep}`;
+    const key = `${s.phase}|${this.host.isHost}|${s.paused}|${tutStep}|${s.sessionIdx ?? 0}|${s.breakPending ? 1 : 0}`;
     if (key === this.lastCtaKey) return;
     this.lastCtaKey = key;
     if (s.paused) {
@@ -535,14 +539,25 @@ export class Hud {
       // 共同経営のゲストは開店できない（開店はホストの操作）
       replace(this.cta, h('div', { class: 'cta-info' }, 'ホストが開店するのを待っています。今のうちに仕込みをしましょう'));
     } else if (s.phase === 'prep') {
+      // 中休み（2つ目以降の営業の枠の前）は、次の枠の時刻を出す（じろ1 5.1）
+      const next = (s.sessionIdx ?? 0) > 0 ? todayHours(s).sessions[s.sessionIdx ?? 0] : undefined;
       replace(
         this.cta,
         // 高さの低い画面（スマホの横向き）では案内と重複するので説明を省く
-        h('div', { class: 'cta-info redundant' }, '開店前の仕込み時間です。準備ができたら開店しましょう'),
-        h('button', { class: 'btn big primary', onclick: () => this.cb.onOpenShop() }, '🏮 開店する'),
+        h('div', { class: 'cta-info redundant' }, next ? `中休みです。仕込みをして、準備ができたら${clockLabel(next.open)}からの営業を始めましょう` : '開店前の仕込み時間です。準備ができたら開店しましょう'),
+        h('button', { class: 'btn big primary', onclick: () => this.cb.onOpenShop() }, next ? `🏮 開店する（${clockLabel(next.open)}〜）` : '🏮 開店する'),
       );
     } else if (s.phase === 'closing') {
-      replace(this.cta, h('div', { class: 'cta-info' }, '営業時間終了。店内のお客さんに提供を済ませましょう'));
+      replace(
+        this.cta,
+        h(
+          'div',
+          { class: 'cta-info' },
+          s.breakPending
+            ? 'この営業の枠は終わりです。お客さんに提供を済ませると中休みになります'
+            : '営業時間終了。並んでいるお客さんと店内のお客さんに提供を済ませましょう（外の行列は約45分で解散します）',
+        ),
+      );
     } else {
       replace(this.cta);
     }

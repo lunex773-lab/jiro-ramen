@@ -1238,6 +1238,7 @@ export function migrateMarket(raw: Record<string, unknown>, now: number): Market
  */
 export const MARKET_ACTIONS: ReadonlySet<Action['type']> = new Set<Action['type']>([
   'setStorePolicy',
+  'setStoreHours',
   'setCompanyPolicy',
   'setRestDays',
   'setShift',

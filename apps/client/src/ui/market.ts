@@ -32,11 +32,13 @@ import {
   type GameState,
   type MarketView,
   type StoreEntry,
+  DEFAULT_HOURS,
 } from '@jiro/core';
 import type { App } from '../game/app';
 import { Api, ApiError, defaultServerUrl, type Auth, type MyMarket } from '../net/api';
 import { serverUrlNote } from './server-url';
 import { openStoreMap } from './store-map';
+import { hoursDialog, hoursSummary } from './hours-dialog';
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { codeBlock } from './room-code';
 
@@ -839,7 +841,7 @@ export class MarketScreen {
           void change('赤字のとき', deficitText(pol.deficit), deficitText(v as CompanyPolicy['deficit']), { deficit: v as CompanyPolicy['deficit'] }, null),
         ),
       ),
-      h('div', { class: 'kv' }, h('span', null, '営業時間'), h('b', null, 'いつも通常の営業時間')),
+      h('div', { class: 'kv' }, h('span', null, '営業時間'), h('b', null, '店ごとに決める（下の各店の「🕒 営業時間」）')),
       h('div', { class: 'kv' }, h('span', null, '株式発行・企業買収'), h('b', null, 'まだありません（しない）')),
     );
   }
@@ -858,6 +860,24 @@ export class MarketScreen {
       entry.propertyId !== 'home' ? this.renameRow('店名', entry.name, 'data-rename-store', entry.id, (v) => void this.act({ type: 'renameStore', storeId: entry.id, name: v }, `店名を「${v}」にしました`)) : null,
       h('div', { class: 'kv' }, h('span', null, '営業'), h('b', null, entry.snapshot && entry.snapshot.closedForConstruction > 0 ? '🛠 準備・工事中' : leadText)),
       h('div', { class: 'kv' }, h('span', null, '評判'), h('b', null, `${stars(st.reputation)} ${st.reputation.toFixed(2)}`)),
+      h(
+        'div',
+        { class: 'kv' },
+        h('span', null, '営業時間'),
+        h('b', { 'data-store-hours': entry.id }, hoursSummary(entry.hours ?? DEFAULT_HOURS)),
+      ),
+      h(
+        'button',
+        {
+          class: 'mini',
+          'data-edit-hours': entry.id,
+          onclick: async () => {
+            const next = await hoursDialog(this.root, `営業時間 — ${storeDisplayName(s, entry)}`, entry.hours ?? DEFAULT_HOURS);
+            if (next) await this.act({ type: 'setStoreHours', storeId: entry.id, hours: next }, '営業時間を決めました（次の営業日から）');
+          },
+        },
+        '🕒 営業時間を変える',
+      ),
       r ? h('div', { class: 'kv' }, h('span', null, `${r.day}日目`), h('b', null, `${r.served}杯・来客${r.customers}人（帰った客 ${r.lost + r.balked}人）・利益 ${yenStr(r.operatingProfit)}`)) : null,
       h(
         'div',

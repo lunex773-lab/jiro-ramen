@@ -638,6 +638,51 @@ test('従業員: みんなの勤務のカレンダーで日を選んでシフト
   await expect(body.locator('.emp[data-emp]').first()).toContainText('シフトリーダー');
 });
 
+test('営業時間: 経営のタブから昼と夜の2つの枠と定休日を決めると、次の日から使い、時計と開店のボタンが枠に合わせて変わる（じろ1）', async ({ page }) => {
+  await startNewGame(page);
+  type S = { day: number; phase: string; sessionIdx?: number; todayHours?: { sessions: { open: number; close: number }[]; closedDays: number[] }; company: { activeStoreId: string; stores: { id: string; hours?: { sessions: { open: number; close: number }[]; closedDays: number[] } }[] } };
+  const state = () => page.evaluate(() => (window as unknown as { __jiro: { host: { state: S } } }).__jiro.host.state);
+  await page.locator('.chip.menu').click();
+  await page.getByRole('button', { name: '経営', exact: true }).click();
+  const body = page.locator('.manage-body');
+  const card = body.locator('.hours-card');
+  await expect(card).toContainText('11:00〜15:00');
+  await card.locator('[data-edit-hours]').click();
+  const dlg = page.locator('.modal.hours-modal');
+  await expect(dlg).toBeVisible();
+  await expect(dlg.locator('.demand-strip .demand-col')).toHaveCount(24);
+  // 昼 11:00〜14:00、夜 18:00〜翌1:00、日曜休み
+  await dlg.locator('[data-close="0"]').selectOption({ label: '14:00' });
+  await dlg.locator('[data-add-session]').click();
+  await dlg.locator('[data-open="1"]').selectOption({ label: '18:00' });
+  await dlg.locator('[data-close="1"]').selectOption({ label: '翌1:00' });
+  await dlg.locator('[data-closed-day="6"]').click();
+  await expect(dlg.locator('[data-hours-problem]')).toHaveCount(0);
+  await expect(dlg).toContainText('うち深夜');
+  await dlg.locator('[data-hours-save]').click();
+  await expect(dlg).toHaveCount(0);
+  await expect.poll(async () => {
+    const s = await state();
+    return JSON.stringify(s.company.stores.find((x) => x.id === s.company.activeStoreId)?.hours);
+  }).toBe(JSON.stringify({ sessions: [{ open: 660, close: 840 }, { open: 1080, close: 1500 }], closedDays: [6] }));
+  // 今日はまだ今までの営業時間（次の営業日から）
+  await expect(card).toContainText('次の営業日から');
+  await expect(card).toContainText('11:00〜14:00・18:00〜翌1:00／定休日 日');
+  // 次の日の朝の状態にして、時計と中休みの開店ボタンを確かめる
+  await page.evaluate(() => {
+    const s = (window as unknown as { __jiro: { host: { state: S & { openT: number; breakPending?: boolean } } } }).__jiro.host.state;
+    s.todayHours = { sessions: [{ open: 660, close: 840 }, { open: 1080, close: 1500 }], closedDays: [6] };
+    s.sessionIdx = 1;
+    s.phase = 'prep';
+    s.openT = 3 * 60 * 2.25;
+  });
+  await page.locator('.manage .close').click();
+  await expect(page.getByRole('button', { name: '🏮 開店する（18:00〜）' })).toBeVisible();
+  await page.getByRole('button', { name: '🏮 開店する（18:00〜）' }).click();
+  await expect.poll(async () => (await state()).phase).toBe('open');
+  await expect(page.locator('.clock').first()).toContainText(/1[89]:\d\d/);
+});
+
 test('従業員: アルバイトとして採用し、カレンダーで日にちごと・毎週のシフトを決め、記録を見て社員にできる（勤怠・辛抱の数値は出ない）', async ({ page }) => {
   await startNewGame(page);
   // 採用を解放し、候補者を1人入れる（隠しパラメータの値は画面に出てはいけない）
@@ -961,6 +1006,9 @@ test('イベントの吹き出しは縁が違い、複数出ても重ならず�
       c.path = [];
       c.eatTotal = 600;
       c.eatLeft = 500;
+      // 団体の会話・食べ方の汚い客のセリフ（イベントの吹き出し）で、通常のセリフが置き換わらないようにする
+      delete c.group;
+      delete c.messy;
       c.say = i === 0 ? 'うまっ' : 'これはイベントの長いセリフです。画面の端でも折り返して、ほかの吹き出しとも重ならないように表示されます';
       c.sayUntil = s.t + 60;
       c.sayEvent = i !== 0;

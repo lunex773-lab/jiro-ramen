@@ -7,6 +7,7 @@
 // flags（受け取るが順位から外す）: 同じ経済の式で出せる上限を超える値、日報とお金の記録の食い違い。
 // 上限の幅は、ボットで多くの日を回した実際の値に余裕を持たせて決めている（test/verify.test.ts で「ふつうの営業では引っかからない」ことを確かめる）。
 
+import { DEFAULT_HOURS, openMinutesOf, todayHours } from './sim/hours';
 import { BALANCE } from './data/balance';
 import { EQUIPMENT } from './data/equipment';
 import { STAGES } from './data/stages';
@@ -227,7 +228,9 @@ export function verifyCommit(prev: GameState, next: GameState, ticket: VerifyTic
   // 上限: 席・客の見込み・値段
   for (const { entry, r } of reports) {
     const st = ns.find((x) => x.id === entry.id)!;
-    const seatsMax = Math.max(st.seatsInstalled, STAGES[st.stage]?.seats.length ?? 0) * V().servedPerSeat + V().servedSlack;
+    // 1席の上限は11〜15時（4時間）の値。営業時間が長い店は時間に比例させる（じろ1 5.1）
+    const hf = Math.max(1, openMinutesOf(entry.hours ?? DEFAULT_HOURS) / openMinutesOf(DEFAULT_HOURS));
+    const seatsMax = Math.max(st.seatsInstalled, STAGES[st.stage]?.seats.length ?? 0) * V().servedPerSeat * hf + V().servedSlack;
     if (r.served > seatsMax) flags.push(`${entry.name}: 提供（${r.served}杯）が席数の上限（${Math.round(seatsMax)}杯）を超える`);
     if (r.sales > r.served * MAX_PRICE + V().moneyEps) flags.push(`${entry.name}: 売上が提供×最高の値段を超える`);
   }
@@ -258,6 +261,6 @@ export function arrivalBound(prev: GameState, next: GameState, demand: number, a
 function buzzAllowance(next: GameState, day: number): number {
   const B = BALANCE.events.buzz;
   if (next.events?.stats.sns_buzz?.lastDay !== day) return 1;
-  const dayMin = (BALANCE.closeHour - BALANCE.openHour) * 60;
+  const dayMin = openMinutesOf(todayHours(next));
   return 1 + (B.arrivalMult - 1) * Math.min(1, B.durationMinTo / dayMin);
 }

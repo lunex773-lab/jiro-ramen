@@ -14,6 +14,7 @@
 // 復元（resetAccident）は控えの値で丸ごと置き換える（足し引きしない）ので、二重に実行しても経済の値は変わらない。
 // 事故が起きているときだけ受け付け、復元すると事故の記録が消えるので、2回目の要求は何もせずに失敗する。
 
+import { openDurationOf } from './hours';
 import { BALANCE } from '../data/balance';
 import { STAGES } from '../data/stages';
 import { equipmentCenter } from '../geometry';
@@ -86,7 +87,7 @@ export function drawAccident(s: GameState): void {
     noteDraw(s, 'explosion');
     if (evRand(s) >= accidentChance(s)) return;
   }
-  ev.accidentPlan = { id: newId(s, 'ev'), day: s.day, atOpenT: forced ? 3 : randRange(ev, X.atFrom, X.atTo) * BALANCE.openDuration };
+  ev.accidentPlan = { id: newId(s, 'ev'), day: s.day, atOpenT: forced ? 3 : randRange(ev, X.atFrom, X.atTo) * openDurationOf(s) };
   if (forced) ev.forced.push('explosion'); // 発生したときに「強制」として記録する
 }
 

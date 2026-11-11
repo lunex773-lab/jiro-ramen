@@ -1,6 +1,7 @@
 // 客にまつわる営業中のイベント: SNS でバズる（設計書 A）、有名レビュアー・覆面調査員（C）、珍しい客（D）。
 // どれも通常の客の流れ（行列・食券・着席・注文・食事・会計）をそのまま使い、売上を直接足したり特別な報酬を出したりしない。
 
+import { openDurationOf, SEC_PER_MIN } from './hours';
 import { BALANCE } from '../data/balance';
 import { BUZZ_POSTS, BUZZ_SAYS, CRITIC_ITEMS, CRITIC_NOTES, RARE_LINES } from '../data/events';
 import type { CriticItem, CriticReport, Customer, EventKind, GameState, Review } from '../types';
@@ -79,7 +80,7 @@ function updateBuzz(s: GameState, ctx: SimCtx): void {
   ev.nextBuzzCheck = s.openT + E.buzz.checkEvery;
   const forced = takeForced(s, 'sns_buzz');
   if (!forced) {
-    if (!eventsAllowed(s, E.buzz.minDay) || s.openT > BALANCE.openDuration * E.buzz.latestStart) return;
+    if (!eventsAllowed(s, E.buzz.minDay) || s.openT > openDurationOf(s) * E.buzz.latestStart) return;
     if (s.events!.stats.sns_buzz?.lastDay === s.day || !cooledDown(s, 'sns_buzz', E.buzz.cooldownDays)) return;
     noteDraw(s, 'sns_buzz');
     if (evRand(s) >= buzzChance(s)) return;
@@ -88,7 +89,7 @@ function updateBuzz(s: GameState, ctx: SimCtx): void {
 }
 
 /** ゲームの1分あたりの営業の秒数（営業 11〜15時 = 540秒 → 2.25秒） */
-const SIM_SEC_PER_MIN = () => BALANCE.openDuration / ((BALANCE.closeHour - BALANCE.openHour) * 60);
+const SIM_SEC_PER_MIN = () => SEC_PER_MIN;
 
 /** バズの長さ（ゲームの分）を、1時間〜3時間の30分刻みから等しい確率で選ぶ（イベント専用の乱数） */
 export function buzzMinutes(ev: { rng: number }): number {
@@ -108,7 +109,7 @@ export function startBuzz(s: GameState, ctx: SimCtx, forced = false): void {
   const ev = ensureEvents(s);
   const post = pick(ev, BUZZ_POSTS).replace('{shop}', s.shopName);
   const minutes = buzzMinutes(ev);
-  ev.buzz = { id: newId(s, 'ev'), startT: s.openT, endT: Math.min(BALANCE.openDuration, s.openT + minutes * SIM_SEC_PER_MIN()), mult: E.buzz.arrivalMult, post, minutes };
+  ev.buzz = { id: newId(s, 'ev'), startT: s.openT, endT: Math.min(openDurationOf(s), s.openT + minutes * SIM_SEC_PER_MIN()), mult: E.buzz.arrivalMult, post, minutes };
   noteFire(s, 'sns_buzz', forced);
   notify(s, ctx, 'buzz', 'good', `📱 SNSでバズっています！「${post}」 ${buzzLengthLabel(minutes)}ほどお客さんが増えます`);
   emit(ctx, { type: 'buzzStart', text: post });
@@ -126,7 +127,7 @@ function drawCritic(s: GameState): void {
     noteDraw(s, 'critic');
     if (evRand(s) >= c.chancePerDay) return;
   }
-  ev.criticPlan = { day: s.day, afterOpenT: forced ? 0 : randRange(ev, c.arriveFrom, c.arriveTo) * BALANCE.openDuration };
+  ev.criticPlan = { day: s.day, afterOpenT: forced ? 0 : randRange(ev, c.arriveFrom, c.arriveTo) * openDurationOf(s) };
   if (forced) ev.forced.push('critic'); // 来店したときに「強制」として記録する
 }
 

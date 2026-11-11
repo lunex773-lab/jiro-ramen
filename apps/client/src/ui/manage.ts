@@ -84,6 +84,15 @@ import {
   leaderWageFor,
   prepTargetItems,
   promoteLeaderProblem,
+  storeHours,
+  openMinutesOf,
+  sessionSpans,
+  SEC_PER_MIN,
+  fullTimePayFor,
+  clockText as clockLabel,
+  todayHours,
+  DEFAULT_HOURS,
+  type StoreEntry,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 
@@ -96,6 +105,7 @@ function companyTabVisible(s: GameState): boolean {
 }
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { openStoreMap } from './store-map';
+import { hoursDialog, hoursSummary } from './hours-dialog';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
 import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
 
@@ -412,6 +422,13 @@ export class ManageMenu {
           ? h('button', { class: 'btn ghost', 'data-set-location': entry.id, onclick: () => this.openLocationMap(entry.id) }, '🗾 この店の場所を決める（1回だけ）')
           : null,
         row('広さ', STAGES[st.stage]?.name ?? ''),
+        h(
+          'div',
+          { class: 'kv' },
+          h('span', null, '営業時間'),
+          h('b', { 'data-store-hours': entry.id }, hoursSummary(entry.hours ?? DEFAULT_HOURS)),
+        ),
+        this.host.isHost ? h('button', { class: 'mini', 'data-edit-hours': entry.id, onclick: () => void this.editHours(entry) }, '🕒 営業時間を変える') : null,
         row('評判', `${stars(st.reputation)} ${st.reputation.toFixed(2)}`),
         row('従業員', `${st.employees.length}人`),
         r ? row(`${r.day}日目`, `純売上 ${yenStr(r.netSales ?? r.sales - r.refunds)}・営業利益 ${yenStr(r.operatingProfit)}・${r.served}杯${r.managed === 'manager' ? '（店長）' : r.managed === 'closed' ? '（休業）' : ''}`, r.operatingProfit < 0 ? 'bad' : '') : null,
@@ -555,6 +572,29 @@ export class ManageMenu {
     return h('div', { class: 'grid2' }, finance, ...storeCards, openCard, moveCard);
   }
 
+  // ───────────────── 営業時間（じろ1 5.1） ─────────────────
+  private hoursCard(s: GameState, entry: StoreEntry): HTMLElement {
+    const set = entry.hours ?? DEFAULT_HOURS;
+    const today = todayHours(s);
+    const changed = hoursSummary(today) !== hoursSummary(set);
+    const row = (k: string, v: string, attr: Record<string, string> = {}) => h('div', { class: 'kv' }, h('span', null, k), h('b', attr, v));
+    return h(
+      'section',
+      { class: 'card hours-card', 'data-hours-card': entry.id },
+      h('h4', null, '🕒 営業時間'),
+      row(changed ? '次の営業日から' : '設定', hoursSummary(set), { 'data-hours-set': '1' }),
+      changed ? row('今日', hoursSummary(today)) : null,
+      this.host.isHost ? h('button', { class: 'btn ghost', 'data-edit-hours': entry.id, onclick: () => void this.editHours(entry) }, '🕒 営業時間・定休日を変える') : null,
+      h('p', { class: 'note' }, '昼・夜など営業の枠を3つまでと、定休日を決められます。長く開けると客は増えますが、光熱費と給料も増えます。'),
+    );
+  }
+
+  private async editHours(entry: StoreEntry): Promise<void> {
+    const s = this.host.state;
+    const next = await hoursDialog(this.root, `営業時間 — ${storeDisplayName(s, entry)}`, entry.hours ?? DEFAULT_HOURS);
+    if (next) await this.act({ type: 'setStoreHours', storeId: entry.id, hours: next }, '営業時間を決めました（次の営業日から）');
+  }
+
   // ───────────────── 経営ダッシュボード ─────────────────
   private dash(s: GameState): HTMLElement {
     const d = s.today;
@@ -604,6 +644,7 @@ export class ManageMenu {
             : null,
         ),
       ),
+      this.hoursCard(s, activeStore(s)),
       h(
         'section',
         { class: 'card' },
@@ -1086,7 +1127,9 @@ export class ManageMenu {
   private staffCard(s: GameState, e: Employee): HTMLElement {
     const part = isPartTime(e);
     const panel = this.empPanel?.id === e.id ? this.empPanel.kind : null;
-    const pay = part ? `時給${yenStr(hourlyOf(e))}` : `日給${yenStr(e.profile.wage)}`;
+    // 社員の日給は営業時間に合わせる（4時間の店は今までの日給。長い店は時間・残業・深夜の分が増える。じろ1 5.1）
+    const fullPay = fullTimePayFor(e, storeHours(s));
+    const pay = part ? `時給${yenStr(hourlyOf(e))}` : `日給${yenStr(fullPay)}${fullPay !== e.profile.wage ? `（基本 ${yenStr(e.profile.wage)}）` : ''}`;
     const summary = staffSummary(e, s);
     const host = this.host.isHost;
     return h(
@@ -1213,13 +1256,7 @@ export class ManageMenu {
     let editor: HTMLElement | null = null;
     if (sel !== null) {
       const host = this.host.isHost;
-      const presets: [string, ShiftDay | null][] = [
-        ['休み', null],
-        ['仕込み〜閉店', { start: 0, end: (BALANCE.closeHour - BALANCE.openHour) * 60, breakAt: 0, breakLen: 0, fromPrep: true }],
-        ['開店〜閉店', { start: 0, end: (BALANCE.closeHour - BALANCE.openHour) * 60, breakAt: 0, breakLen: 0, fromPrep: false }],
-        ['前半', { start: 0, end: ((BALANCE.closeHour - BALANCE.openHour) * 60) / 2, breakAt: 0, breakLen: 0, fromPrep: false }],
-        ['後半', { start: ((BALANCE.closeHour - BALANCE.openHour) * 60) / 2, end: (BALANCE.closeHour - BALANCE.openHour) * 60, breakAt: 0, breakLen: 0, fromPrep: false }],
-      ];
+      const presets = this.shiftPresets(s);
       editor = h(
         'div',
         { class: 'team-edit', 'data-team-edit': String(sel) },
@@ -1258,10 +1295,35 @@ export class ManageMenu {
     return h('div', { class: 'team-calendar' }, h('h5', null, '📅 みんなの勤務（2週間）'), grid, editor);
   }
 
+  /**
+   * みんなの勤務のカレンダーで選べるシフトの形。店の営業時間（じろ1 5.1）に合わせる:
+   * 枠が2つ以上なら枠ごと（昼だけ・夜だけ）、1つなら前半・後半
+   */
+  private shiftPresets(s: GameState): [string, ShiftDay | null][] {
+    const hrs = storeHours(s);
+    const openMin = openMinutesOf(hrs);
+    const step = BALANCE.staff.shiftStepMin;
+    const at = (start: number, end: number, fromPrep = false): ShiftDay => ({ start, end, breakAt: 0, breakLen: 0, fromPrep });
+    const list: [string, ShiftDay | null][] = [
+      ['休み', null],
+      ['仕込み〜閉店', at(0, openMin, true)],
+      ['開店〜閉店', at(0, openMin)],
+    ];
+    const spans = sessionSpans(hrs);
+    if (spans.length > 1) {
+      for (const sp of spans) list.push([`${clockLabel(sp.open)}〜${clockLabel(sp.close)}の営業`, at(Math.round(sp.startT / SEC_PER_MIN), Math.round(sp.endT / SEC_PER_MIN))]);
+    } else {
+      const half = Math.max(step, Math.floor(openMin / 2 / step) * step);
+      list.push(['前半', at(0, half)], ['後半', at(half, openMin)]);
+    }
+    return list;
+  }
+
   private shiftText(sh: ShiftDay | null): string {
     if (!sh) return '休み';
+    const hrs = storeHours(this.host.state);
     const b = sh.breakLen > 0 ? `（休憩${sh.breakLen}分）` : '';
-    return `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start)}〜${shiftTimeText(sh.end)}${b}`;
+    return `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start, hrs)}〜${shiftTimeText(Math.min(sh.end, openMinutesOf(hrs)), hrs, true)}${b}`;
   }
 
   /**
@@ -1281,7 +1343,7 @@ export class ManageMenu {
       return h(
         'div',
         { class: 'prio' },
-        h('p', { class: 'note' }, `社員は出勤の日は仕込みから閉店まで勤務します（日給 ${yenStr(e.profile.wage)}）。休みの曜日は来ず、日給もかかりません。疲れは休みの日に回復します（週に1〜2日休ませると、ほぼ回復します）。`),
+        h('p', { class: 'note' }, `社員は出勤の日は仕込みから閉店まで勤務します（日給 ${yenStr(fullTimePayFor(e, storeHours(s)))}。営業時間に合わせて変わります）。休みの曜日は来ず、日給もかかりません。疲れは休みの日に回復します（週に1〜2日休ませると、ほぼ回復します）。`),
         h(
           'div',
           { class: 'tbtns rest-days', 'data-rest-days': e.id },
@@ -1364,7 +1426,9 @@ export class ManageMenu {
       editor = h('p', { class: 'note' }, '日にちを押して選びます（いくつでも選べます。曜日の見出しを押すとその曜日をまとめて選べます）。');
     } else {
       const step = BALANCE.staff.shiftStepMin;
-      const close = (BALANCE.closeHour - BALANCE.openHour) * 60;
+      // シフトの時刻は店の営業時間（じろ1 5.1）の中で決める（0 = その日の最初の開店。枠の間の中休みは飛ばして数える）
+      const hrs = storeHours(s);
+      const close = openMinutesOf(hrs);
       const base = shiftFor(e, picked[0]!);
       const draft: ShiftDay | null = ed && ed.draft !== undefined ? ed.draft : base;
       const setDraft = (d: ShiftDay | null) => {
@@ -1380,12 +1444,12 @@ export class ManageMenu {
       let summary = '休み';
       if (draft) {
         const starts: HTMLElement[] = [h('option', { value: 'prep', selected: draft.fromPrep }, '仕込みから')];
-        for (let m = 0; m < close; m += step) starts.push(opt(m, shiftTimeText(m), draft.fromPrep ? -1 : draft.start));
+        for (let m = 0; m < close; m += step) starts.push(opt(m, shiftTimeText(m, hrs), draft.fromPrep ? -1 : draft.start));
         const ends: HTMLElement[] = [];
-        for (let m = draft.start + step; m <= close; m += step) ends.push(opt(m, shiftTimeText(m), draft.end));
+        for (let m = draft.start + step; m <= close; m += step) ends.push(opt(m, shiftTimeText(m, hrs, true), draft.end));
         const breaks: HTMLElement[] = [opt(0, 'なし', draft.breakLen), opt(30, '30分', draft.breakLen), opt(60, '60分', draft.breakLen)];
         const breakAts: HTMLElement[] = [];
-        for (let m = draft.start + step; m + draft.breakLen < draft.end; m += step) breakAts.push(opt(m, `${shiftTimeText(m)}から`, draft.breakAt));
+        for (let m = draft.start + step; m + draft.breakLen < draft.end; m += step) breakAts.push(opt(m, `${shiftTimeText(m, hrs)}から`, draft.breakAt));
         const fixBreak = (d: ShiftDay): ShiftDay => {
           if (d.breakLen <= 0) return { ...d, breakAt: 0, breakLen: 0 };
           let at = d.breakAt;
@@ -1409,8 +1473,8 @@ export class ManageMenu {
             draft.breakLen > 0 && breakAts.length > 0 ? h('label', null, '休憩の開始', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, breakAt: Number((ev.target as HTMLSelectElement).value) })) }, breakAts)) : null,
           ),
         );
-        problem = shiftProblem(draft);
-        const hours = shiftPaidHours(draft);
+        problem = shiftProblem(draft, close);
+        const hours = shiftPaidHours(draft, close);
         summary = `${this.shiftText(draft)}・1日の給与の目安 ${yenStr(Math.round((hourlyOf(e) * hours) / 10) * 10)}（${hours}時間）`;
       }
       editor = h(
@@ -1433,7 +1497,7 @@ export class ManageMenu {
       );
     }
     let total = 0;
-    for (let d = s.day; d <= lastDay; d++) total += expectedPay(e, d);
+    for (let d = s.day; d <= lastDay; d++) total += expectedPay(e, d, d === s.day ? todayHours(s) : storeHours(s));
     return h(
       'div',
       { class: 'prio shift' },
@@ -1441,7 +1505,7 @@ export class ManageMenu {
       cal,
       repeat,
       editor,
-      h('p', { class: 'note' }, `${N}日間の給与の目安 ${yenStr(total)}・今日の見込み ${yenStr(expectedPay(e, s.day))}。今日の予定を変えるとすぐに反映します（休みの人に勤務を入れると呼び出し、着くまで少しかかります）。`),
+      h('p', { class: 'note' }, `${N}日間の給与の目安 ${yenStr(total)}・今日の見込み ${yenStr(expectedPay(e, s.day, todayHours(s)))}。今日の予定を変えるとすぐに反映します（休みの人に勤務を入れると呼び出し、着くまで少しかかります）。`),
     );
   }
 

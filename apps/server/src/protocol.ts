@@ -14,7 +14,7 @@ export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
   'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'promote', 'promoteLeader', 'setPrepTarget', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
-  'accidentReset', 'openStore', 'setStoreLocation', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setCompanyPolicy',
+  'accidentReset', 'openStore', 'setStoreLocation', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setStoreHours', 'setCompanyPolicy',
 ] as const satisfies readonly ActionType[];
 
 /**
@@ -90,10 +90,22 @@ function isCompanyPolicy(v: unknown): boolean {
   return true;
 }
 
+/** 営業時間の形（値の範囲は core の hoursProblem が確かめる） */
+function isHours(v: unknown): boolean {
+  if (!isObj(v) || Object.keys(v).length !== 2) return false;
+  const { sessions, closedDays } = v;
+  if (!Array.isArray(sessions) || sessions.length < 1 || sessions.length > 3) return false;
+  for (const x of sessions) {
+    if (!isObj(x) || Object.keys(x).length !== 2) return false;
+    if (!Number.isInteger(x.open) || !Number.isInteger(x.close) || (x.open as number) < 0 || (x.close as number) > 3000) return false;
+  }
+  return Array.isArray(closedDays) && closedDays.length <= 6 && closedDays.every((d) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6);
+}
+
 function isPolicy(v: unknown): boolean {
   if (!isObj(v)) return false;
   const keys = Object.keys(v);
-  if (keys.length === 0 || keys.length > 7) return false;
+  if (keys.length === 0 || keys.length > 8) return false;
   for (const k of keys) {
     const x = v[k];
     if (k === 'priceMult' || k === 'repairCap' || k === 'adBudget' || k === 'safetyStock') {
@@ -102,6 +114,8 @@ function isPolicy(v: unknown): boolean {
       if (typeof x !== 'boolean') return false;
     } else if (k === 'orderMode') {
       if (x !== 'manual' && x !== 'sales') return false;
+    } else if (k === 'orderBy') {
+      if (x !== 'manager' && x !== 'self') return false;
     } else if (k === 'maintenance') {
       if (typeof x !== 'boolean') return false;
     } else return false;
@@ -159,6 +173,7 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   assignManager: { storeId: isId, employeeId: (v: unknown) => v === null || isId(v) },
   transferEmployee: { employeeId: isId, toStoreId: isId, asManager: optBool },
   setStorePolicy: { storeId: isId, policy: isPolicy },
+  setStoreHours: { storeId: isId, hours: isHours },
   setCompanyPolicy: { policy: isCompanyPolicy },
 };
 

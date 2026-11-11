@@ -479,6 +479,10 @@ export interface Customer {
   arrivedAt: number;
   /** 行列で待った時間 */
   queueWait: number;
+  /** 閉店の時刻のあと、店の外の列で待った時間（sim 秒） */
+  closeWait?: number;
+  /** 食券を買う前に店外の列の先頭にいた客（前のセーブの行列・テレビの出演者）。食券を買ったらそのまま中で待つ */
+  fromQueue?: boolean;
   /** 着席から提供までの時間 */
   seatWait: number;
   patience: number;
@@ -727,6 +731,8 @@ export interface DayStats {
   stockoutItems?: Record<string, number>;
   /** 仕入れる食材の使用量（その日に使った分。「売れ行きに合わせる」自動発注に使う）。古い日報にはない */
   usedItems?: Record<string, number>;
+  /** 閉店の時刻のあと、並んだ客に提供していた時間（営業の sim 秒。人件費・光熱費に入る。じろ1 5.3） */
+  afterHoursSec?: number;
   /** 店長が閉店後に発注した翌朝便（じろ1 5.8。店長に任せた店だけ） */
   managerOrder?: { spent: number; packs: number; skipped: number };
   /** 店内外のトラブル（食べ方・居座り・喫煙・店員の口論など）と、そのうち対応したもの（第2版 10。古いセーブにはない） */
@@ -1080,6 +1086,12 @@ export interface GameState {
   autoOrderMode?: 'manual' | 'sales';
   /** 仕込みの目安（作った品の量。品の id → 量）。ない品は自動（売れ行きから。じろ1 5.8） */
   prepTargets?: Record<string, number>;
+  /** 今日の営業時間（朝に店の設定から決まる。前のセーブにはない → 11:00〜15:00。じろ1 5.1） */
+  todayHours?: StoreHours;
+  /** 今日の何番目の営業の枠か（0〜。中休みのあとの開店で1つ進む） */
+  sessionIdx?: number;
+  /** 今の枠の営業が終わって、店内のお客さんが帰ったら中休みに入る */
+  breakPending?: boolean;
 
   equipment: Equipment[];
   seats: Seat[];
@@ -1166,7 +1178,8 @@ export type StoreKey =
   | 'prices'
   | 'pausedMenu'
   | 'history'
-  | 'closedForConstruction';
+  | 'closedForConstruction'
+  | 'prepTargets';
 
 
 /** プレイヤーがいない店の中身（店の段階 = 席の数の段階も店ごと） */
@@ -1190,6 +1203,14 @@ export interface StorePolicy {
   safetyStock?: number;
   /** 翌朝便の発注をだれがするか（じろ1 5.8）: 'manager' = 店長がいれば店長が需要の見込みから発注する（ない → manager）、'self' = 自分の発注の設定 */
   orderBy?: 'manager' | 'self';
+}
+
+/** 営業時間（じろ1 5.1）。時刻は0:00からの分（24時を超えると翌日。日をまたぐ営業） */
+export interface StoreHours {
+  /** 営業の枠（1〜3つ。時刻の早い順） */
+  sessions: { open: number; close: number }[];
+  /** 定休日の曜日（月=0 … 日=6） */
+  closedDays: number[];
 }
 
 /**
@@ -1219,6 +1240,8 @@ export interface StoreEntry {
   policy: StorePolicy;
   /** プレイヤーがいない店の中身。プレイヤーがいる店（activeStoreId）は null（中身は GameState にある） */
   snapshot: StoreSnapshot | null;
+  /** 営業時間（ない → 11:00〜15:00・定休日なし。じろ1 5.1） */
+  hours?: StoreHours;
 }
 
 /** 会社の日報の、店ごとの行 */

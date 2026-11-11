@@ -2,6 +2,8 @@
 // プレイヤーがいる店の中身は GameState の店の部分にあり、ほかの店は stores[].snapshot にある。
 // 店を切り替えるときは、閉店後（精算のあと・次の日の前）に中身を入れ替える。会社のお金・借入・キャリアは変わらない。
 
+import { hoursProblem } from './hours';
+import type { StoreHours } from '../types';
 import { BALANCE } from '../data/balance';
 import { INGREDIENTS } from '../data/ingredients';
 import { PROPERTIES, PROPERTY_CANDIDATES } from '../data/properties';
@@ -354,6 +356,18 @@ export function transferEmployee(s: GameState, ctx: SimCtx, employeeId: Id, toSt
 }
 
 /** 店の方針を変える（範囲の外の値は受け付けない） */
+/**
+ * 店の営業時間を決める（じろ1 5.1）。次の営業日から使う（その日の営業時間は朝に決まる。営業中に変えても今日は変わらない）
+ */
+export function setStoreHours(s: GameState, storeId: Id, hours: StoreHours): { ok: boolean; reason?: string } {
+  const entry = s.company.stores.find((x) => x.id === storeId);
+  if (!entry) return { ok: false, reason: '店が見つかりません' };
+  const bad = hoursProblem(hours);
+  if (bad) return { ok: false, reason: bad };
+  entry.hours = { sessions: hours.sessions.map((x) => ({ open: x.open, close: x.close })), closedDays: [...hours.closedDays].sort((a, b) => a - b) };
+  return { ok: true };
+}
+
 export function setStorePolicy(s: GameState, storeId: Id, p: Partial<StorePolicy>): { ok: boolean; reason?: string } {
   const entry = s.company.stores.find((x) => x.id === storeId);
   if (!entry) return { ok: false, reason: '店が見つかりません' };

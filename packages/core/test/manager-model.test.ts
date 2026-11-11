@@ -67,6 +67,10 @@ export function compare(c: Config, warm = 10, days = 10) {
   }
   const sum = (rs: DayReport[]) => ({
     served: avg(rs, (r) => r.served),
+    arrivals: avg(rs, (r) => r.customers + r.balked),
+    lost: avg(rs, (r) => r.lost),
+    sales: avg(rs, (r) => r.sales),
+    refunds: avg(rs, (r) => r.refunds),
     netSales: avg(rs, (r) => r.netSales ?? r.sales - r.refunds),
     op: avg(rs, (r) => r.operatingProfit),
     cogsWaste: avg(rs, (r) => r.cogs + r.waste),

@@ -8,9 +8,10 @@
 //
 // 注意: 読むだけの関数（*Of / staffSummary / promotionInfo / attendanceText など）は状態を変えない。client の共同経営の複製からも呼べる。
 
+import { clockMinuteAt, clockMinuteAtEnd, clockText, DEFAULT_HOURS, SEC_PER_MIN, isClosedDay, lateNightShare, openDurationOf, openMinutesOf, paidHoursWithPremium, storeHours, todayHours } from './hours';
 import { BALANCE } from '../data/balance';
 import { stageOf } from '../geometry';
-import type { Attendance, Employee, EmployeeSkills, Employment, GameState, ShiftDay, StaffLogEntry, StaffLogKind, StaffRecord } from '../types';
+import type { StoreHours, Attendance, Employee, EmployeeSkills, Employment, GameState, ShiftDay, StaffLogEntry, StaffLogKind, StaffRecord } from '../types';
 import { clamp01, hashString } from '../util';
 import { startArrive, startLeave } from './commute';
 import { dropHand } from './interact';
@@ -19,8 +20,6 @@ import { emit, notify, type SimCtx } from './notices';
 
 const ST = BALANCE.staff;
 const MIN_PER_DAY = (BALANCE.closeHour - BALANCE.openHour) * 60;
-/** ゲーム内の1分 = 営業の sim 秒 */
-export const SEC_PER_MIN = BALANCE.openDuration / MIN_PER_DAY;
 /** 退勤が閉店（15:00）のときの退勤時刻。閉店作業まで残る */
 const UNTIL_CLOSE = 1e9;
 
@@ -32,10 +31,13 @@ export function weekdayOf(day: number): number {
   return (((day - 1) % 7) + 7) % 7;
 }
 
-/** 開店からの分 → 時刻の文字列（0 → 11:00） */
-export function shiftTimeText(min: number): string {
-  const m = BALANCE.openHour * 60 + min;
-  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+/**
+ * 開店からの分 → 時刻の文字列（0 → 11:00）。asEnd = 終わりの時刻（退勤・休憩の終わり）として読む:
+ * 営業の枠の終わりちょうどは、次の枠の開店ではなくその枠の閉店の時刻（11〜14時と18時〜の店で 180分 → 「14:00」）
+ */
+export function shiftTimeText(min: number, hours?: StoreHours, asEnd = false): string {
+  const h = hours ?? DEFAULT_HOURS;
+  return clockText((asEnd ? clockMinuteAtEnd : clockMinuteAt)(h, min * SEC_PER_MIN));
 }
 
 // ───────────────────────── 読むだけ ─────────────────────────
@@ -146,23 +148,29 @@ export function pruneDateShifts(e: Employee, today: number): void {
   if (Object.keys(e.dateShifts).length === 0) delete e.dateShifts;
 }
 
-/** シフトの形を確かめる。正しければ null */
-export function shiftProblem(sh: ShiftDay): string | null {
+/** シフトの形を確かめる（正しければ null）。openMin = 店の営業の分の合計（ない → 11:00〜15:00 の4時間） */
+export function shiftProblem(sh: ShiftDay, openMin = MIN_PER_DAY): string | null {
   const step = ST.shiftStepMin;
   const ok = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v % step === 0;
   if (!ok(sh.start) || !ok(sh.end) || !ok(sh.breakAt) || !ok(sh.breakLen)) return `時刻は${step}分刻みで指定してください`;
   if (typeof sh.fromPrep !== 'boolean') return 'シフトの形が正しくありません';
-  if (sh.start < 0 || sh.end > MIN_PER_DAY || sh.end - sh.start < step) return '出勤から退勤まで30分以上、営業時間（11:00〜15:00）の中で指定してください';
-  if (sh.fromPrep && sh.start !== 0) return '仕込みから出勤するときは、営業は11:00からになります';
+  if (sh.start < 0 || sh.end > openMin || sh.end - sh.start < step) return '出勤から退勤まで30分以上、営業時間の中で指定してください';
+  if (sh.fromPrep && sh.start !== 0) return '仕込みから出勤するときは、開店から働きます';
   if (sh.breakLen < 0 || sh.breakLen > 60) return '休憩は60分までです';
   if (sh.breakLen > 0 && (sh.breakAt <= sh.start || sh.breakAt + sh.breakLen >= sh.end)) return '休憩は勤務の途中に入れてください';
   return null;
 }
 
 /** シフトの給与の対象時間（時間） */
-export function shiftPaidHours(sh: ShiftDay | null): number {
+export function shiftPaidHours(sh: ShiftDay | null, openMin = MIN_PER_DAY): number {
   if (!sh) return 0;
-  return (sh.end - sh.start - (sh.breakLen > 0 ? sh.breakLen : 0)) / 60 + (sh.fromPrep ? ST.employment.prepPaidHours : 0);
+  const end = isFullShift(sh) ? openMin : Math.min(sh.end, openMin);
+  return Math.max(0, end - sh.start - (sh.breakLen > 0 ? sh.breakLen : 0)) / 60 + (sh.fromPrep ? ST.employment.prepPaidHours : 0);
+}
+
+/** 「仕込みから最後まで」のシフト（営業時間が変わっても閉店まで働く） */
+export function isFullShift(sh: ShiftDay): boolean {
+  return sh.fromPrep && sh.start === 0 && sh.end >= MIN_PER_DAY;
 }
 
 /** 時給（アルバイト）。古いデータは日給から換算 */
@@ -171,9 +179,13 @@ export function hourlyOf(e: Employee): number {
 }
 
 /** その日の給与の見込み（予定どおりに働いた場合） */
-export function expectedPay(e: Employee, day: number): number {
-  if (!isPartTime(e)) return shiftFor(e, day) ? e.profile.wage : 0;
-  return Math.round((hourlyOf(e) * shiftPaidHours(shiftFor(e, day))) / 10) * 10;
+export function expectedPay(e: Employee, day: number, hours: StoreHours = DEFAULT_HOURS): number {
+  const sh = shiftFor(e, day);
+  if (!sh || isClosedDay(hours, day)) return 0;
+  if (!isPartTime(e)) return fullTimePayFor(e, hours);
+  // 長い勤務の残業・深夜の割り増しと休憩（11〜15時の店では今までと同じ）
+  const h = shiftPaidHours(sh, openMinutesOf(hours));
+  return Math.round((hourlyOf(e) * paidHoursWithPremium(h, h * lateNightShare(hours))) / 10) * 10;
 }
 
 /** 1日分の給与の目安（解雇手当・一覧の表示）。アルバイトは仕込みから閉店まで働いた額 */
@@ -192,14 +204,33 @@ export function payDue(e: Employee, s: GameState): number {
   const a = e.att;
   if (!isPartTime(e)) {
     // 社員は休まなければ日給（遅刻しても減らさない）。このバージョンより前の状態（出勤の記録がない）は出勤していれば払う
-    if (!a || a.day !== s.day) return e.presentToday ? e.profile.wage : 0;
+    if (!a || a.day !== s.day) return e.presentToday ? fullTimeDayPay(e, s) : 0;
     // 休みの曜日（今日の予定がない日）は日給なし。工事の休業日は出勤するので払う。休みの日に呼び出したら払う
     if (a.status !== 'closed' && !a.calledIn && a.shift === null) return 0;
-    return a.absent ? 0 : e.profile.wage;
+    return a.absent ? 0 : fullTimeDayPay(e, s);
   }
   if (!a || a.day !== s.day) return 0;
   const hours = a.workedSec / (60 * SEC_PER_MIN) + (a.prepWorked ? ST.employment.prepPaidHours : 0);
-  return Math.round((hourlyOf(e) * hours) / 10) * 10;
+  // 長く働いた日の残業・深夜の割り増しと休憩（じろ1 5.1・5.7。11〜15時の店では今までと同じ）
+  const paid = paidHoursWithPremium(hours, hours * lateNightShare(todayHours(s)));
+  return Math.round((hourlyOf(e) * paid) / 10) * 10;
+}
+
+/**
+ * 社員の1日の給料。日給は11〜15時の店（仕込みから閉店まで4.5時間）の額なので、営業時間が長い日は時間に合わせて増やし、
+ * 残業・深夜の割り増しを足す（じろ1 5.1）。11〜15時の店では日給のまま
+ */
+export function fullTimeDayPay(e: Employee, s: GameState): number {
+  return fullTimePayFor(e, todayHours(s));
+}
+
+/** その営業時間の日の、社員の1日の給料 */
+export function fullTimePayFor(e: Employee, h: StoreHours): number {
+  const std = ST.employment.fullShiftHours;
+  const hours = openMinutesOf(h) / 60 + ST.employment.prepPaidHours;
+  if (Math.abs(hours - std) < 1e-6) return e.profile.wage;
+  const paid = paidHoursWithPremium(hours, (openMinutesOf(h) / 60) * lateNightShare(h));
+  return Math.round(((e.profile.wage / std) * paid) / 10) * 10;
 }
 
 const EMPTY_RECORD: StaffRecord = { daysWorked: 0, daysScheduled: 0, late: 0, absent: 0, slack: 0, postpone: 0, argue: 0, rude: 0, abandon: 0, calm: 0, complaintsSettled: 0, served: 0, log: [] };
@@ -292,7 +323,8 @@ export function attendanceText(e: Employee, s: GameState): string {
   const a = e.att;
   if (!a || a.day !== s.day) return e.presentToday ? '勤務中' : '休み';
   const sh = a.shift;
-  const hours = sh ? `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start)}〜${shiftTimeText(sh.end)}` : '';
+  const th = todayHours(s);
+  const hours = sh ? `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start, th)}〜${shiftTimeText(Math.min(sh.end, openMinutesOf(th)), th, true)}` : '';
   switch (a.status) {
     case 'off':
       return e.availableFrom !== undefined && s.day < e.availableFrom ? `${e.availableFrom}日目から出勤（採用の手続き中）` : '今日は休み';
@@ -301,11 +333,11 @@ export function attendanceText(e: Employee, s: GameState): string {
     case 'closed':
       return '休業日';
     case 'late':
-      return `遅刻（${shiftTimeText(Math.round((a.arriveAt < 0 ? 0 : a.arriveAt) / SEC_PER_MIN))}ごろ到着の見込み）`;
+      return `遅刻（${shiftTimeText(Math.round((a.arriveAt < 0 ? 0 : a.arriveAt) / SEC_PER_MIN), th)}ごろ到着の見込み）`;
     case 'scheduled':
       return `${hours} の予定`;
     case 'break':
-      return `休憩中（${shiftTimeText(Math.round(a.breakTo / SEC_PER_MIN))}まで）`;
+      return `休憩中（${shiftTimeText(Math.round(a.breakTo / SEC_PER_MIN), th, true)}まで）`;
     case 'left':
       return '退勤済み';
     case 'working':
@@ -383,7 +415,7 @@ function arriveFloor(s: GameState, e: Employee, kind: 'arrive' | 'return' | 'bac
 }
 
 /** その日の予定から時刻を決める（引いた結果 absent / lateMin はそのまま使う） */
-function planTimes(a: Attendance, sh: ShiftDay | null): void {
+function planTimes(a: Attendance, sh: ShiftDay | null, openMin: number): void {
   a.shift = sh;
   if (!sh) {
     a.arriveAt = a.leaveAt = a.breakFrom = a.breakTo = -1;
@@ -391,7 +423,8 @@ function planTimes(a: Attendance, sh: ShiftDay | null): void {
   }
   const late = Math.min(a.lateMin, Math.max(0, sh.end - sh.start - 15));
   a.arriveAt = sh.fromPrep && late === 0 ? -1 : (sh.start + late) * SEC_PER_MIN;
-  a.leaveAt = sh.end >= MIN_PER_DAY ? UNTIL_CLOSE : sh.end * SEC_PER_MIN;
+  // 「仕込みから最後まで」のシフト（社員・初めのシフト）と、今日の営業の終わりまでのシフトは閉店まで（営業時間が長い店でも。じろ1 5.1）
+  a.leaveAt = isFullShift(sh) || sh.end >= openMin ? UNTIL_CLOSE : sh.end * SEC_PER_MIN;
   if (sh.breakLen > 0) {
     a.breakFrom = sh.breakAt * SEC_PER_MIN;
     a.breakTo = (sh.breakAt + sh.breakLen) * SEC_PER_MIN;
@@ -457,7 +490,8 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
     e.ai.stuckTime = 0;
     delete e.ai.failed;
     e.say = null;
-    const sh = shiftFor(e, s.day);
+    // 定休日はみんな休み（じろ1 5.1）
+    const sh = isClosedDay(todayHours(s), s.day) && !s.tutorial ? null : shiftFor(e, s.day);
     const a: Attendance = {
       day: s.day,
       shift: null,
@@ -496,7 +530,7 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
     if (!tutorial && s.day - lastLogDay(e, 'absent') > A.absentGapDays && evRand(s) < ch.absent) {
       a.absent = true;
       a.status = 'absent';
-      planTimes(a, sh);
+      planTimes(a, sh, openMinutesOf(todayHours(s)));
       e.presentToday = false;
       e.ai.state = 'absent';
       logStaff(s, e, 'absent', '当日になって欠勤の連絡があった');
@@ -506,7 +540,7 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
     if (!tutorial && s.day - lastLogDay(e, 'late') > A.lateGapDays && evRand(s) < ch.late) {
       a.lateMin = Math.round((A.lateMinFrom + (A.lateMinTo - A.lateMinFrom) * evRand(s)) / 5) * 5;
     }
-    planTimes(a, sh);
+    planTimes(a, sh, openMinutesOf(todayHours(s)));
     if (a.arriveAt < 0) {
       // 仕込みから出勤
       a.arrived = true;
@@ -568,7 +602,7 @@ function ensureAttendance(s: GameState, e: Employee): Attendance {
     calledIn: false,
     lateNoted: false,
   };
-  planTimes(a, sh);
+  planTimes(a, sh, openMinutesOf(todayHours(s)));
   e.att = a;
   return a;
 }
@@ -599,7 +633,7 @@ export function attendHireDay(s: GameState, e: Employee): void {
     return;
   }
   const sh = shiftFor(e, s.day);
-  planTimes(a, sh);
+  planTimes(a, sh, openMinutesOf(todayHours(s)));
   if (!sh) {
     e.presentToday = false;
     e.ai.state = 'off';
@@ -622,9 +656,15 @@ export function attendHireDay(s: GameState, e: Employee): void {
 /**
  * 出勤・退勤・休憩・サボり（step から毎回呼ぶ。抽選は一定間隔だけ）。presentToday を「今、店で働いている」に保つ
  */
+/** 閉店の時刻のあと、まだ提供を待っている客がいるか（店の外の列・店内の待ち・席で丼を待つ客） */
+export function afterHoursService(s: GameState): boolean {
+  return s.phase === 'closing' && s.customers.some((c) => c.state === 'queue' || c.state === 'ticket' || c.state === 'waitingSeat' || c.state === 'toSeat' || c.state === 'seated');
+}
+
 export function updateAttendance(s: GameState, dt: number, ctx: SimCtx): void {
   if (s.employees.length === 0) return;
   const t = s.openT;
+  const overtime = afterHoursService(s);
   for (const e of s.employees) {
     const a = ensureAttendance(s, e);
     if (a.status === 'off' || a.status === 'absent' || a.status === 'closed') continue;
@@ -679,7 +719,11 @@ export function updateAttendance(s: GameState, dt: number, ctx: SimCtx): void {
         arriveFloor(s, e, 'return');
       }
       if (e.conduct?.kind) endConduct(s, e);
-      if (a.arrived && a.status !== 'left' && a.leaveAt < UNTIL_CLOSE && leaveFloor(s, e, ctx, 'leave')) a.status = 'left';
+      // 中休みの前（あとに営業の枠が残っている）は、退勤の時刻を過ぎた人だけ帰る。最後の閉店では、閉店まで働く人だけ残る
+      const done = s.breakPending ? t >= a.leaveAt : a.leaveAt < UNTIL_CLOSE;
+      if (a.arrived && a.status !== 'left' && done && leaveFloor(s, e, ctx, 'leave')) a.status = 'left';
+      // 閉店の時刻のあと、並んだ客に提供している間は働いた時間に数える（じろ1 5.3）
+      else if (overtime && a.arrived && a.status === 'working') a.workedSec += dt;
     }
   }
 }
@@ -691,7 +735,7 @@ function overlap(a0: number, a1: number, b0: number, b1: number): number {
 /** [from, to) のうち、出勤してから退勤の予定まで・休憩を除いた時間 */
 function paidOverlap(a: Attendance, from: number, to: number): number {
   const inAt = Math.max(0, a.arriveAt);
-  const outAt = Math.min(a.leaveAt, BALANCE.openDuration);
+  const outAt = a.leaveAt;
   let sec = overlap(from, to, inAt, outAt);
   if (a.breakFrom >= 0) sec -= overlap(from, to, Math.max(inAt, a.breakFrom), Math.min(outAt, a.breakTo));
   return Math.max(0, sec);
@@ -771,7 +815,7 @@ export function closeStaffDay(s: GameState): void {
   for (const e of s.employees) {
     const a = e.att;
     const worked = a && a.day === s.day ? !a.absent && (a.workedSec > 0 || a.prepWorked || (a.status === 'closed' && !isPartTime(e))) : e.presentToday;
-    const share = a && a.day === s.day ? clamp01((a.workedSec + (a.prepWorked ? BALANCE.openDuration * 0.1 : 0)) / BALANCE.openDuration) : worked ? 1 : 0;
+    const share = a && a.day === s.day ? clamp01((a.workedSec + (a.prepWorked ? openDurationOf(s) * 0.1 : 0)) / openDurationOf(s)) : worked ? 1 : 0;
     endOfDayWellbeing(s, e, worked, a?.status === 'closed' ? 1 : share);
     if (!worked) continue;
     ensureRecord(e).daysWorked += 1;
@@ -829,7 +873,9 @@ export function wagesDueToday(s: GameState): number {
 
 /** 当日（または翌日）の給与の見込み */
 export function expectedWages(s: GameState, day: number): number {
-  return s.employees.reduce((sum, e) => sum + expectedPay(e, day), 0);
+  // 今日の分は今日の営業時間、明日からの分は店の設定の営業時間
+  const hours = day === s.day ? todayHours(s) : storeHours(s);
+  return s.employees.reduce((sum, e) => sum + expectedPay(e, day, hours), 0);
 }
 
 /** 仕事の経験による成長（作業1回ごと。1日の上限あり） */
@@ -908,7 +954,7 @@ export function setShift(s: GameState, ctx: SimCtx, employeeId: string, weekday:
   let sh: ShiftDay | null = null;
   if (shift) {
     sh = { start: shift.start, end: shift.end, breakAt: shift.breakLen > 0 ? shift.breakAt : 0, breakLen: shift.breakLen, fromPrep: shift.fromPrep };
-    const bad = shiftProblem(sh);
+    const bad = shiftProblem(sh, openMinutesOf(storeHours(s)));
     if (bad) return { ok: false, reason: bad };
   }
   const before = shiftFor(e, s.day);
@@ -944,7 +990,7 @@ export function setDateShift(s: GameState, ctx: SimCtx, employeeId: string, days
   let sh: ShiftDay | null = null;
   if (mode !== 'reset' && shift) {
     sh = { start: shift.start, end: shift.end, breakAt: shift.breakLen > 0 ? shift.breakAt : 0, breakLen: shift.breakLen, fromPrep: shift.fromPrep };
-    const bad = shiftProblem(sh);
+    const bad = shiftProblem(sh, openMinutesOf(storeHours(s)));
     if (bad) return { ok: false, reason: bad };
   }
   pruneDateShifts(e, s.day);
@@ -974,7 +1020,7 @@ function reapplyToday(s: GameState, e: Employee, ctx: SimCtx): void {
   if (a.absent || a.status === 'closed') return;
   const sh = shiftFor(e, s.day);
   const wasOff = a.status === 'off' && !a.arrived;
-  planTimes(a, sh);
+  planTimes(a, sh, openMinutesOf(todayHours(s)));
   if (!sh) {
     // 今日の予定を消した: 店にいれば上がる
     if (a.arrived && e.presentToday) leaveFloor(s, e, ctx, 'leave');

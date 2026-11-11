@@ -6,7 +6,7 @@ import { GOALS, UNLOCK_NAMES } from '../data/career';
 import { EQUIPMENT } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
 import { STAGES } from '../data/stages';
-import type { DayReport, GameState } from '../types';
+import type { StoreHours, DayReport, GameState } from '../types';
 import { clamp, newId } from '../util';
 import { closeLostItems } from './customers';
 import { activeStore, recordCompanyDay } from './company';
@@ -22,12 +22,23 @@ import { expireLots, receiveDeliveries, runAutoOrder, STOCKOUT_SOURCE } from './
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { drawAccident, takePrepSnapshot } from './accident';
 import { applyWageFloor } from './wages';
+import { clockMinuteAt, clockText, isClosedDay, SEC_PER_MIN, sessionIndex, sessionSpans, storeHours, todayHours, utilitiesBaseOf } from './hours';
 import { onDayEndEvents, onDayStartEvents, onOpenShopEvents } from './visitors';
 
 /** 開店 */
 export function openShop(s: GameState, ctx: SimCtx): { ok: boolean; reason?: string } {
   if (s.phase !== 'prep') return { ok: false, reason: '準備時間にだけ開店できます' };
   if (s.bankruptcy) return { ok: false, reason: '破産しています' };
+  // 中休みのあとの開店（2つ目以降の営業の枠。じろ1 5.1）: 時刻を次の枠の始まりにして、その日の抽選などはしない
+  const idx = sessionIndex(s);
+  if (idx > 0) {
+    s.phase = 'open';
+    s.openT = sessionSpans(todayHours(s))[idx]?.startT ?? s.openT;
+    s.arrivalAcc = 0.6;
+    emit(ctx, { type: 'open' });
+    notify(s, ctx, 'phase', 'info', `${clockText(clockMinuteAt(todayHours(s), s.openT))}からの営業を開始しました`);
+    return { ok: true };
+  }
   s.phase = 'open';
   s.openT = 0;
   s.arrivalAcc = 0.6;
@@ -44,8 +55,21 @@ export function openShop(s: GameState, ctx: SimCtx): { ok: boolean; reason?: str
 /** 営業時間の終了（新規の来店を止める） */
 export function startClosing(s: GameState, ctx: SimCtx): void {
   s.phase = 'closing';
+  // あとに営業の枠が残っていれば中休み（店内のお客さんに提供を済ませたら、仕込みの時間に戻る）
+  const last = sessionIndex(s) >= todayHours(s).sessions.length - 1;
+  s.breakPending = !last;
   emit(ctx, { type: 'closing' });
-  notify(s, ctx, 'phase', 'info', '営業時間が終わりました。店内のお客さんに提供を済ませましょう');
+  notify(s, ctx, 'phase', 'info', last ? '営業時間が終わりました。店内のお客さんに提供を済ませましょう' : 'この枠の営業が終わりました。店内のお客さんに提供を済ませたら中休みです');
+}
+
+/** 中休みに入る（2つ目以降の営業の枠の前。時間は止まり、「開店する」で次の枠を始める） */
+export function startBreak(s: GameState, ctx: SimCtx): void {
+  s.phase = 'prep';
+  s.breakPending = false;
+  s.sessionIdx = sessionIndex(s) + 1;
+  const next = todayHours(s).sessions[s.sessionIdx];
+  notify(s, ctx, 'phase', 'info', `中休みです。仕込み・片付けをして、${next ? clockText(next.open) : ''}からの営業を「開店する」で始めましょう`);
+  emit(ctx, { type: 'break' });
 }
 
 /** 店内の客がいなくなったか */
@@ -66,7 +90,7 @@ export function fixedCosts(s: GameState): { rent: number; wages: number; upkeep:
   // 給与はシフトどおりに働いた場合の見込み（閉店後は翌日の分）
   const wages = expectedWages(s, s.phase === 'closed' ? s.day + 1 : s.day);
   const upkeep = upkeepTotal(s);
-  const utilities = BALANCE.utilitiesBase;
+  const utilities = utilitiesBaseOf(storeHours(s), true);
   const loans = s.loans.reduce((a, l) => a + Math.min(l.remaining, l.dailyPayment) + Math.round(l.remaining * l.dailyRate), 0);
   return { rent, wages, upkeep, utilities, loans, total: rent + wages + upkeep + utilities + loans };
 }
@@ -167,7 +191,8 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
   const upkeep = upkeepTotal(s);
   recordPL(s, 'upkeep', upkeep);
   payOrAccrue(s, 'upkeep', upkeep, '設備維持費', key('upkeep'));
-  recordPL(s, 'utilities', BALANCE.utilitiesBase);
+  // 光熱費の基本（1日の固定分 + 営業の時間）と、閉店の時刻のあとに提供していた時間の分
+  recordPL(s, 'utilities', utilitiesBaseOf(todayHours(s), s.openT > 0) + Math.round((BALANCE.hours.utilitiesPerHour * (s.today.afterHoursSec ?? 0)) / (60 * SEC_PER_MIN)));
   payOrAccrue(s, 'utilities', s.today.utilities, '光熱費', key('util'));
   for (const loan of s.loans) {
     const interest = Math.round(loan.remaining * loan.dailyRate);
@@ -362,6 +387,10 @@ export function startNextDay(s: GameState, ctx: SimCtx, takeSnapshot = true): { 
   s.today = emptyDayStats();
   s.cashAtDayStart = s.money;
   s.regularsVisitedToday = [];
+  // 今日の営業時間（店の設定。変えた設定は次の営業日から。じろ1 5.1）
+  s.todayHours = JSON.parse(JSON.stringify(storeHours(s))) as StoreHours;
+  s.sessionIdx = 0;
+  s.breakPending = false;
   for (const e of s.equipment) {
     if (e.status === 'repairing') finishRepair(s, ctx, e);
     e.process = null;
@@ -384,6 +413,13 @@ export function startNextDay(s: GameState, ctx: SimCtx, takeSnapshot = true): { 
   s.regulars = s.regulars.filter((r) => r.loyalty > 0.02);
   // 覆面調査員の記事の公開など（仕込み開始時点の控えより前に済ませ、控えに含める）
   onDayStartEvents(s, ctx);
+  if (isClosedDay(s.todayHours, s.day) && s.closedForConstruction <= 0 && !s.tutorial) {
+    // 定休日: 営業せずに精算だけ（家賃・維持費・光熱費の固定分はかかる。従業員は休み）
+    notify(s, ctx, 'closedDay', 'info', `今日（${s.day}日目）は定休日です`);
+    s.phase = 'closing';
+    settleDay(s, ctx);
+    return { ok: true };
+  }
   if (s.closedForConstruction > 0) {
     // 工事で休業: 営業せずに精算だけ行う
     s.closedForConstruction -= 1;

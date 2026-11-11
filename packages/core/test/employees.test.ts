@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyAction, BALANCE, buildTasks, dailyWageOf, expectedPay, refreshCandidates, ROLE_LABEL, step, TASK_KINDS } from '../src';
+import { addLot, applyAction, BALANCE, buildTasks, dailyWageOf, expectedPay, refreshCandidates, ROLE_LABEL, step, TASK_KINDS } from '../src';
 import { addBot, newGame, runDay } from './helpers';
 
 describe('従業員', () => {
@@ -17,12 +17,20 @@ describe('従業員', () => {
   });
 
   it('従業員だけでも営業でき、雇うと処理量が増える', () => {
+    // 人手の差だけを見るため、両方の店に麺と豚を足しておく（開業日の在庫は約50杯分。食券が先の行列では入る客が増え、
+    // 人手のある店は在庫が先に尽きて売り切れで帰る客が出る。じろ1 P3）
+    const stock = (s: ReturnType<typeof newGame>['s']) => {
+      addLot(s, 'noodle', 15_000, 0.3);
+      addLot(s, 'buta', 40, 48);
+    };
     const solo = newGame(31);
+    stock(solo.s);
     addBot(solo.s, 'cook', 0.6);
     applyAction(solo.s, 'p1', { type: 'openShop' }, solo.ctx);
     solo.s.reputation = 4;
     runDay(solo.s, solo.ctx);
     const team = newGame(31);
+    stock(team.s);
     addBot(team.s, 'cook', 0.6);
     addBot(team.s, 'cook', 0.6);
     addBot(team.s, 'server', 0.6);

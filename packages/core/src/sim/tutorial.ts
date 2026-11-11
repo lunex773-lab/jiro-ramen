@@ -95,7 +95,6 @@ function spawnScriptedCustomer(s: GameState, ctx: SimCtx, menuId: string, call: 
   c.patience = 1e6;
   c.script = { menuId, eatTime };
   s.customers.push(c);
-  s.queue.push(c.id);
   s.today.customers += 1;
   emit(ctx, { type: 'arrive', targetId: c.id });
   return c;

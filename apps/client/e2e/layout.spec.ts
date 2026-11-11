@@ -295,6 +295,19 @@ async function walk(page: Page, p: Profile): Promise<{ issues: Issue[]; shots: s
     await page.waitForTimeout(200);
     await check(`manage-${t.replace(/[・\s]/g, '')}`);
   }
+  // 営業時間の設定（枠を2つにして定休日も選んだ状態。下の「保存する」が画面の中にあって押せる。じろ1 5.1）
+  await page.locator('.manage .tabs .tab', { hasText: '経営' }).first().click();
+  await page.locator('.manage [data-edit-hours]').first().click();
+  {
+    const dlg = page.locator('.modal.hours-modal');
+    await expect(dlg).toBeVisible();
+    await dlg.locator('[data-add-session]').click();
+    await dlg.locator('[data-closed-day="6"]').click();
+    await check('hours-dialog');
+    await expect(dlg.getByRole('button', { name: '保存する' })).toBeInViewport({ ratio: 1 });
+    await expect(dlg.getByRole('button', { name: 'やめる' })).toBeInViewport({ ratio: 1 });
+    await dlg.getByRole('button', { name: 'やめる' }).click();
+  }
   // 社員にする確認の画面（中身が長くても、下のボタンが画面の中にあって押せる）
   await page.locator('.manage .tabs .tab', { hasText: '従業員' }).first().click();
   const promote = page.locator('.manage').getByRole('button', { name: '社員にする' }).first();

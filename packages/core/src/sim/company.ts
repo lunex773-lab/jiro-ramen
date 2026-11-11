@@ -35,6 +35,7 @@ const STORE_KEY_SET: Record<StoreKey, true> = {
   pausedMenu: true,
   history: true,
   closedForConstruction: true,
+  prepTargets: true,
 };
 export const STORE_KEYS = Object.keys(STORE_KEY_SET) as StoreKey[];
 

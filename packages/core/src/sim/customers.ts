@@ -3,11 +3,12 @@
 // 途中退店（abandoned）、クレーム（complaint）を含む。各遷移の条件はこのファイルに明示する。
 
 import { BALANCE } from '../data/balance';
+import { clockMinuteAt, hourDemand, openDurationOf, todayHours } from './hours';
 import { adFactor } from './ads';
 import { calendarDemand } from './calendar';
 import { CALL_KEYS, MENU, MENU_IDS } from '../data/menu';
 import { LOST_ITEM_KINDS, REVIEW_BAD, REVIEW_GOOD, SURNAMES } from '../data/names';
-import { CELL, streetQueueSpot } from '../data/stages';
+import { CELL, STREET_QUEUE_ROWS, streetQueueSpot, ticketLineSpot } from '../data/stages';
 import { accessPoint, seatPos, stageOf } from '../geometry';
 import { findPath } from '../nav';
 import type {
@@ -239,7 +240,7 @@ export function priceDemandFactor(s: GameState): number {
 export function arrivalRate(s: GameState, opts: { events?: boolean } = {}): number {
   const c = BALANCE.customers;
   const repF = Math.pow(Math.max(0.3, s.reputation) / 3, c.reputationExponent);
-  const x = s.openT / BALANCE.openDuration;
+  const clock = clockMinuteAt(todayHours(s), s.openT);
   const priceF = priceDemandFactor(s);
   // 立地（駅前・住宅街・郊外）と場所（市区町村の人口）の倍率
   const propF = s.company ? storeDemandMult(activeStore(s)) : 1;
@@ -255,7 +256,7 @@ export function arrivalRate(s: GameState, opts: { events?: boolean } = {}): numb
   const calF = s.tutorial ? 1 : calendarDemand(s.day);
   // その日に払った広告費（オーナーの判断 14）
   const adF = adFactor(s.today?.ads ?? 0);
-  return c.baseRate * repF * timeCurve(x) * priceF * demand * regularF * ticketF * eventF * stageF * propF * calF * adF;
+  return c.baseRate * repF * hourDemand(clock) * priceF * demand * regularF * ticketF * eventF * stageF * propF * calF * adF;
 }
 
 /** 共通市場の客の取り合いの倍率（プレイヤーがいる店。市場の外では 1） */
@@ -268,8 +269,8 @@ export function marketDemandFactor(s: GameState): number {
 
 /** 1日（営業時間）の来店の見込み（人）。arrivalRate を営業時間で積分する */
 export function expectedDailyArrivals(s: GameState, opts: { events?: boolean } = {}): number {
-  const D = BALANCE.openDuration;
-  const n = 54;
+  const D = openDurationOf(s);
+  const n = Math.max(1, Math.round((54 * D) / BALANCE.openDuration));
   const saved = s.openT;
   let sum = 0;
   for (let i = 0; i < n; i++) {
@@ -327,15 +328,15 @@ export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
       }
     }
     const c = makeCustomer(s, regular);
-    // 行列の長さを見て並ぶか決める
-    const L = s.queue.length;
+    // 行列の長さを見て並ぶか決める（店外の行列は2列なので、同じ人数でも列は半分の長さに見える。じろ1 5.3）
+    const L = (s.queue.length + ticketLine(s).length) / STREET_QUEUE_ROWS;
     const join = clamp01(1 - L * BALANCE.customers.balkPerQueue * (1.3 - c.traits.patience) + (s.reputation - 3) * 0.08 + (regular ? 0.3 : 0));
     if (rand(s) > join) {
       s.today.balked += regular ? 1 : planned;
       continue;
     }
+    // 来た客は、まず券売機で食券を買う（状態 'arriving' の客が来た順に券売機を待つ）。食券を買ってから並ぶ
     s.customers.push(c);
-    s.queue.push(c.id);
     s.today.customers += 1;
     emit(ctx, { type: 'arrive', targetId: c.id });
     // SNS を見て来た客・覆面調査員・珍しい客。カップルなら一緒に来た彼氏がすぐ後ろに並ぶ
@@ -345,7 +346,6 @@ export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
     const members: Customer[] = [c];
     if (partner) {
       s.customers.push(partner);
-      s.queue.push(partner.id);
       s.today.customers += 1;
       emit(ctx, { type: 'arrive', targetId: partner.id });
       members.push(partner);
@@ -357,7 +357,6 @@ export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
         m.pos = { x: c.pos.x + 0.45 * i, z: c.pos.z + (i % 2 === 0 ? 0 : 0.3) };
         if (c.fromBuzz) m.fromBuzz = true;
         s.customers.push(m);
-        s.queue.push(m.id);
         s.today.customers += 1;
         emit(ctx, { type: 'arrive', targetId: m.id });
         members.push(m);
@@ -402,6 +401,24 @@ function routeInside(s: GameState, from: Vec2, to: Vec2): Vec2[] {
   const p = findPath(s, start, to, 'customer');
   if (p) pts.push(...p.points);
   else pts.push(to);
+  return pts;
+}
+
+/** 券売機の順番を待つ客（来た順。行列の先頭に入った特別な客・忘れ物を取りに来た客が先） */
+function ticketLine(s: GameState): string[] {
+  const xs = s.customers.filter((c) => c.state === 'arriving');
+  const first = xs.filter((c) => c.forLostItem || c.special?.kind === 'tv_performer');
+  return [...first, ...xs.filter((c) => !first.includes(c))].map((c) => c.id);
+}
+
+/** 店内 → 出口 → 歩道の決まった位置（食券を買って外の列に並ぶ） */
+function routeToStreet(s: GameState, from: Vec2, spot: Vec2): Vec2[] {
+  const st = stageOf(s);
+  const doorX = (st.door.x0 + st.door.x1) / 2;
+  const pts: Vec2[] = [];
+  const p = findPath(s, from, { x: doorX, z: 0.35 }, 'customer');
+  if (p) pts.push(...p.points);
+  pts.push({ x: doorX, z: -0.5 }, spot);
   return pts;
 }
 
@@ -494,21 +511,29 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
   const speed = BALANCE.customers.walkSpeed;
   const st = stageOf(s);
 
-  // 店外行列の並び位置
+  // 店外の行列は、列に並んでいる客（状態 'queue'）だけ（前の版の状態・もういない客の id を除く）
+  if (s.queue.some((id) => s.customers.find((x) => x.id === id)?.state !== 'queue')) {
+    s.queue = s.queue.filter((id) => s.customers.find((x) => x.id === id)?.state === 'queue');
+  }
+  // 店外行列の並び位置（2列）
   s.queue.forEach((id, i) => {
     const c = s.customers.find((x) => x.id === id);
     if (c && c.state === 'queue' && c.slot !== i) {
       c.slot = i;
-      setTarget(c, [streetQueueSpot(i)]);
+      setTarget(c, c.pos.z >= 0 ? routeToStreet(s, c.pos, streetQueueSpot(i)) : [streetQueueSpot(i)]);
     }
   });
+  // 券売機の順番を待つ客（来た順）
+  const line = ticketLine(s);
+  const doorX = (st.door.x0 + st.door.x1) / 2;
   // 店内の後ろ待ちの並び位置
   s.insideQueue.forEach((id, i) => {
     const c = s.customers.find((x) => x.id === id);
     if (c && c.state === 'waitingSeat' && c.slot !== i) {
       c.slot = i;
       const spot = st.waitSpots[Math.min(i, st.waitSpots.length - 1)]!;
-      setTarget(c, findPath(s, c.pos, spot, 'customer')?.points ?? [spot]);
+      // 店外の列から入る客は入口を通る
+      setTarget(c, c.pos.z < 0 ? routeInside(s, c.pos, spot) : (findPath(s, c.pos, spot, 'customer')?.points ?? [spot]));
     }
   });
 
@@ -522,43 +547,75 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
     c.stateTime += dt;
     switch (c.state) {
       case 'arriving': {
-        const i = s.queue.indexOf(c.id);
-        if (c.path.length === 0) {
-          c.slot = i;
-          setTarget(c, [streetQueueSpot(Math.max(0, i))]);
+        // まず券売機で食券を買う（じろ1 5.3）。順番が来るまで入口の前で待つ（待たされているとは感じない）
+        if (s.phase === 'closing') {
+          // 閉店の時刻で券売機は止まる。食券を買っていない客は帰る（店の評価には影響しない）
+          startLeaving(s, c, ctx, 'abandoned');
+          break;
         }
-        if (walk(c, dt, speed * 1.1)) {
-          c.state = 'queue';
+        const i = Math.max(0, line.indexOf(c.id));
+        if (c.slot !== i || c.stateTime <= dt) {
+          c.slot = i;
+          setTarget(c, [ticketLineSpot(doorX, i)]);
+        }
+        const there = walk(c, dt, speed * 1.1);
+        if (i === 0 && there && !ticketBusy) {
+          c.state = 'ticket';
           c.stateTime = 0;
+          c.slot = -1;
+          ticketBusy = true;
+          setTarget(c, routeInside(s, c.pos, ticketPoint(s)));
         }
         break;
       }
       case 'queue': {
+        // 店外の列（食券を買った客）。外で並んでいる間は待たされているとは感じない（我慢が減らない・待ち時間に数えない）。
+        // 閉店の時刻を過ぎても解散せず、提供を受けるまで待つ（じろ1 5.3）
         walk(c, dt, speed);
-        c.queueWait += dt;
-        c.patience -= dt * 0.55;
         const front = s.queue[0] === c.id;
         // 団体は、連れが店内で待っていれば待ち場所がいっぱいでも一緒に入る（全員そろわないと座れないため）
         const mateInside = !!c.group && s.insideQueue.some((id) => s.customers.find((x) => x.id === id)?.group?.id === c.group!.id);
         const roomInside = s.insideQueue.length < st.waitSpots.length || mateInside;
-        if (s.phase === 'closing' && front) {
-          // 閉店後は店外の客は帰る（店の評価には影響しない）
-          leaveQueue(s, c, ctx, true);
+        if (!c.menuId && !c.forLostItem) {
+          // 食券を買っていない客が列にいる（前の版の状態・行列の先頭に入ったテレビの出演者）: 今までどおり、先頭で中に空きがあれば券売機へ
+          c.queueWait += dt;
+          c.patience -= dt * 0.55;
+          if (s.phase === 'closing' && front) {
+            leaveQueue(s, c, ctx, true);
+            break;
+          }
+          if (c.patience <= 0) {
+            sayFor(c, s, '…並びすぎ。帰ろう');
+            c.sat.speed = 0.1;
+            leaveQueue(s, c, ctx, false);
+            leaveWaitingGroup(s, c, ctx);
+            break;
+          }
+          if (front && roomInside && !ticketBusy && c.path.length === 0) {
+            s.queue.shift();
+            c.state = 'ticket';
+            c.stateTime = 0;
+            c.fromQueue = true;
+            ticketBusy = true;
+            setTarget(c, routeInside(s, c.pos, ticketPoint(s)));
+          }
           break;
         }
-        if (c.patience <= 0) {
-          sayFor(c, s, '…並びすぎ。帰ろう');
-          c.sat.speed = 0.1;
-          leaveQueue(s, c, ctx, false);
-          leaveWaitingGroup(s, c, ctx);
-          break;
+        if (s.phase === 'closing') {
+          // 閉店の時刻を過ぎても、すぐには解散せずに待つ（約45分）。それでも入れなければ帰る（今までの閉店のときと同じく、店の評価には影響しない）
+          c.closeWait = (c.closeWait ?? 0) + dt;
+          if (c.closeWait > BALANCE.customers.afterCloseWaitSec) {
+            sayFor(c, s, '…今日はもう無理か。また来よう');
+            leaveQueue(s, c, ctx, true);
+            break;
+          }
         }
-        if (front && roomInside && !ticketBusy && c.path.length === 0) {
-          s.queue.shift();
-          c.state = 'ticket';
+        if ((front || mateInside) && roomInside) {
+          s.queue = s.queue.filter((x) => x !== c.id);
+          c.state = 'waitingSeat';
           c.stateTime = 0;
-          ticketBusy = true;
-          setTarget(c, routeInside(s, c.pos, ticketPoint(s)));
+          c.slot = -1;
+          s.insideQueue.push(c.id);
         }
         break;
       }
@@ -594,11 +651,21 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
         if (!c.script && soupOut(s)) noteStockout(s, 'soup');
         if (tm) useEquipment(s, ctx, tm);
         else if (!tm || !isUsable(tm)) notify(s, ctx, 'ticket:manual', 'warn', '券売機が使えないため手売りで対応しています（時間がかかります）');
-        c.state = 'waitingSeat';
-        c.stateTime = 0;
-        c.slot = -1;
-        s.insideQueue.push(c.id);
         emit(ctx, { type: 'ticket', targetId: c.id, text: MENU[c.menuId]?.short ?? '' });
+        {
+          // 食券を買ったら、中の待ち場所が空いていて外に先客がいなければ中で待つ。そうでなければ店の外の列（2列）に並ぶ
+          const mateIn = !!c.group && s.insideQueue.some((id) => s.customers.find((x) => x.id === id)?.group?.id === c.group!.id);
+          const room = s.insideQueue.length < st.waitSpots.length;
+          c.stateTime = 0;
+          c.slot = -1;
+          if (c.fromQueue || mateIn || (room && s.queue.length === 0)) {
+            c.state = 'waitingSeat';
+            s.insideQueue.push(c.id);
+          } else {
+            c.state = 'queue';
+            s.queue.push(c.id);
+          }
+        }
         break;
       }
       case 'waitingSeat': {
@@ -1115,8 +1182,8 @@ export function spawnLostItemOwners(s: GameState, ctx: SimCtx): void {
     const c = makeCustomer(s, reg);
     c.forLostItem = item.id;
     c.menuId = null;
+    // 券売機の順番の先頭に入る（食券は買わず、店内の端で待つ）
     s.customers.push(c);
-    s.queue.unshift(c.id);
     item.returnDay = -1;
     emit(ctx, { type: 'lostOwner', text: item.kind });
   }

@@ -6,7 +6,7 @@ import { BOWL_PACK, EQUIPMENT, SEAT_PRICE } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
 import { MENU } from '../data/menu';
 import { moveWithCollision, stageOf } from '../geometry';
-import type { CompanyPolicy, EmployeeRole, EventKind, GameState, Id, Rot, ShiftDay, StorePolicy, Vec2 } from '../types';
+import type { CompanyPolicy, EmployeeRole, EventKind, GameState, Id, Rot, ShiftDay, StorePolicy, Vec2, StoreHours } from '../types';
 import { dist, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipment';
@@ -23,7 +23,7 @@ import { forceEvent } from './visitors';
 import { promote, promoteLeader, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
 import { answerRequest } from './media';
 import { setCompanyPolicy } from './company';
-import { assignManager, enterStore, openStore, renameShop, renameStore, setStoreLocation, setStorePolicy, transferEmployee } from './stores';
+import { assignManager, enterStore, openStore, renameShop, renameStore, setStoreHours, setStoreLocation, setStorePolicy, transferEmployee } from './stores';
 
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
@@ -90,7 +90,9 @@ export type Action =
   /** 今の店の従業員をほかの店へ異動させる（閉店後） */
   | { type: 'transferEmployee'; employeeId: Id; toStoreId: Id; asManager?: boolean }
   /** 店の方針（店長の営業の価格・発注・修理費の上限・定期メンテ） */
-  | { type: 'setStorePolicy'; storeId: Id; policy: Partial<StorePolicy> };
+  | { type: 'setStorePolicy'; storeId: Id; policy: Partial<StorePolicy> }
+  /** 店の営業時間（開店・閉店の枠と定休日。次の営業日から。じろ1 5.1） */
+  | { type: 'setStoreHours'; storeId: Id; hours: StoreHours };
 
 export type ActionType = Action['type'];
 
@@ -316,6 +318,9 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
     case 'setStorePolicy':
       if (typeof a.storeId !== 'string' || typeof a.policy !== 'object' || a.policy === null) return fail('不正な指定');
       return setStorePolicy(s, a.storeId, a.policy);
+    case 'setStoreHours':
+      if (typeof a.storeId !== 'string' || typeof a.hours !== 'object' || a.hours === null) return fail('不正な指定');
+      return setStoreHours(s, a.storeId, a.hours);
     case 'setPrice': {
       const m = Object.hasOwn(MENU, a.menuId) ? MENU[a.menuId] : undefined;
       if (!m || !isNum(a.price)) return fail('不正な価格');
