@@ -194,17 +194,17 @@ describe('共通市場: 端末で営業する日（判断 1・1a・1b・1d）', 
     expect(sum.netSales).toBe(0);
   });
 
-  it('営業中・同期中は、サーバーでの経営の操作を断る。終われば使えて、状態の版が上がる', () => {
+  it('端末で営業中の日があっても、市場の画面から経営の操作ができる（オーナーの指示）。同期中は断る。使うと状態の版が上がる', () => {
     const m = mk();
     const c = playerCompany(m, 'u1')!;
     const sid = c.state.company.stores[0]!.id;
     const pol = { type: 'setStorePolicy' as const, storeId: sid, policy: { priceMult: 1.1 } };
     startDay(m, 'u1', T0, 'a', c.progress.stateVersion);
-    expect(marketAction(m, 'u1', pol, T0).ok).toBe(false);
-    c.openDay = null;
     const v = c.progress.stateVersion;
     expect(marketAction(m, 'u1', pol, T0).ok).toBe(true);
     expect(c.progress.stateVersion).toBe(v + 1);
+    // 営業中の日はそのまま（端末で続けるときは、サーバーの今の状態から初めてやり直す）
+    expect(c.openDay?.token).toBe('a');
     expect(marketAction(m, 'u1', { type: 'nextDay' }, T0).ok).toBe(false);
     expect(marketAction(m, 'u1', { type: 'buyEquipment', equipType: 'fridge' }, T0).ok).toBe(false);
     // 0時を過ぎて同期していない期間がある

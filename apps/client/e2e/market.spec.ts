@@ -295,12 +295,21 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   await expect.poll(() => me().openDay?.gameDate ?? null).toBe(2);
   await expect.poll(() => page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.host.state.day)).toBe(2);
   await shot(page, '61-market-play');
+  // 営業中の経営メニューの「会社」に、企業間の貸し借り（オーナーの指示 2026-11-11）
+  await page.locator('.chip.menu').click();
+  await page.getByRole('button', { name: '会社', exact: true }).click();
+  await expect(page.locator('.manage-body [data-market-credit=""]')).toContainText('貸し出しを申し込む');
+  await page.getByRole('button', { name: /閉じる/ }).first().click();
 
   // 市場の画面へ戻る（2日目は送られていない → やり直しになると知らせる）
   void page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.returnToTitle());
   await page.getByRole('button', { name: '市場の画面に戻る' }).click();
   await expect(screen.locator('[data-leader-day]')).toHaveText('1日目まで');
   await expect(screen.locator('.market-standings .trow.mine [data-progress]')).toContainText('1日目まで（今日 手動1日）');
+  // 端末で2日目を営業中でも、市場の画面から経営の操作ができる（オーナーの指示 2026-11-11）
+  await expect(screen.locator('[data-playing-note]')).toContainText('2日目を営業中');
+  await screen.locator(`[data-price="${storeId}"]`).selectOption('1.1');
+  await expect.poll(() => mock.market!.companies[0]!.state.company.stores[0]!.policy.priceMult).toBe(1.1);
 
   // 0時: いちばん進んだ会社（あなた・1日目）まで、AI 企業を自動営業でそろえる
   mock.midnight();

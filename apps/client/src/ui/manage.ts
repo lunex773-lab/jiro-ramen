@@ -106,8 +106,11 @@ import {
   type StoreEntry,
   prefRangeProblem,
   rangeTitle,
+  type MarketView,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
+import { MarketHost } from '../game/market-play';
+import { creditCard } from './market-credit';
 
 /** 「会社」のタブを出すか: 店を2つ以上持っている、または出店の条件（12席以上・評判★4.0以上の店）を満たしている */
 function companyTabVisible(s: GameState): boolean {
@@ -402,7 +405,8 @@ export class ManageMenu {
     this.renderedVersion = s.version;
     const scroll = this.body.scrollTop;
     // 「会社」は、2店舗目を出せるようになるか、店を2つ以上持ってから出す（1店舗のうちは今までどおり）
-    const showCompany = companyTabVisible(s);
+    // 共通市場の営業中は、企業間の貸し借りのために「会社」をいつも出す（オーナーの指示 2026-11-11）
+    const showCompany = companyTabVisible(s) || this.host instanceof MarketHost;
     const ct = this.tabButtons.get('company');
     if (ct && ct.hidden === showCompany) ct.hidden = !showCompany;
     if (this.tab === 'company' && !showCompany) this.tab = 'dash';
@@ -429,6 +433,48 @@ export class ManageMenu {
     replace(this.body, content);
     if (ro) lockControls(this.body);
     this.body.scrollTop = scroll;
+  }
+
+  /** 営業中の会社の企業間の貸し借り（共通市場の営業中だけ。市場の今をサーバーから読む） */
+  private creditView: MarketView | null = null;
+  private creditLoadedAt = 0;
+  private creditLoading = false;
+
+  private marketCredit(): HTMLElement | null {
+    if (!(this.host instanceof MarketHost)) return null;
+    const session = this.host.session;
+    const load = async () => {
+      if (this.creditLoading) return;
+      this.creditLoading = true;
+      try {
+        this.creditView = await session.api.viewMarket<MarketView>(session.auth.token, session.marketId);
+        this.creditLoadedAt = Date.now();
+      } catch (e) {
+        toast(this.root, `市場を読み込めませんでした（${(e as Error)?.message ?? e}）`, 'warn');
+        this.creditLoadedAt = Date.now();
+      } finally {
+        this.creditLoading = false;
+        if (this.tab === 'company') this.render();
+      }
+    };
+    if (!this.creditLoading && Date.now() - this.creditLoadedAt > 20_000) void load();
+    if (!this.creditView) return h('section', { class: 'card wide', 'data-market-credit': 'loading' }, h('h4', null, '企業間の貸し借り'), h('p', { class: 'note' }, '市場を読み込んでいます…'));
+    const card = creditCard(this.root, this.creditView, {
+      op: async (op, okMsg) => {
+        try {
+          const r = await session.api.creditMarket(session.auth.token, session.marketId, `cr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, op);
+          if (!r.ok) toast(this.root, r.reason ?? 'できませんでした', 'warn');
+          else toast(this.root, okMsg, 'good', 1800);
+        } catch (e) {
+          toast(this.root, (e as Error)?.message ?? String(e), 'warn');
+        }
+        this.creditLoadedAt = 0;
+        await load();
+      },
+    });
+    return card
+      ? h('div', null, card, h('p', { class: 'note' }, '営業中でも申し込み・承認ができます。お金は、この日の営業を送ったあと（日の確定のあと）に動きます。前倒しの返済も、日の確定のあとに返します。'))
+      : null;
   }
 
   // ───────────────── 会社（Phase 2: 店舗一覧・店舗別損益・会社の財務・出店・店長・方針） ─────────────────
@@ -626,7 +672,7 @@ export class ManageMenu {
             ),
           )
         : null;
-    return h('div', { class: 'grid2' }, finance, ...storeCards, openCard, moveCard);
+    return h('div', { class: 'grid2' }, finance, this.marketCredit(), ...storeCards, openCard, moveCard);
   }
 
   // ───────────────── 営業時間（じろ1 5.1） ─────────────────

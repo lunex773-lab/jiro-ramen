@@ -1362,8 +1362,12 @@ export function importCompany(m: MarketState, ownerId: string, exp: ExportedComp
 export function retireCompany(m: MarketState, ownerId: string, now: number): { ok: boolean; reason?: string } {
   const c = m.companies.find((x) => x.kind === 'player' && x.ownerId === ownerId && (x.status === 'active' || x.status === 'bankrupt'));
   if (!c) return { ok: false, reason: 'この市場に会社がありません' };
-  if (c.openDay) return { ok: false, reason: '端末で営業中です。営業を終えてから抜けてください' };
   if (c.status === 'active' && syncPending(m, now)) return { ok: false, reason: '0時の計算中です。終わるまでお待ちください' };
+  // 端末で営業中の日は取り消す（その日は数えない）
+  if (c.openDay) {
+    c.openDay = null;
+    c.progress.synchronizationStatus = 'idle';
+  }
   const wasActive = c.status === 'active';
   c.status = 'retired';
   if (wasActive) c.bankruptDay = c.progress.lastProcessedGameDate;
@@ -1471,7 +1475,8 @@ export function marketAction(m: MarketState, ownerId: string, a: Action, now = 0
   const c = playerCompany(m, ownerId);
   if (!c) return { ok: false, reason: 'この市場に参加していません' };
   if (c.status !== 'active') return { ok: false, reason: '破産しています' };
-  if (c.openDay) return { ok: false, reason: '端末で営業中です。営業の画面から操作してください' };
+  // 端末で営業中の日があっても、市場の画面から変えられる（オーナーの指示 2026-11-11）。営業中の日は、端末で続けるときに
+  // サーバーの今の状態から初めてやり直すので、ここで変えたことはその日に入る（状態の版を上げる）
   if (syncPending(m, now)) return { ok: false, reason: '0時の計算中です。終わるまでお待ちください' };
   if (!a || typeof a !== 'object' || !MARKET_ACTIONS.has(a.type)) return { ok: false, reason: '市場では使えない操作です' };
   refreshMarketRange(m, c);

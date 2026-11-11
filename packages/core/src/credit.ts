@@ -75,6 +75,8 @@ export interface CompanyCredit {
   paid: number;
   /** 返せなかった分（貸し手の損） */
   lost: number;
+  /** 端末で営業中に前倒しの返済を頼んだ（営業が終わったら返す） */
+  repayRequested?: boolean;
   events: CreditEvent[];
 }
 
@@ -193,6 +195,19 @@ export function flushCredits(m: MarketState, c: MarketCompany, now: number): voi
     touched(c);
   }
   for (const cr of creditsOf(m)) if (cr.status === 'approved' && cr.lenderId === c.id) startCredit(m, cr, now);
+  // 営業中に頼まれた前倒しの返済
+  for (const cr of creditsOf(m)) {
+    if (!cr.repayRequested || cr.borrowerId !== c.id) continue;
+    if (!creditOpen(cr)) {
+      delete cr.repayRequested;
+      continue;
+    }
+    if (c.state.money >= creditOwed(cr)) repayNow(m, cr, c, now);
+    else {
+      delete cr.repayRequested;
+      event(m, cr, now, 'repay', `お金が足りず、前倒しの返済はできませんでした（${yen(creditOwed(cr))} が要る）`);
+    }
+  }
   refreshCreditBook(m);
 }
 
@@ -262,7 +277,8 @@ export function creditOp(m: MarketState, env: CreditEnv, op: CreditOp): CreditRe
   const { me, now } = env;
   if (me.status !== 'active') return { ok: false, reason: '営業している会社だけが使えます' };
   if (env.syncing) return { ok: false, reason: '0時の計算中です。終わるまでお待ちください' };
-  if (busy(me)) return { ok: false, reason: '端末で営業中です。営業が終わってから操作してください' };
+  // 端末で営業中でも申し込み・承認・断る・取り消すはできる（営業中の経営メニューからも。オーナーの指示 2026-11-11）。
+  // 営業中の会社のお金は、営業が終わったときに動かす
   expireOffers(m, now);
   if (op.op === 'offer') {
     if (env.ended) return { ok: false, reason: 'この市場の競争期間は終わっています' };
@@ -340,17 +356,31 @@ export function creditOp(m: MarketState, env: CreditEnv, op: CreditOp): CreditRe
   // 前倒しで全部返す（その日までの利息）
   if (!creditOpen(cr)) return { ok: false, reason: '返している最中の契約ではありません' };
   const owed = creditOwed(cr);
+  if (busy(me)) {
+    // 端末で営業中: その日の営業が終わったら返す
+    cr.repayRequested = true;
+    event(m, cr, now, 'repay', '借り手が前倒しの返済を頼みました（端末の営業が終わったら返します）');
+    return { ok: true, credit: cr };
+  }
   if (me.state.money < owed) return { ok: false, reason: `全部返すには ${yen(owed)} が要ります（今 ${yen(me.state.money)}）` };
+  repayNow(m, cr, me, now);
+  return { ok: true, credit: cr };
+}
+
+/** 前倒しで全部返す（借り手が営業中でないこと。お金が足りること） */
+function repayNow(m: MarketState, cr: CompanyCredit, me: MarketCompany, now: number): boolean {
+  const owed = creditOwed(cr);
   const lender = byId(m, cr.lenderId)!;
   const paid = payOut(me, owed, 'companyRepay', `${cr.lenderName}への返済（前倒し）`, `credit:${cr.id}:early:${cr.paid}`, true);
-  if (paid < owed) return { ok: false, reason: '返せませんでした' };
+  if (paid < owed) return false;
   applyPayment(cr, paid);
   payIn(m, lender, paid, 'companyCollect', `${cr.borrowerName}からの返済（前倒し）`, `credit:${cr.id}:earlyIn:${cr.paid}`);
   cr.status = 'repaid';
+  delete cr.repayRequested;
   event(m, cr, now, 'repay', `借り手が前倒しで全部返しました（${yen(paid)}）`, paid);
   decide(m, me.id, `${me.name}が${cr.lenderName}への借金を前倒しで返しました（${yen(paid)}）`);
   refreshCreditBook(m);
-  return { ok: true, credit: cr };
+  return true;
 }
 
 /** 返事のない申し込みを取り消す（72時間） */

@@ -299,3 +299,32 @@ describe('企業間の貸し借り: 返す（自動・延滞・不履行・前�
     expect(enterpriseValue(borrower(m).state)).toBeTypeOf('number');
   });
 });
+
+describe('端末で営業中でも貸し借りの操作ができる（オーナーの指示: 営業中の経営メニューからも）', () => {
+  it('借り手が営業中に前倒しの返済を頼むと、その日の確定のあとに返す', () => {
+    const m = withBorrower();
+    const o = offer(m, 100_000, 10, 0);
+    expect(marketCredit(m, 'u2', { op: 'accept', creditId: o.ok ? o.credit.id : '' }, T0).ok).toBe(true);
+    const cr = m.credits![0]!;
+    const b = borrower(m);
+    const t = startDay(m, 'u2', T0, `t${++tok}`, b.progress.stateVersion);
+    if (!t.ok) throw new Error(t.reason);
+    // 営業中でも申し込みは受けられる・返済を頼める（お金はまだ動かない）
+    const money0 = b.state.money;
+    expect(marketCredit(m, 'u2', { op: 'repay', creditId: cr.id }, T0).ok).toBe(true);
+    expect(cr.status).toBe('active');
+    expect(b.state.money).toBe(money0);
+    const s: GameState = clone(b.state);
+    autoPlayDay(s, t.ticket.gameDate, t.ticket.demand, { allowLoan: false });
+    expect(commitDay(m, 'u2', T0 + 1000, t.ticket.token, s).ok).toBe(true);
+    expect(cr.status).toBe('repaid');
+    expect(cr.repayRequested).toBeUndefined();
+  });
+
+  it('貸し手が営業中でも申し込める', () => {
+    const m = withBorrower();
+    const L = lender(m);
+    expect(startDay(m, 'u1', T0, `t${++tok}`, L.progress.stateVersion).ok).toBe(true);
+    expect(offer(m).ok).toBe(true);
+  });
+});

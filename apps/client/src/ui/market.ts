@@ -287,6 +287,24 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
     body,
     serverUrlNote(() => app.showSettings(() => app.showMarketLobby())),
     h('p', { class: 'note' }, '各社は自分の端末で1日ずつ営業し、1日の終わりにサーバーへ送ります。毎日0時（日本時間）に、いちばん進んだ会社の日付まで、ほかの会社を自動営業でそろえます。'),
+    // 並び（オーナーの指示）: 参加している市場 → 公開の市場（入る） → 市場を作る
+    h('section', { class: 'card wide' }, h('h4', null, '参加している市場'), list, h('button', { class: 'btn ghost', onclick: () => void refreshList() }, '一覧を読み込む')),
+    status,
+    h('section', { class: 'card wide' }, h('h4', null, '公開のコミュニティ'), pubList, h('button', { class: 'btn ghost', 'data-load-public': '', onclick: () => void refreshPublic() }, '公開のコミュニティを読み込む')),
+    h(
+      'section',
+      { class: 'card wide' },
+      h('h4', null, '参加する会社'),
+      h('p', { class: 'note' }, '競争期間が終わった市場の会社は、「育てた企業も参加できる」市場へ持っていけます（お金・店・従業員はそのまま。入る市場の日付に合わせます）。'),
+      h('div', { class: 'kv' }, h('span', null, '入る会社'), bringSel),
+    ),
+    h(
+      'section',
+      { class: 'card wide' },
+      h('h4', null, '招待コードで入る'),
+      codeInput,
+      h('button', { class: 'btn', 'data-join-market': '', onclick: () => void join({ code: codeInput.value }) }, '入る'),
+    ),
     h(
       'section',
       { class: 'card wide' },
@@ -329,23 +347,6 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
         '市場を作る',
       ),
     ),
-    h(
-      'section',
-      { class: 'card wide' },
-      h('h4', null, '参加する会社'),
-      h('p', { class: 'note' }, '競争期間が終わった市場の会社は、「育てた企業も参加できる」市場へ持っていけます（お金・店・従業員はそのまま。入る市場の日付に合わせます）。'),
-      h('div', { class: 'kv' }, h('span', null, '入る会社'), bringSel),
-    ),
-    h(
-      'section',
-      { class: 'card wide' },
-      h('h4', null, '招待コードで入る'),
-      codeInput,
-      h('button', { class: 'btn', 'data-join-market': '', onclick: () => void join({ code: codeInput.value }) }, '入る'),
-    ),
-    h('section', { class: 'card wide' }, h('h4', null, '公開のコミュニティ'), pubList, h('button', { class: 'btn ghost', 'data-load-public': '', onclick: () => void refreshPublic() }, '公開のコミュニティを読み込む')),
-    h('section', { class: 'card wide' }, h('h4', null, '参加している市場'), list, h('button', { class: 'btn ghost', onclick: () => void refreshList() }, '一覧を読み込む')),
-    status,
   );
   if (defaultServerUrl()) {
     void refreshList();
@@ -552,6 +553,9 @@ export class MarketScreen {
             },
             bankrupt ? '破産しています' : playing ? `${myDay}日目の営業を続ける（初めから）` : `${myDay}日目を営業する`,
           )
+        : null,
+      playing
+        ? h('p', { class: 'note', 'data-playing-note': '' }, `端末で${myDay}日目を営業中です。この画面で変えたこと（値段・人・出店・融資など）は、営業を続けるときに入ります（その日は初めからやり直します）。`)
         : null,
       mine
         ? h(
