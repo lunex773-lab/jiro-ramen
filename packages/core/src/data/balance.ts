@@ -276,6 +276,8 @@ export const BALANCE = {
 
   /** 設備売却時の買取率 */
   resaleRate: 0.4,
+  /** 仕入れ値の全体の倍率（測定用。1 = 食材の表の値段のまま） */
+  purchaseCostMult: 1 as number,
   /** 1杯の値段の範囲（じろ1 5.5: 上限 3,000円 → 5,000円） */
   priceMin: 500,
   priceMax: 5_000,

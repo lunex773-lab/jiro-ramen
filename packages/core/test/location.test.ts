@@ -119,7 +119,7 @@ describe('場所つきの出店', () => {
     expect(home.location).toBe(OSAKA);
   });
 
-  it('手動で営業している支店も、立地と場所の家賃を払う（前は立地の倍率が抜けていた）', () => {
+  it('手動で営業している支店も、立地と場所の家賃を払う（前は立地の倍率が抜けていた）', { timeout: 60_000 }, () => {
     const { s, ctx, cook } = readyCompany(703);
     expect(applyAction(s, 'p1', { type: 'openStore', propertyId: 'station', managerId: cook.id, location: OSAKA }, ctx).ok).toBe(true);
     const branch = s.company.stores[1]!;

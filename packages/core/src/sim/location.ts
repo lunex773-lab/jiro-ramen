@@ -173,7 +173,8 @@ export function storePriceFeel(entry: StoreEntry | null | undefined): PriceFeel 
 
 /** 今いる店（プレイヤーがいる店・店長の計算中の店）の仕入れ値の倍率 */
 export function purchaseMultOf(s: GameState): number {
-  return s.company ? storePurchaseMult(s.company.stores.find((x) => x.id === s.company.activeStoreId)) : 1;
+  const base = BALANCE.purchaseCostMult ?? 1;
+  return base * (s.company ? storePurchaseMult(s.company.stores.find((x) => x.id === s.company.activeStoreId)) : 1);
 }
 
 /** 今いる店の値段の感じ方 */

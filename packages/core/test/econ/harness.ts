@@ -135,7 +135,12 @@ export function runCase(policy: CasePolicy, days: number, seed = 777, opts: { sk
     for (let i = 0; i < 600 && s.phase === 'prep'; i++) step(s, 0.1, ctx);
     if (s.phase === 'prep') applyAction(s, 'p1', { type: 'openShop' }, ctx);
     let guard = 0;
-    while (s.phase !== 'closed' && (s.phase as string) !== 'bankrupt' && guard < 30000) {
+    while (s.phase !== 'closed' && (s.phase as string) !== 'bankrupt' && guard < 60000) {
+      // 2つ目以降の営業の枠（中休みのあと）: 少し仕込んでから「開店する」（じろ1 5.1）
+      if (s.phase === 'prep') {
+        for (let i = 0; i < 300 && s.phase === 'prep'; i++) step(s, 0.1, ctx);
+        if (s.phase === 'prep') applyAction(s, 'p1', { type: 'openShop' }, ctx);
+      }
       step(s, 0.1, ctx);
       autoRepair(s, ctx);
       guard += 1;

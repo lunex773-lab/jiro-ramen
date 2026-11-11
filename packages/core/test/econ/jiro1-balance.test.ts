@@ -5,6 +5,20 @@ import { writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { firstProfitableWeek, PATTERNS, runPattern, totalsUpTo } from './jiro1-balance';
 
+import { BALANCE } from '../../src';
+
+/** 調整案を試す: JIRO1_TUNE='{"customers.valueWeight":0.6}'（BALANCE の項目。測定だけに使う） */
+function applyTune(json: string | undefined): void {
+  if (!json) return;
+  for (const [path, v] of Object.entries(JSON.parse(json) as Record<string, unknown>)) {
+    const keys = path.split('.');
+    let o = BALANCE as unknown as Record<string, unknown>;
+    for (const k of keys.slice(0, -1)) o = o[k] as Record<string, unknown>;
+    o[keys[keys.length - 1]!] = v;
+  }
+}
+applyTune(process.env.JIRO1_TUNE);
+
 const ON = process.env.JIRO1_SIM === '1';
 const DAYS = Number(process.env.JIRO1_DAYS ?? 90);
 const ONLY = process.env.JIRO1_CASES?.split(',');

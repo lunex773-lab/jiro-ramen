@@ -1187,6 +1187,8 @@ details.help > summary {
 details.help > summary::-webkit-details-marker { display: none; }
 details.help[open] > summary { background: var(--yellow); color: #1a1407; border-color: var(--yellow); }
 .help-body { font-size: 13px; line-height: 1.55; color: var(--muted); margin: 6px 0; }
+/* 閉じているときの中身は確実に消す（新しいブラウザでは閉じた details の中身にも位置が付く） */
+details.help:not([open]) > .help-body { display: none; }
 .card-head details.help[open] { flex-basis: 100%; }
 .card-head:has(details.help[open]) { flex-wrap: wrap; }
 .flow-bar { display: flex; height: 28px; border-radius: 7px; overflow: hidden; margin: 4px 0 8px; background: rgba(255, 255, 255, 0.06); }
