@@ -94,8 +94,7 @@ import {
   DEFAULT_HOURS,
   type StoreEntry,
   prefRangeProblem,
-  scopeForNth,
-  SCOPE_LABEL,
+  rangeTitle,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 
@@ -248,9 +247,8 @@ export class ManageMenu {
     const fullStaff = s.employees.filter((e) => e.profile.employment === 'full');
     let managerId = fullStaff[0]?.id ?? '';
     const closed = s.phase === 'closed';
-    const n = s.company.stores.length + 1;
     const map = openStoreMap(this.root, {
-      title: `出店先を選ぶ（${n}店目: ${SCOPE_LABEL[scopeForNth(n)]}）`,
+      title: `出店先を選ぶ（${rangeTitle(s)}）`,
       mode: 'site',
       confirmLabel: 'ここに出店する',
       // 出店の範囲（じろ1 5.6）: 2〜5店目は本店と同じ都道府県、6〜10店目は同じ地方、11店目から全国。範囲の外は薄く出す

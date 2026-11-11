@@ -8,7 +8,7 @@ import { MUNICIPALITY_AREA_KM2 } from '../data/areas';
 import { MUNICIPALITIES, PREFECTURES } from '../data/municipalities';
 import { PROPERTIES, PROPERTY_CANDIDATES } from '../data/properties';
 import { NATIONAL_ECONOMY, PREFECTURE_ECONOMY } from '../data/regional';
-import type { GameState, StoreEntry } from '../types';
+import type { GameState, MarketScope, StoreEntry } from '../types';
 
 /** 地方と都道府県（出店の範囲。出店マップの地方と同じ） */
 export const REGION_PREFS: Readonly<Record<string, readonly string[]>> = {
@@ -203,6 +203,17 @@ export function scopeForNth(n: number): StoreScope {
 
 export const SCOPE_LABEL: Record<StoreScope, string> = { prefecture: '本店と同じ都道府県', region: '本店と同じ地方', national: '全国' };
 
+/** オンライン市場の出店の範囲の名前（じろ1 Q13） */
+export const MARKET_SCOPE_LABEL: Record<MarketScope, string> = { city: '市場の街', prefecture: '同じ都道府県', region: '同じ地方', national: '全国' };
+export const MARKET_SCOPES: readonly MarketScope[] = ['city', 'prefecture', 'region', 'national'];
+
+/** 次に出す店を出せる範囲の説明（「3店目: 本店と同じ都道府県」・市場では「出店の範囲: 市場の街」） */
+export function rangeTitle(s: GameState): string {
+  const n = (s.company?.stores.length ?? 1) + 1;
+  const mr = s.company?.marketRange;
+  return mr ? `${n}店目・出店の範囲: ${MARKET_SCOPE_LABEL[mr.scope]}` : `${n}店目: ${SCOPE_LABEL[scopeForNth(n)]}`;
+}
+
 /** 本店（1店目）の場所 */
 export function homeLocation(s: GameState): string | null {
   const home = s.company?.stores.find((x) => x.propertyId === 'home') ?? s.company?.stores[0];
@@ -213,6 +224,16 @@ export function homeLocation(s: GameState): string | null {
  * 次に出す店を、その都道府県（2桁）に出せない理由（出せるなら null）。範囲の外の地域を地図で薄くするのに使う
  */
 export function prefRangeProblem(s: GameState, prefCode: string): string | null {
+  // オンライン市場: 市場の成績で広がる範囲（じろ1 Q13）
+  const mr = s.company?.marketRange;
+  if (mr) {
+    const cityPref = mr.city.slice(0, 2);
+    const cityName = PREFECTURES[cityPref] ?? '';
+    if (mr.scope === 'national') return null;
+    if (mr.scope === 'region') return regionOfPref(prefCode) === regionOfPref(cityPref) ? null : `出店の範囲は${regionOfPref(cityPref)}地方の中まで（市場の成績で全国へ広がります）`;
+    if (prefCode !== cityPref) return mr.scope === 'city' ? '出店の範囲は市場の街の中だけ（市場の成績で同じ都道府県へ広がります）' : `出店の範囲は${cityName}の中まで（市場の成績で${regionOfPref(cityPref)}地方へ広がります）`;
+    return null;
+  }
   const n = (s.company?.stores.length ?? 1) + 1;
   const scope = scopeForNth(n);
   if (scope === 'national') return null;
@@ -228,6 +249,8 @@ export function prefRangeProblem(s: GameState, prefCode: string): string | null 
 /** 次に出す店を、その市区町村に出せない理由（範囲。出せるなら null） */
 export function storeRangeProblem(s: GameState, location: string | null | undefined): string | null {
   if (!location) return '出店先の場所を選んでください';
+  const mr = s.company?.marketRange;
+  if (mr && mr.scope === 'city' && location !== mr.city) return '出店の範囲は市場の街の中だけ（市場の成績で同じ都道府県へ広がります）';
   return prefRangeProblem(s, location.slice(0, 2));
 }
 

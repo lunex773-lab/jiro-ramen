@@ -204,13 +204,19 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   expect(mock.market!.settings.cityCode).toBe('27100');
   expect(mock.market!.companies.every((c) => c.state.company.stores[0]!.location === '27100')).toBe(true);
   await expect(screen.locator('.market-rules')).toContainText('大阪府 大阪市');
+  // 出店の範囲（じろ1 Q13）: はじめは市場の街。次の「同じ都道府県」の条件の様子が出る
+  const range = screen.locator('[data-market-range="city"]');
+  await expect(range).toContainText('出店の範囲: 市場の街');
+  await expect(range.locator('[data-range-check="cityStores"]')).toContainText('市場の街に2店以上（今 1店）');
+  await expect(range.locator('[data-range-check="share"]')).toBeVisible();
   // 市場の画面: 地図で出店先を見る（市場の街を開いた状態で始まる。駅前・住宅街・郊外の3か所。ほかの市区町村へも移れる。じろ1 Q11）
   await screen.locator('[data-market-open-map]').click();
   const siteMap = page.locator('[data-store-map]');
   await expect(siteMap.locator('[data-muni="27100"]')).toHaveClass(/selected/);
   await expect(siteMap.locator('[data-muni]').nth(1)).toBeAttached();
   await expect(siteMap.locator('[data-site]')).toHaveCount(3);
-  await expect(siteMap).toContainText('2店目: 本店と同じ都道府県');
+  // 出店の範囲（じろ1 Q13）: はじめは市場の街の中だけ
+  await expect(siteMap).toContainText('出店の範囲: 市場の街');
   await siteMap.locator('[data-map-site="station"] button').click();
   await expect(siteMap.locator('[data-map-site="station"]')).toContainText('空き');
   await expect(siteMap.locator('[data-map-confirm]')).toBeDisabled();

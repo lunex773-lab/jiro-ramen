@@ -14,7 +14,7 @@ import { PROPERTIES, PROPERTY_CANDIDATES } from './data/properties';
 import { STAGES } from './data/stages';
 import { addDays, jstDateKey, jstMidnight, nextJstMidnight, type DateKey } from './jst';
 import { createGame } from './state';
-import type { GameState, Id, StoreEntry } from './types';
+import type { GameState, Id, MarketScope, StoreEntry } from './types';
 import { hashString } from './util';
 import { lastCompanyDay, verifyCommit } from './verify';
 import { shiftGameDays } from './sim/rebase';
@@ -31,7 +31,7 @@ import { expansionInfo } from './sim/layout';
 import { planManagerDay, runManagerDay, standaloneArrivals } from './sim/manager';
 import { makeCtx } from './sim/notices';
 import { cleanStoreName, openStoreProblem, runAbsentStores, storeStatus } from './sim/stores';
-import { locationLabel, locationProblem } from './sim/location';
+import { locationLabel, locationProblem, MARKET_SCOPE_LABEL, MARKET_SCOPES } from './sim/location';
 
 export const MARKET_SCHEMA = 2;
 
@@ -319,6 +319,8 @@ export function placeInCity(m: MarketState, s: GameState): void {
   const city = m.settings.cityCode;
   if (!city) return;
   for (const st of s.company.stores) st.location = city;
+  // 出店の範囲ははじめ市場の街の中だけ（じろ1 Q13。市場の成績で広がる）
+  s.company.marketRange = { city, scope: 'city' };
 }
 
 /** 市場を作る。AI で埋める設定なら、上限の社数になるまで AI 企業を入れる */
@@ -505,6 +507,77 @@ export function freeSlots(m: MarketState, propertyId: string, location?: string 
   let used = 0;
   for (const c of activeCompanies(m)) used += c.state.company.stores.filter((x) => x.propertyId === propertyId && storeLocationIn(m, x) === at).length;
   return Math.max(0, total - used);
+}
+
+// ───────────────────────── 出店の範囲（じろ1 Q13） ─────────────────────────
+
+export interface MarketRangeCheck {
+  key: 'cityStores' | 'share' | 'cityFull' | 'stores' | 'profit' | 'rank';
+  label: string;
+  ok: boolean;
+}
+
+/** その会社の出店の範囲と、次の範囲へ広がる条件の様子（読むだけ）。街のない市場は null */
+export function marketRangeChecks(m: MarketState, c: MarketCompany): { scope: MarketScope; next: MarketScope | null; checks: MarketRangeCheck[]; ready: boolean; either?: boolean } | null {
+  const city = m.settings.cityCode;
+  if (!city) return null;
+  const R = B().range;
+  const scope = c.state.company.marketRange?.city === city ? c.state.company.marketRange.scope : 'city';
+  const next = MARKET_SCOPES[MARKET_SCOPES.indexOf(scope) + 1] ?? null;
+  if (!next) return { scope, next: null, checks: [], ready: false };
+  const live = activeCompanies(m);
+  const avg = live.length > 0 ? 1 / live.length : 1;
+  const share = marketShare(m, c.id);
+  const pct = (x: number) => `${Math.round(x * 100)}%`;
+  const stores = c.state.company.stores;
+  const hist = c.state.company.history;
+  const opLast = (n: number) => hist.slice(-n).reduce((a, r) => a + r.operatingProfit, 0);
+  if (next === 'prefecture') {
+    const inCity = stores.filter((x) => storeLocationIn(m, x) === city).length;
+    const full = PROPERTY_CANDIDATES.every((pid) => freeSlots(m, pid, city) <= 0);
+    const checks: MarketRangeCheck[] = [
+      { key: 'cityStores', label: `市場の街に${R.prefectureCityStores}店以上（今 ${inCity}店）`, ok: inCity >= R.prefectureCityStores },
+      { key: 'share', label: `市場シェアが平均以上（今 ${pct(share)}・平均 ${pct(avg)}）`, ok: share >= avg - 1e-9 && share > 0 },
+      { key: 'cityFull', label: 'または、市場の街の物件が満室', ok: full },
+    ];
+    return { scope, next, checks, ready: (checks[0]!.ok && checks[1]!.ok) || full, either: true };
+  }
+  if (next === 'region') {
+    const need = avg * R.regionShareOfAvg;
+    const op = opLast(7);
+    const checks: MarketRangeCheck[] = [
+      { key: 'stores', label: `店が${R.regionStores}店以上（今 ${stores.length}店）`, ok: stores.length >= R.regionStores },
+      { key: 'share', label: `市場シェアが${pct(need)}以上（今 ${pct(share)}）`, ok: share >= need - 1e-9 },
+      { key: 'profit', label: `直近7日の営業利益（全店）が黒字（今 ${op >= 0 ? '' : '−'}¥${Math.abs(Math.round(op)).toLocaleString('ja-JP')}）`, ok: hist.length >= 7 && op > 0 },
+    ];
+    return { scope, next, checks, ready: checks.every((x) => x.ok) };
+  }
+  const top = live.every((o) => o.id === c.id || marketShare(m, o.id) <= share);
+  const op = opLast(30);
+  const checks: MarketRangeCheck[] = [
+    { key: 'stores', label: `店が${R.nationalStores}店以上（今 ${stores.length}店）`, ok: stores.length >= R.nationalStores },
+    { key: 'rank', label: `市場シェアが1位（今 ${pct(share)}）`, ok: top && share > 0 },
+    { key: 'profit', label: `直近30日の営業利益（全店）が黒字（今 ${op >= 0 ? '' : '−'}¥${Math.abs(Math.round(op)).toLocaleString('ja-JP')}）`, ok: hist.length >= 7 && op > 0 },
+  ];
+  return { scope, next, checks, ready: checks.every((x) => x.ok) };
+}
+
+/**
+ * 出店の範囲を、条件を満たしていれば広げる（一度広がった範囲は戻らない）。市場のサーバーだけが決める（端末から届いた値は使わない）
+ */
+export function refreshMarketRange(m: MarketState, c: MarketCompany, day = m.commonMarketDate): void {
+  const city = m.settings.cityCode;
+  if (!city) return;
+  const cur = c.state.company.marketRange;
+  if (!cur || cur.city !== city) c.state.company.marketRange = { city, scope: 'city' };
+  // AI 企業は市場の街の中だけ
+  if (c.kind === 'ai') return;
+  for (let i = 0; i < 3; i++) {
+    const r = marketRangeChecks(m, c);
+    if (!r || !r.next || !r.ready) break;
+    c.state.company.marketRange = { city, scope: r.next };
+    log(m, c.id, `出店の範囲が「${MARKET_SCOPE_LABEL[r.next]}」に広がりました`, day);
+  }
 }
 
 /** 客を取り合う単位: 同じ市区町村の同じ地域（本店は企業の本店の商店街、ほかは物件の種類） */
@@ -728,7 +801,11 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
     return done({ ok: false, code: 'rejected', reason: '前の日の状態から説明できない変化があるため、この日は受け取れません。前の日の状態からやり直してください', reject: v.reject });
   }
   const valueStart = enterpriseValue(c.state);
+  // 出店の範囲は市場のサーバーが決める（端末から届いた値は使わない）
+  const range = c.state.company.marketRange;
   c.state = sanitize(next, o.demand);
+  if (range) c.state.company.marketRange = range;
+  else delete c.state.company.marketRange;
   // 端末の経営メニューで屋号を変えていれば、市場の会社の名前も合わせる
   c.name = cleanStoreName(c.state.shopName) || c.name;
   c.state.shopName = c.name;
@@ -745,6 +822,7 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
   c.progress.manualProgressDays += 1;
   c.progress.totalManualDays += 1;
   c.days.push(dayRecord(c.state, o.gameDate, o.periodId, 'manual', v.flags, valueStart));
+  refreshMarketRange(m, c, o.gameDate);
   if (isEnded(m, jstMidnight(o.periodId))) {
     // 終わった市場の日は集計しない（記録は直近だけ残す）
     if (c.days.length > B().keepDayRecords) c.days.splice(0, c.days.length - B().keepDayRecords);
@@ -864,6 +942,7 @@ function autoPlayDate(m: MarketState, day: number, group: MarketCompany[], perio
     c.progress.autoSimulationDays += 1;
     c.progress.totalAutoDays += 1;
     c.days.push(dayRecord(c.state, day, periodId, 'auto', null, valueStart));
+    refreshMarketRange(m, c, day);
   }
 }
 
@@ -1283,6 +1362,7 @@ export function marketAction(m: MarketState, ownerId: string, a: Action, now = 0
   if (c.openDay) return { ok: false, reason: '端末で営業中です。営業の画面から操作してください' };
   if (syncPending(m, now)) return { ok: false, reason: '0時の計算中です。終わるまでお待ちください' };
   if (!a || typeof a !== 'object' || !MARKET_ACTIONS.has(a.type)) return { ok: false, reason: '市場では使えない操作です' };
+  refreshMarketRange(m, c);
   if (a.type === 'buyEquipment' && a.autoPlace !== true) return { ok: false, reason: '市場では設備は自動で置きます' };
   if (a.type === 'openStore') {
     // 市場の店も、ひとりの経営と同じ範囲（本店 = 市場の街から）に出せる（じろ1 Q11）。場所を指定しなければ市場の街
@@ -1494,7 +1574,7 @@ export interface MarketView {
   decisions: MarketDecision[];
   history: MarketDayReport[];
   /** 自分の企業（参加していなければ null） */
-  mine: { companyId: Id; state: GameState; progress: CompanyProgress; openDay: OpenDay | null; lastCommit: CommitResult | null; days: CompanyDayRecord[] } | null;
+  mine: { companyId: Id; state: GameState; progress: CompanyProgress; openDay: OpenDay | null; lastCommit: CommitResult | null; days: CompanyDayRecord[]; range?: ReturnType<typeof marketRangeChecks> } | null;
   /** 出店先の地域ごとの空いている物件の数（市場の街） */
   freeSlots: Record<string, number>;
   /** 全社の店の場所と物件（市区町村ごとの空きを数える。じろ1 Q11） */
@@ -1557,7 +1637,7 @@ export function marketView(m: MarketState, ownerId: string | null, now?: number)
     decisions: m.decisions.slice(-60),
     history: m.history.slice(-30),
     mine: me
-      ? { companyId: me.id, state: me.state, progress: me.progress, openDay: me.openDay, lastCommit: me.lastCommit ? (({ token: _t, ...r }) => r)(me.lastCommit) : null, days: me.days.slice(-30) }
+      ? { companyId: me.id, state: me.state, progress: me.progress, openDay: me.openDay, lastCommit: me.lastCommit ? (({ token: _t, ...r }) => r)(me.lastCommit) : null, days: me.days.slice(-30), range: marketRangeChecks(m, me) }
       : null,
     freeSlots: free,
     sites: live.flatMap((c) => c.state.company.stores.filter((x) => x.propertyId !== 'home').map((x) => ({ location: storeLocationIn(m, x), propertyId: x.propertyId }))),

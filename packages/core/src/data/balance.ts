@@ -208,6 +208,12 @@ export const BALANCE = {
     competition: 0.4,
     /** 市場シェア = 直近この日数の純売上の割合 */
     shareDays: 30,
+    /**
+     * 出店の範囲を広げる条件（じろ1 Q13。オーナーが承認した案）: 同じ都道府県 = 市場の街に prefectureCityStores 店以上＋シェアが平均以上
+     * （または市場の街の物件が満室）、同じ地方 = regionStores 店以上＋シェアが平均の regionShareOfAvg 倍以上＋直近7日が黒字、
+     * 全国 = nationalStores 店以上＋シェア1位＋直近30日が黒字
+     */
+    range: { prefectureCityStores: 2, regionStores: 4, regionShareOfAvg: 1.5, nationalStores: 7 },
     /** 出店先の地域ごとの物件の数（全社で取り合う） */
     branchSlots: { station: 3, residential: 3, roadside: 2 } as Record<string, number>,
     /**

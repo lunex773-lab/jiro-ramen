@@ -142,7 +142,7 @@ describe('場所つきの出店', () => {
 
 describe('共通市場の街（市場は1つの街）', () => {
   const T0 = jstMidnight('2026-11-04') + 10 * 3_600_000;
-  it('作る人が選んだ街に全社の店がある。出店は街の中か、ひとりの経営と同じ範囲（じろ1 Q11）。街のない市場・不正な街は ×1', () => {
+  it('作る人が選んだ街に全社の店がある。出店ははじめ街の中だけ（市場の成績で広がる。じろ1 Q11・Q13）。街のない市場・不正な街は ×1', () => {
     const m = createMarket({ id: 'loc', name: 'loc', seed: 9, now: T0, settings: { cityCode: OSAKA }, creator: { ownerId: 'u1', companyName: '一号店' } });
     expect(m.settings.cityCode).toBe(OSAKA);
     for (const c of m.companies) expect(c.state.company.stores.every((st) => st.location === OSAKA)).toBe(true);
@@ -154,20 +154,16 @@ describe('共通市場の街（市場は1つの街）', () => {
     cook.profile.employment = 'full';
     // 12席の店（市場では拡張は営業の画面から。ここでは段階を直接上げる）
     s.career.stage = 1;
-    // 2店目は市場の街（本店）と同じ都道府県まで: 東京には出せない
+    // 出店の範囲ははじめ市場の街の中だけ（じろ1 Q13）: 東京にも、同じ大阪府の堺市にもまだ出せない
     const far = marketAction(m, 'u1', { type: 'openStore', propertyId: 'residential', managerId: cook.id, location: TOKYO_SHINJUKU }, T0);
     expect(far.ok).toBe(false);
-    expect(far.reason).toContain('大阪府');
+    expect(far.reason).toContain('市場の街');
+    expect(marketAction(m, 'u1', { type: 'openStore', propertyId: 'residential', managerId: cook.id, location: '27140' }, T0).ok).toBe(false);
     // 場所を指定しなければ市場の街
     const r = marketAction(m, 'u1', { type: 'openStore', propertyId: 'residential', managerId: cook.id }, T0);
     expect(r.ok, r.reason).toBe(true);
     expect(s.company.stores[1]!.location).toBe(OSAKA);
-    // 同じ大阪府の堺市にも出せる（物件の空きは市区町村ごと）
-    const cook2 = addBot(s, 'cook', 0.7, 6000);
-    cook2.profile.employment = 'full';
-    const r2 = marketAction(m, 'u1', { type: 'openStore', propertyId: 'residential', managerId: cook2.id, location: '27140' }, T0);
-    expect(r2.ok, r2.reason).toBe(true);
-    expect(s.company.stores[2]!.location).toBe('27140');
+    expect(s.company.marketRange).toEqual({ city: OSAKA, scope: 'city' });
     expect(normalizeSettings({ cityCode: '99999' }, T0).cityCode).toBeNull();
     expect(normalizeSettings({ cityCode: FUTABA }, T0).cityCode).toBeNull();
     const old = createMarket({ id: 'old', name: 'old', seed: 9, now: T0, settings: {}, creator: { ownerId: 'u1', companyName: 'x' } });

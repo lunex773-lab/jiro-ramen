@@ -35,8 +35,8 @@ import {
   DEFAULT_HOURS,
   locationInfo,
   prefRangeProblem,
-  scopeForNth,
-  SCOPE_LABEL,
+  rangeTitle,
+  MARKET_SCOPE_LABEL,
 } from '@jiro/core';
 import type { App } from '../game/app';
 import { Api, ApiError, defaultServerUrl, type Auth, type MyMarket } from '../net/api';
@@ -659,7 +659,29 @@ export class MarketScreen {
       row('終わったあと', 'この市場で営業を続けられる（同期・順位なし）／別のコミュニティへ移せる／上位3社に称号'),
       h('p', { class: 'note' }, '営業していない間の経営（値段・人・出店）は、この画面で決められます。拡張の工事は、営業の画面で閉店後に決めます。'),
     );
-    return h('div', { class: 'market-mine-col' }, finance, rules, this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
+    return h('div', { class: 'market-mine-col' }, finance, rules, this.rangeCard(v), this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
+  }
+
+  /**
+   * 出店の範囲（じろ1 Q13）: 市場の街 → 同じ都道府県 → 同じ地方 → 全国。今の範囲と、次の範囲へ広がる条件の様子
+   */
+  private rangeCard(v: MarketScreenView): HTMLElement | null {
+    const r = v.mine?.range;
+    if (!r) return null;
+    return h(
+      'section',
+      { class: 'card market-range', 'data-market-range': r.scope },
+      h('h4', null, `🗾 出店の範囲: ${MARKET_SCOPE_LABEL[r.scope]}`),
+      r.next
+        ? h(
+            'div',
+            null,
+            h('p', { class: 'note' }, `次は「${MARKET_SCOPE_LABEL[r.next]}」${r.either ? '（上の2つ、または一番下を満たすと広がる）' : '（全部を満たすと広がる）'}`),
+            h('ul', { class: 'range-checks' }, r.checks.map((c) => h('li', { class: c.ok ? 'ok' : 'ng', 'data-range-check': c.key }, `${c.ok ? '✓' : '・'} ${c.label}`))),
+          )
+        : h('p', { class: 'note' }, '全国に出店できます'),
+      h('p', { class: 'note' }, '市場の街の外は、同じ市区町村の店どうしで客を取り合います。広がった範囲は戻りません（AI 企業は市場の街だけ）'),
+    );
   }
 
   /**
@@ -671,10 +693,9 @@ export class MarketScreen {
     if (!city) return;
     const homeFull = s.employees.filter((e) => e.profile.employment === 'full');
     let managerId = homeFull[0]?.id ?? '';
-    const n = s.company.stores.length + 1;
     const used = (code: string, pid: string) => (v.sites ?? []).filter((x) => x.location === code && x.propertyId === pid).length;
     const map = openStoreMap(this.root, {
-      title: `出店先を選ぶ（${n}店目: ${SCOPE_LABEL[scopeForNth(n)]}）`,
+      title: `出店先を選ぶ（${rangeTitle(s)}）`,
       mode: 'site',
       // 市場の街を開いた状態で始める（ほかの市区町村へも移れる）
       startAt: city,

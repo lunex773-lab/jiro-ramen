@@ -1281,4 +1281,12 @@ export interface CompanyState {
   history: CompanyDayReport[];
   /** 会社全体の自動経営の方針（古いデータにはない → 初期値） */
   policy?: CompanyPolicy;
+  /**
+   * オンライン市場での出店の範囲（じろ1 Q13）。市場の街 → 同じ都道府県 → 同じ地方 → 全国の順に、市場の成績で広がる（戻らない）。
+   * ひとりの経営にはない（店の数で決まる）
+   */
+  marketRange?: { city: string; scope: MarketScope };
 }
+
+/** オンライン市場の出店の範囲 */
+export type MarketScope = 'city' | 'prefecture' | 'region' | 'national';
