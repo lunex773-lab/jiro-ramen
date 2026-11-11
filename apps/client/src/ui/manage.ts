@@ -27,7 +27,7 @@ import {
   MENU,
   operatingProfit,
   pendingOf,
-  purchaseUnitCost,
+  packPriceOf,
   resaleValue,
   ROLE_LABEL,
   SEAT_PRICE,
@@ -396,15 +396,15 @@ export class ManageMenu {
     const finance = h(
       'section',
       { class: 'card' },
-      h('h4', null, `会社の財務 — ${s.day}日目`),
-      row('現金（会社）', yenStr(s.money)),
-      row('借入・未払金', yenStr(totalDebt(s)), totalDebt(s) > 0 ? 'warn' : ''),
-      row('店の数', `${c.stores.length}店`),
-      last ? row(`${last.day}日目の純売上（全店）`, yenStr(last.netSales)) : null,
-      last ? row(`${last.day}日目の営業利益（全店）`, yenStr(last.operatingProfit), last.operatingProfit < 0 ? 'bad' : 'good') : null,
-      last && last.interest > 0 ? row('利息（会社）', `−${yenStr(last.interest)}`) : null,
-      week.length > 0 ? row(`直近${week.length}日の営業利益（全店）`, yenStr(weekOp), weekOp < 0 ? 'bad' : 'good') : null,
-      h('p', { class: 'note' }, 'お金・借入・キャリアは会社のものです。プレイヤーがいない店は店長が営業し、1日ごとに計算します（細かい動きは見えません）。'),
+      cardHead(`会社の財務 — ${s.day}日目`, 'お金・借入・キャリアは会社のものです。プレイヤーがいない店は店長が営業し、1日ごとに計算します（細かい動きは見えません）。'),
+      kpiRow([
+        kpi('現金（会社）', yenSigned(s.money), null, s.money < 50_000 ? 'bad' : ''),
+        kpi('借入・未払金', yenSigned(totalDebt(s)), null, totalDebt(s) > 0 ? 'warn' : ''),
+        kpi('店の数', `${c.stores.length}店`, null),
+        last ? kpi(`${last.day}日目の営業利益（全店）`, yenSigned(last.operatingProfit, true), `純売上 ${yenSigned(last.netSales)}${last.interest > 0 ? `・利息 −${yenStr(last.interest)}` : ''}`, last.operatingProfit < 0 ? 'bad' : 'good') : null,
+      ]),
+      week.length > 0 ? row(`直近${week.length}日の営業利益（全店）`, yenSigned(weekOp, true), weekOp < 0 ? 'bad' : 'good') : null,
+      c.history.length > 1 ? profitBars(c.history.slice(-14).map((r) => ({ day: r.day, value: r.operatingProfit }))) : null,
     );
     const storeCards = c.stores.map((entry) => {
       const st = storeStatus(s, entry);
@@ -769,15 +769,30 @@ export class ManageMenu {
     const prepared = Object.values(INGREDIENTS).filter((d) => !d.purchasable && isUnlocked(s, d.unlock));
     const cap = fridgeCapacity(s);
     const used = fridgeUsage(s, true);
+    const fill = used / Math.max(1, cap);
+    // 在庫が少ない: 自動発注の目安の3割より少ない（届く予定を入れる）
+    const low = purch.filter((d) => (s.autoOrder[d.id] ?? 0) > 0 && stockOf(s, d.id) + pendingOf(s, d.id) < (s.autoOrder[d.id] ?? 0) * 0.3);
+    const last = s.history.at(-1);
+    const express = s.deliveries.filter((d) => d.arriveAt !== null).length;
     return h(
       'div',
       null,
-      h('section', { class: 'card wide' }, h('h4', null, '冷蔵庫'), h('div', { class: 'meter' }, h('div', { class: 'meter-fill', style: { width: `${Math.min(100, (used / Math.max(1, cap)) * 100)}%` } })), h('p', { class: 'note' }, `使用 ${used.toFixed(1)}kg / ${cap}kg（配送待ち含む）`)),
+      kpiRow(
+        [
+          kpi('冷蔵庫', `${Math.round(used)} / ${cap}kg`, `${Math.round(fill * 100)}%（届く予定を含む）`, fill >= 0.9 ? 'warn' : '', fill >= 0.9 ? 'warn' : '', { 'data-kpi': 'fridge' }),
+          kpi('在庫が少ない', `${low.length}品`, low.length > 0 ? low.slice(0, 2).map((d) => d.name.replace(/（.*）/, '')).join('・') : '足りています', low.length > 0 ? 'bad' : '', low.length > 0 ? 'bad' : 'good'),
+          kpi('届く予定', `${s.deliveries.length}件`, express > 0 ? `当日便 ${express}件` : s.deliveries.length > 0 ? 'あすの朝' : null),
+          kpi('きのうの原価', last ? yenSigned(last.cogs) : '—', last ? `廃棄 ${yenSigned(last.waste)}` : null, '', last && last.waste > last.cogs * 0.15 ? 'warn' : ''),
+        ],
+        'tab-kpis',
+      ),
       h(
         'section',
         { class: 'card wide' },
-        h('h4', null, '仕入れ'),
-        h('p', { class: 'note' }, '翌朝便は通常価格で翌日の開店前に届きます。当日便は3割高で約60秒後に届きます。自動発注は閉店後に目標在庫まで翌朝便で発注します。'),
+        cardHead(
+          '仕入れ',
+          '翌朝便は通常価格で翌日の開店前に届きます。当日便は3割高で約60秒後に届きます。自動発注は閉店後に目標在庫まで翌朝便で発注します。「売れ行きに合わせる」は、最近3日の使用量に余裕をみた量まで発注します（品切れした食材は多めに。冷蔵庫に入りきらないときは比例して減らします。目安の量の半分は必ず持ちます）。値段は店の場所の物価で変わります。',
+        ),
         h(
           'div',
           { class: 'row wrap auto-mode' },
@@ -785,16 +800,13 @@ export class ManageMenu {
           h('button', { class: `mini ${s.autoOrderMode !== 'sales' ? 'on' : 'ghost'}`, 'data-mode': 'manual', onclick: () => this.act({ type: 'setAutoOrderMode', mode: 'manual' }, '自動発注を「目安の量まで」にしました') }, '目安の量まで'),
           h('button', { class: `mini ${s.autoOrderMode === 'sales' ? 'on' : 'ghost'}`, 'data-mode': 'sales', onclick: () => this.act({ type: 'setAutoOrderMode', mode: 'sales' }, '自動発注を「売れ行きに合わせる」にしました') }, '売れ行きに合わせる'),
         ),
-        s.autoOrderMode === 'sales'
-          ? h('p', { class: 'note' }, '最近3日の使用量に余裕をみた量まで自動で発注します（品切れした食材は多めに。冷蔵庫に入りきらないときは比例して減らします）。目安の量の半分は必ず持ちます。')
-          : null,
         this.managerOrderRow(s),
         h(
           'div',
           { class: 'table' },
           purch.map((d) => {
-            const unit = purchaseUnitCost(d.id, false);
-            const pack = Math.round(unit * d.packQty);
+            // 店の場所の物価を入れた1パックの値段（じろ1 5.5）
+            const pack = packPriceOf(s, d.id);
             const target = s.autoOrder[d.id] ?? 0;
             return h(
               'div',
@@ -823,10 +835,9 @@ export class ManageMenu {
       h(
         'section',
         { class: 'card wide' },
-        h('h4', null, '仕込み品（店内で作る）'),
+        cardHead('仕込み品（店内で作る）', '仕込み: 豚を煮込む→（煮豚・タレ）→ 仕込み台で豚を切る / 野菜ゆで釜でヤサイ / 仕込み台でニンニクを刻む / 煮込み鍋で背脂を炊く / 寸胴でスープを炊く。'),
         this.prepTargetRows(s),
         h('div', { class: 'table' }, prepared.map((d) => h('div', { class: 'trow' }, h('div', { class: 'tname' }, d.name), h('div', { class: 'tsub' }, `${Math.floor(stockOf(s, d.id)).toLocaleString('ja-JP')}${d.unit}`), h('div', { class: 'tsub' }, d.shelfLifeDays === 0 ? '当日限り' : `${d.shelfLifeDays}日もつ`)))),
-        h('p', { class: 'note' }, '仕込み: 豚を煮込む→（煮豚・タレ）→ 仕込み台で豚を切る / 野菜ゆで釜でヤサイ / 仕込み台でニンニクを刻む / 煮込み鍋で背脂を炊く / 寸胴でスープを炊く。'),
       ),
     );
   }
@@ -903,13 +914,27 @@ export class ManageMenu {
   // ───────────────── メニュー ─────────────────
   private menu(s: GameState): HTMLElement {
     const editable = s.phase !== 'open' && s.phase !== 'closing';
+    const live = Object.values(MENU).filter((m) => isUnlocked(s, m.unlock) && !s.pausedMenu.includes(m.id));
+    const ratio = live.length > 0 ? live.reduce((a, m) => a + (s.prices[m.id] ?? m.defaultPrice) / m.defaultPrice, 0) / live.length : 1;
+    const last = s.history.filter((r) => r.served > 0).at(-1);
+    const ticket = last ? (last.sales - last.refunds) / last.served : null;
+    const ad = adBudgetOf(activeStore(s));
     return h(
       'div',
       null,
+      kpiRow(
+        [
+          kpi('販売中のメニュー', `${live.length}品`, `全${Object.keys(MENU).length}品`),
+          kpi('定価に対する値段', `${Math.round(ratio * 100)}%`, ratio > 1.05 ? '高め（客が減りやすい）' : ratio < 0.95 ? '安め（客が増えやすい）' : '定価くらい', '', ratio > 1.05 ? 'warn' : ''),
+          kpi('客単価（最後の営業日）', ticket !== null ? yenSigned(ticket) : '—', last ? `${last.day}日目・${last.served}杯` : null),
+          kpi('広告', ad > 0 ? `${yenSigned(ad)}/日` : 'なし', ad > 0 ? `来客 +${Math.round((adFactor(ad) - 1) * 100)}%` : null),
+        ],
+        'tab-kpis',
+      ),
       h(
         'section',
         { class: 'card wide' },
-        h('h4', null, 'メニューと価格'),
+        cardHead('メニューと価格', '定価より高いと来客が減り、安いと増えます。高すぎる値段は「値段に見合わない」と感じられ、満足度・口コミ・常連にも効きます。'),
         h(
           'p',
           { class: 'note', 'data-price-note': '' },
@@ -917,7 +942,7 @@ export class ManageMenu {
             // 地域の値段の感じ方（じろ1 5.5）: 都会・所得の高い地域は高めでも来て、田舎・所得の低い地域は高いと離れやすい
             const l = locationInfo(activeStore(s).location);
             const feel = !l ? '' : l.tolerance > 1.005 ? `この地域は定価の${Math.round((l.tolerance - 1) * 100)}%増しまでなら客が減りにくい。` : l.priceSensitivity > 1.005 ? 'この地域は定価より高いと客が離れやすく、量の多い品が好まれます。' : '';
-            return `価格は営業時間外に、¥${BALANCE.priceMin.toLocaleString('ja-JP')}〜¥${BALANCE.priceMax.toLocaleString('ja-JP')}で変更できます。定価より高いと来客が減り、安いと増えます。${feel}`;
+            return `営業時間外に ¥${BALANCE.priceMin.toLocaleString('ja-JP')}〜¥${BALANCE.priceMax.toLocaleString('ja-JP')} で変えられます。${feel}`;
           })(),
         ),
         Object.values(MENU).map((m) => {
@@ -944,8 +969,7 @@ export class ManageMenu {
       h(
         'section',
         { class: 'card wide' },
-        h('h4', null, '無料トッピング（コール）'),
-        h('p', { class: 'note' }, '客は食券を出したあと、麺がゆで上がる頃に「ニンニク入れますか？」と聞かれてコールします。コールを聞いてから盛り付けましょう。'),
+        cardHead('無料トッピング（コール）', '客は食券を出したあと、麺がゆで上がる頃に「ニンニク入れますか？」と聞かれてコールします。コールを聞いてから盛り付けましょう。'),
         Object.values(CALLS).map((c) => h('div', { class: 'kv' }, h('span', null, c.name), h('b', null, c.levels.map((l) => l.label).join(' / ')))),
       ),
     );
@@ -958,8 +982,7 @@ export class ManageMenu {
     return h(
       'section',
       { class: 'card wide ads-card' },
-      h('h4', null, '広告'),
-      h('p', { class: 'note' }, `1日の広告費を決めると、開店のときに払い、その日の来客が増えます（1日¥3,000で約+8%、どれだけ出しても+${Math.round(BALANCE.ads.max * 100)}%まで。効きは段々弱まります）。お金が足りない日は出しません。`),
+      cardHead('広告', `1日の広告費を決めると、開店のときに払い、その日の来客が増えます（1日¥3,000で約+8%、どれだけ出しても+${Math.round(BALANCE.ads.max * 100)}%まで。効きは段々弱まります）。お金が足りない日は出しません。`),
       h(
         'div',
         { class: 'kv' },
@@ -979,13 +1002,27 @@ export class ManageMenu {
     const owned = s.equipment;
     const shop = Object.values(EQUIPMENT);
     const ownedCount = (id: string) => owned.filter((e) => e.type === id).length;
+    const broken = owned.filter((e) => e.status === 'broken').length;
+    const worn = owned.filter((e) => e.status !== 'broken' && (e.status === 'faulty' || e.condition < 40)).length;
+    const upkeep = owned.reduce((a, e) => a + (EQUIPMENT[e.type]?.upkeep ?? 0), 0);
+    const booked = owned.filter((e) => e.maintenanceBooked).length;
+    const repairable = owned.filter((e) => (EQUIPMENT[e.type]?.repairCost ?? 0) > 0).length;
     return h(
       'div',
       null,
+      kpiRow(
+        [
+          kpi('設備', `${owned.length}台`, `丼 ${s.bowls.length}個`),
+          kpi('故障・不調', `${broken + worn}台`, broken > 0 ? `故障 ${broken}台` : worn > 0 ? '状態が悪い' : 'なし', broken > 0 ? 'bad' : worn > 0 ? 'warn' : '', broken > 0 ? 'bad' : worn > 0 ? 'warn' : 'good'),
+          kpi('維持費', `${yenSigned(upkeep)}/日`, null),
+          kpi('自動メンテ', `${booked} / ${repairable}台`, booked < repairable ? 'OFFの設備は故障しやすい' : 'すべてON', '', booked < repairable ? 'warn' : 'good'),
+        ],
+        'tab-kpis',
+      ),
       h(
         'section',
         { class: 'card wide' },
-        h('h4', null, '所有している設備'),
+        cardHead('所有している設備', `状態が下がると故障しやすくなります。自動メンテをONにすると、状態が${MAINTENANCE_THRESHOLD}%を下回った日の閉店後にメンテ（状態+40%）を行います。売ると買値の一部が戻ります。`),
         owned.map((e) => {
           const def = EQUIPMENT[e.type]!;
           const cond = Math.round(e.condition);
@@ -1022,8 +1059,7 @@ export class ManageMenu {
       h(
         'section',
         { class: 'card wide' },
-        h('h4', null, '設備を買う'),
-        h('p', { class: 'note' }, '配置が必要な設備は倉庫に入ります。閉店後か仕込み時間に「店舗 → レイアウト編集」で置いてください。'),
+        cardHead('設備を買う', '配置が必要な設備は空いている場所に置きます（置けなければ倉庫）。閉店後か仕込み時間に「店舗 → レイアウト編集」で動かせます。'),
         h(
           'div',
           { class: 'row' },
@@ -1058,9 +1094,22 @@ export class ManageMenu {
       counts.set(st, (counts.get(st) ?? 0) + 1);
     }
     const today = [...counts].map(([k, n]) => `${k} ${n}`).join('・');
+    const full = s.employees.filter((e) => !isPartTime(e)).length;
+    const present = s.employees.filter((e) => e.presentToday).length;
+    const tomorrowPay = s.employees.reduce((a, e) => a + expectedPay(e, s.day + 1, storeHours(s)), 0);
+    const short = s.employees.length > 0 ? shiftTable(s).reduce((a, r) => a + r.cells.filter((c) => c.staff < c.need).length, 0) : 0;
     return h(
       'div',
       null,
+      kpiRow(
+        [
+          kpi('従業員', `${s.employees.length}人`, `社員 ${full}・アルバイト ${s.employees.length - full}`),
+          kpi('いま店にいる', `${present}人`, s.employees.length > 0 ? `${WEEKDAY_LABEL[wd]}曜` : null),
+          kpi('あすの人件費の見込み', yenSigned(tomorrowPay), null),
+          kpi('人が足りない時間', s.employees.length > 0 ? `週${short}時間` : '—', s.employees.length > 0 ? (short > 0 ? 'シフト表の赤い時間' : '足りています') : 'まだ雇っていません', '', short > 0 ? 'warn' : s.employees.length > 0 ? 'good' : ''),
+        ],
+        'tab-kpis',
+      ),
       h(
         'section',
         { class: 'card wide' },
@@ -1075,8 +1124,11 @@ export class ManageMenu {
         ? h(
             'section',
             { class: 'card wide' },
-            h('h4', null, '採用候補（毎朝入れ替わります）'),
-            h('p', { class: 'note' }, `採用はアルバイトから（時給・シフト制）。採用は閉店後か仕込み時間にできます。手続きと研修があるので、出勤できるのは採用の${BALANCE.staff.hireDelayDays}日後からです。採用費はその場で、給与は働いた時間ぶんを閉店後の精算で支払います。アルバイトには出られる曜日（希望シフト）があります。真面目さや我慢強さは数字では分かりません。働きぶりは勤務の記録で確かめましょう。`),
+            cardHead(
+              '採用候補（毎朝入れ替わります）',
+              `採用はアルバイトから（時給・シフト制）。採用は閉店後か仕込み時間にできます。手続きと研修があるので、出勤できるのは採用の${BALANCE.staff.hireDelayDays}日後からです。採用費はその場で、給与は働いた時間ぶんを閉店後の精算で支払います。アルバイトには出られる曜日（希望シフト）があります。真面目さや我慢強さは数字では分かりません。働きぶりは勤務の記録で確かめましょう。`,
+            ),
+            h('p', { class: 'note' }, `出勤できるのは採用の${BALANCE.staff.hireDelayDays}日後から。`),
             s.candidates.length === 0 ? h('p', { class: 'note' }, '今日の候補者はいません。') : null,
             s.candidates.map((c) =>
               h(
@@ -1173,8 +1225,8 @@ export class ManageMenu {
     return h(
       'section',
       { class: 'card wide temp-card' },
-      h('h4', null, `短期バイト（今日だけ・1日${max}人まで）`),
-      h('p', { class: 'note' }, `開店前（仕込みの間）に呼ぶと、すぐ来て今日だけ働きます。採用費はかからず、時給は通常の${BALANCE.staff.temp.wageMult}倍（${yenStr(tempHourly())}）、能力は新人並みです。人が足りない日に使います。`),
+      cardHead(`短期バイト（今日だけ・1日${max}人まで）`, `開店前（仕込みの間）に呼ぶと、すぐ来て今日だけ働きます。採用費はかからず、時給は通常の${BALANCE.staff.temp.wageMult}倍（${yenStr(tempHourly())}）、能力は新人並みです。人が足りない日に使います。`),
+      h('p', { class: 'note' }, `時給 ${yenStr(tempHourly())}・採用費なし`),
       h(
         'div',
         { class: 'tbtns' },
@@ -1665,14 +1717,24 @@ export class ManageMenu {
     const adv = expansionAdvice(s);
     const st = STAGES[s.career.stage]!;
     const editable = s.phase === 'closed' || s.phase === 'prep';
+    const seatsNow = s.seats.filter((x) => x.installed && x.index < st.seats.length).length;
+    const fc = fixedCosts(s);
     return h(
       'div',
       null,
+      kpiRow(
+        [
+          kpi('店の大きさ', st.name.replace(/（.*）/, ''), `${st.seats.length}席の店`),
+          kpi('席', `${seatsNow} / ${st.seats.length}席`, seatsNow < st.seats.length ? `あと${st.seats.length - seatsNow}席置ける` : 'すべて設置', '', seatsNow < st.seats.length ? 'warn' : 'good'),
+          kpi('家賃', `${yenSigned(fc.rent)}/日`, null),
+          kpi('次の拡張', info.next ? yenSigned(adv?.total ?? info.cost) : '—', info.next ? (info.canExpand ? 'いま拡張できます' : (info.reason ?? '')) : '最大の店舗', info.next && info.canExpand ? 'good' : '', info.next && info.canExpand ? 'good' : ''),
+        ],
+        'tab-kpis',
+      ),
       h(
         'section',
         { class: 'card wide' },
-        h('h4', null, `レイアウト — ${st.name}`),
-        h('p', { class: 'note' }, '設備の配置で動線（移動距離）が変わり、処理能力が変わります。盛り付け台の近くにスープ寸胴・トッピング台・麺釜を置くと作業が速くなります。'),
+        cardHead(`レイアウト — ${st.name}`, '設備の配置で動線（移動距離）が変わり、処理能力が変わります。盛り付け台の近くにスープ寸胴・トッピング台・麺釜を置くと作業が速くなります。'),
         h('button', { class: 'btn primary', disabled: !editable, onclick: () => this.cb.onLayoutEditor() }, editable ? 'レイアウト編集を開く' : '営業中は編集できません'),
       ),
       h(
@@ -1743,9 +1805,19 @@ export class ManageMenu {
   // ───────────────── キャリア ─────────────────
   private career(s: GameState): HTMLElement {
     const signs = signsOf(s);
+    const done = GOALS.filter((g) => s.career.goalsDone.includes(g.id)).length;
     return h(
       'div',
       null,
+      kpiRow(
+        [
+          kpi('評判', `★ ${s.reputation.toFixed(2)}`, `口コミ ${s.reviews.length}件`, 'accent'),
+          kpi('キャリア目標', `${done} / ${GOALS.length}`, done < GOALS.length ? '達成すると新しい物が解放されます' : 'すべて達成', '', done === GOALS.length ? 'good' : ''),
+          kpi('常連客', `${s.regulars.length}人`, null),
+          kpi('累計提供', `${s.career.totalServed.toLocaleString('ja-JP')}杯`, `営業 ${s.career.daysPlayed}日・最高 ${s.career.bestDayServed}杯/日`),
+        ],
+        'tab-kpis',
+      ),
       h(
         'section',
         { class: 'card wide' },

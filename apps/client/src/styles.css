@@ -1228,3 +1228,16 @@ details.help:not([open]) > .help-body { display: none; }
 .shift-table td.short { background: rgba(231, 76, 60, 0.35); color: #fff; font-weight: 700; }
 .shift-table td.over { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
 .shift-table td.closed { background: rgba(255, 255, 255, 0.04); color: var(--muted); }
+
+/* オンライン市場の画面（じろ1 P6・承認した見た目の案） */
+.kpi-value.small { font-size: 15px; letter-spacing: 0; }
+.market-standings .share-cell { display: flex; flex-direction: column; gap: 3px; min-width: 90px; }
+.market-standings .share-cell .mbar { width: 100%; }
+.tone-good { color: var(--good); }
+.tone-bad { color: var(--bad); }
+.store-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.store-line { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.store-line .dot { flex: 0 0 8px; height: 8px; border-radius: 4px; background: var(--muted); }
+.store-line .dot.good { background: var(--good); }
+.store-line .dot.bad { background: var(--bad); }
+.store-line-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }

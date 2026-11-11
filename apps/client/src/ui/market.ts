@@ -45,6 +45,12 @@ import { openStoreMap } from './store-map';
 import { hoursDialog, hoursSummary } from './hours-dialog';
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { codeBlock } from './room-code';
+import { cardHead, kpi, kpiRow, meterBar, yenSigned } from './kit';
+
+/** 市場の画面の上の数字のカード（値の要素に data 属性を付ける。E2E が読む） */
+function stat(label: string, attrs: Record<string, string>, value: string, tone = ''): HTMLElement {
+  return h('div', { class: `kpi${tone ? ` tone-${tone}` : ''}` }, h('span', { class: 'kpi-label' }, label), h('b', { class: 'kpi-value small', ...attrs }, value));
+}
 
 export type MarketScreenView = MarketView & {
   clock: { serverNow: number; nextMidnight: number; nextSyncAt: number | null; syncPending: boolean };
@@ -492,10 +498,15 @@ export class MarketScreen {
     replace(
       this.head,
       h('h2', null, v.name),
-      h('div', { class: 'kv' }, h('span', null, '全社が営業済み'), h('b', { 'data-market-day': String(v.commonMarketDate) }, v.commonMarketDate === 0 ? 'まだ0日' : `${v.commonMarketDate}日目まで`)),
-      h('div', { class: 'kv' }, h('span', null, 'いちばん進んだ会社'), h('b', { 'data-leader-day': String(v.leaderDay) }, `${v.leaderDay}日目まで`)),
-      h('div', { class: 'kv' }, h('span', null, '同期'), h('b', { 'data-sync': v.ended ? 'ended' : v.clock.syncPending ? 'pending' : 'idle' }, syncText)),
-      h('div', { class: 'kv' }, h('span', null, '自動営業'), h('b', { 'data-auto-status': v.sync ? v.sync.status : 'idle' }, autoStatusText(v))),
+      // 数字のカード（じろ1 P6・承認した見た目の案）
+      h(
+        'div',
+        { class: 'kpi-row market-stats' },
+        stat('全社が営業済み', { 'data-market-day': String(v.commonMarketDate) }, v.commonMarketDate === 0 ? 'まだ0日' : `${v.commonMarketDate}日目まで`),
+        stat('いちばん進んだ会社', { 'data-leader-day': String(v.leaderDay) }, `${v.leaderDay}日目まで`),
+        stat('同期', { 'data-sync': v.ended ? 'ended' : v.clock.syncPending ? 'pending' : 'idle' }, syncText, v.clock.syncPending ? 'warn' : ''),
+        stat('自動営業', { 'data-auto-status': v.sync ? v.sync.status : 'idle' }, autoStatusText(v)),
+      ),
       v.ended
         ? h(
             'p',
@@ -560,7 +571,7 @@ export class MarketScreen {
     return h(
       'section',
       { class: 'card wide market-standings' },
-      h('h4', null, `企業の順位（市場シェア = 全社がそろった日までの直近${BALANCE.market.shareDays}日の純売上の割合）`),
+      cardHead('企業の順位（市場シェア）', `市場シェア = 全社がそろった日までの直近${BALANCE.market.shareDays}日の純売上の割合。右の数字は全社がそろった日の純売上と営業利益です。同じ市区町村・同じ場所の店どうしで客を取り合います（安い店・評判の良い店ほど客が来る）。`),
       h(
         'div',
         { class: 'table' },
@@ -575,13 +586,18 @@ export class MarketScreen {
               `${c.name}${c.mine ? '（あなた）' : ''}`,
               h('small', null, `${c.kind === 'ai' ? `AI・${AI_STRATEGY_LABEL[(c.strategy ?? 'standard') as AiStrategy] ?? ''}` : 'プレイヤー'}・${c.stores.map((s) => `${s.area}${s.seats}席★${s.reputation.toFixed(1)}`).join('／')}${c.bankrupt ? '・撤退' : ''}`),
             ),
-            h('div', { class: 'tsub' }, `シェア ${pct(c.share)}`),
+            h('div', { class: 'tsub share-cell' }, meterBar(c.share, c.mine ? 'accent' : c.kind === 'ai' ? 'info' : 'good', `シェア ${pct(c.share)}`), h('span', null, `シェア ${pct(c.share)}`)),
             h('div', { class: 'tsub', 'data-progress': String(c.lastDay) }, `${c.lastDay}日目まで${c.manualDays > 0 ? `（今日 手動${c.manualDays}日）` : ''}${c.playing ? '・営業中' : ''}`),
-            h('div', { class: 'tsub' }, `${v.commonMarketDate > 0 ? `${v.commonMarketDate}日目` : '—'} ${yenStr(c.netSales)}（利益 ${yenStr(c.operatingProfit)}）`),
+            h(
+              'div',
+              { class: 'tsub' },
+              v.commonMarketDate > 0 ? `${v.commonMarketDate}日目 ${yenStr(c.netSales)}` : '—',
+              v.commonMarketDate > 0 ? h('b', { class: c.operatingProfit < 0 ? 'tone-bad' : c.operatingProfit > 0 ? 'tone-good' : '' }, ` ${yenSigned(c.operatingProfit, true)}`) : null,
+            ),
           ),
         ),
       ),
-      h('p', { class: 'note' }, `同じ地域の店どうしで客を取り合います（安い店・評判の良い店ほど客が来る）。出店先の空き: ${PROPERTY_CANDIDATES.map((p) => `${PROPERTIES[p]!.area} ${v.freeSlots[p] ?? 0}件`).join('・')}`),
+      h('p', { class: 'note' }, `市場の街の出店先の空き: ${PROPERTY_CANDIDATES.map((p) => `${PROPERTIES[p]!.area} ${v.freeSlots[p] ?? 0}件`).join('・')}`),
     );
   }
 
@@ -591,7 +607,7 @@ export class MarketScreen {
     return h(
       'section',
       { class: 'card wide market-history', 'data-history': '' },
-      h('h4', null, '競争の記録（0時の同期）'),
+      cardHead('競争の記録（0時の同期）', '0時の同期ごとに、どの日付まで全社をそろえ、遅れていた会社の何日分を自動営業したかの記録です。'),
       h(
         'p',
         { class: 'note' },
@@ -620,7 +636,7 @@ export class MarketScreen {
     return h(
       'section',
       { class: 'card wide market-log' },
-      h('h4', null, '市場の出来事（AI 企業の判断の理由など）'),
+      cardHead('市場の出来事', 'AI 企業の出店・値下げ・採用などの判断と、その理由です（新しい順）。'),
       h('div', { class: 'table' }, [...v.decisions].reverse().slice(0, 24).map((d) => h('div', { class: 'trow' }, h('div', { class: 'tsub' }, `${d.day}日目`), h('div', { class: 'tname' }, h('small', null, names.get(d.companyId) ?? ''), d.text)))),
     );
   }
@@ -636,10 +652,32 @@ export class MarketScreen {
       { class: 'card market-mine' },
       h('h4', null, `あなたの会社: ${s.shopName}`),
       bankrupt ? null : this.renameRow('屋号', s.shopName, 'data-rename-shop', '', (v) => void this.act({ type: 'rename', name: v }, `店名を「${v}」にしました`)),
-      row('現金', yenStr(s.money), s.money < 50_000 ? 'bad' : ''),
-      row('借入・未払金', yenStr(totalDebt(s)), totalDebt(s) > 0 ? 'warn' : ''),
-      last ? row(`${last.day}日目の営業利益（全店）`, yenStr(last.operatingProfit), last.operatingProfit < 0 ? 'bad' : 'good') : null,
-      row('評判（本店）', `${stars(s.reputation)} ${s.reputation.toFixed(2)}`),
+      kpiRow([
+        kpi('現金', yenSigned(s.money), null, s.money < 50_000 ? 'bad' : ''),
+        kpi('借入・未払金', yenSigned(totalDebt(s)), null, totalDebt(s) > 0 ? 'warn' : ''),
+        last ? kpi(`${last.day}日目の営業利益（全店）`, yenSigned(last.operatingProfit, true), `純売上 ${yenSigned(last.netSales)}`, last.operatingProfit < 0 ? 'bad' : 'good') : null,
+        kpi('評判（本店）', `★ ${s.reputation.toFixed(2)}`, stars(s.reputation), 'accent'),
+      ]),
+      // あなたの店（店ごとの最後の日の営業利益。色の点で黒字・赤字）
+      h(
+        'div',
+        { class: 'store-list', 'data-store-list': '' },
+        s.company.stores.map((entry) => {
+          const day = v.mine!.progress.lastProcessedGameDate;
+          const r = day > 0 ? storeReport(s, entry, day) : null;
+          const stt = storeStatus(s, entry);
+          const lead = entry.managerId ? stt.employees.find((e) => e.id === entry.managerId) : null;
+          const who = lead ? '店長' : s.company.ownerStoreId === entry.id ? '店主' : '店長なし';
+          const op = r ? r.operatingProfit : null;
+          return h(
+            'div',
+            { class: 'store-line' },
+            h('span', { class: `dot ${op === null ? '' : op < 0 ? 'bad' : 'good'}` }),
+            h('span', { class: 'store-line-name' }, `${storeDisplayName(s, entry)}（${STAGES[stt.stage]?.seats.length ?? 8}席・${who}）`),
+            h('b', { class: op === null ? '' : op < 0 ? 'tone-bad' : 'tone-good' }, op === null ? '—' : yenSigned(op, true)),
+          );
+        }),
+      ),
       bankrupt ? h('p', { class: 'note bad' }, '破産しました。市場から消えています') : null,
       s.loans.length === 0 && !bankrupt ? h('button', { class: 'btn ghost', onclick: () => void this.act({ type: 'takeLoan' }, '融資を受けました') }, `融資を受ける（${yenStr(BALANCE.loan.amount)}）`) : null,
       bankrupt || v.ended ? h('button', { class: 'btn ghost danger', 'data-retire': '', onclick: () => void this.retire(bankrupt) }, '会社を引退させる') : null,
