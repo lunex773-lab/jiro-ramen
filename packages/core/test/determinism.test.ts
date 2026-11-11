@@ -15,7 +15,8 @@ describe('決定性', () => {
     expect(play()).toBe(play());
   });
 
-  it('前に別のゲームを動かしていても、同じシードなら同じ結果（ゲームの状態の外に記録を持たない）', () => {
+  // 3日 × 3回の営業で数秒かかる（ほかのテストと同時に動くと5秒を超えることがある）
+  it('前に別のゲームを動かしていても、同じシードなら同じ結果（ゲームの状態の外に記録を持たない）', { timeout: 30_000 }, () => {
     const play = (seed: number, days: number) => {
       const { s, ctx } = newGame(seed);
       addSoloBot(s);
