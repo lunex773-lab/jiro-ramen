@@ -28,7 +28,7 @@ import type {
   Vec2,
 } from '../types';
 import { clamp01, dist, newId } from '../util';
-import { emptyContents, evaluateBowl, isBowlComplete, menuOf, noodleQualityFor, soupPerBowl, toppingAmount } from './cooking';
+import { emptyContents, evaluateBowl, isBowlComplete, menuOf, noodleQualityFor, soldOutCalls, soupPerBowl, toppingAmount } from './cooking';
 import { cash, noteStockout, recordPL } from './economy';
 import { fatigueSpeed, growFromWork, noteServed } from './staff';
 import {
@@ -832,6 +832,15 @@ const VERBS: VerbDef[] = [
       // 別の注文に割り当てていた丼なら、その注文は丼なしに戻る
       b.orderId = o.id;
       const q = evaluateBowl(b.contents, o);
+      // 切れているトッピングは「〇〇切れです」と伝えて出す: ミスにはせず、品切れとして満足度を少し下げる（作り直しても入れられない）
+      const outCalls = soldOutCalls((id) => stockOf(s, id), o, b.contents);
+      if (outCalls.length > 0) {
+        const names = outCalls.map((k) => CALLS[k].name);
+        q.mistakes = q.mistakes.filter((m) => !names.some((n) => m === `${n}が入っていない` || m === `${n}の量が違う`));
+        const cust = s.customers.find((x) => x.id === o.customerId);
+        if (cust) cust.sat.stock = Math.min(cust.sat.stock, 0.6);
+        for (const k of outCalls) noteStockout(s, toppingAmount(k, 1).itemId);
+      }
       o.status = 'served';
       o.servedAt = s.t;
       o.quality = q.quality;

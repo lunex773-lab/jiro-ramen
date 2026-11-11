@@ -11,6 +11,8 @@ import type { ComplaintCause, ComplaintResponse, Customer, CustomerComplaint, Em
 import { clamp01, newId, pick } from '../util';
 import { addReview, eventSayTime, leaveAngry, leaveWithoutEating, sayEvent } from './customers';
 import { cash, recordPL } from './economy';
+import { stockOf } from './inventory';
+import { MENU } from '../data/menu';
 import { ensureEvents, evRand } from './events';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { argueChance, noteComplaintHandled, noteTemper } from './staff';
@@ -68,6 +70,8 @@ export function planComplaintResponse(s: GameState, a: Actor, seat: Seat, resp: 
   if (cp.tried.includes(resp)) return { reason: 'さっき受け入れてもらえませんでした', label, time };
   if (resp === 'remake') {
     if (!cp.served) return { reason: 'まだ提供していません', label, time };
+    const short = remakeShortage(s, c);
+    if (short) return { reason: `${short}が切れているため作り直せません`, label, time };
     if (!(a.hand.kind === 'none' || (a.hand.kind === 'dirty' && a.hand.bowlIds.length < 5))) return { reason: '手をあけてください（丼を下げます）', label, time };
   }
   if (resp === 'refund' && !cp.served) label = '食券代を払い戻す';
@@ -269,11 +273,27 @@ function resolved(s: GameState, ctx: SimCtx, c: Customer, seat: Seat, reply: str
   emit(ctx, { type: 'complaintResolved', targetId: seat.id, text: resp });
 }
 
-/** 従業員が選ぶ対応（原因に合わせ、だめだった対応は避ける） */
-export function complaintVerbFor(c: Customer): string {
+/**
+ * 作り直しても足りない材料（豚・タレ・麺・スープが今の在庫で1杯分ない）。作り直せるなら null。
+ * 足りないまま作り直すと、同じミスでまたクレームになり、丼の原価だけがかかる（じろ1 P5 の検証で見つけた）
+ */
+export function remakeShortage(s: GameState, c: Customer): string | null {
+  const o = s.orders.find((x) => x.id === c.orderId);
+  const m = o ? MENU[o.menuId] : undefined;
+  if (!o || !m) return null;
+  const mis = o.mistakes ?? [];
+  if (mis.some((x) => x.startsWith('豚が足りない')) && stockOf(s, 'buta') < m.buta) return '豚';
+  if (mis.includes('タレが入っていない') && stockOf(s, 'tare') <= 0) return 'タレ';
+  if (mis.includes('麺が入っていない') && stockOf(s, 'noodle') < m.noodleG) return '麺';
+  return null;
+}
+
+/** 従業員が選ぶ対応（原因に合わせ、だめだった対応は避ける。材料が切れていて作り直せないときは返金） */
+export function complaintVerbFor(c: Customer, s?: GameState): string {
   const cp = complaintOf(c);
+  const cannotRemake = !!s && cp.served && remakeShortage(s, c) !== null;
   const order: ComplaintResponse[] =
-    cp.cause === 'unreasonable' ? ['explain', 'refuse'] : !cp.served ? ['apologize', 'explain', 'refund'] : ['remake', 'refund'];
+    cp.cause === 'unreasonable' ? ['explain', 'refuse'] : !cp.served ? ['apologize', 'explain', 'refund'] : cannotRemake ? ['refund'] : ['remake', 'refund'];
   const r = order.find((x) => !cp.tried.includes(x)) ?? 'refund';
   return `complaint_${r}`;
 }

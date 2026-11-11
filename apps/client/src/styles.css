@@ -1164,3 +1164,55 @@ input, select { font: inherit; }
 .demand-hour { position: absolute; top: 100%; left: 0; font-size: 10px; line-height: 14px; color: var(--muted); }
 .hours-sum { margin-top: 8px; }
 .hours-card .btn { margin-top: 6px; }
+
+/* ─────────────── 経営・市場の画面の部品（じろ1 P6: 数字のカード・お金の流れ・利益の棒・気をつけること・「？」の説明） ─────────────── */
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 8px; margin-bottom: 10px; }
+.kpi { background: var(--panel-2); border-radius: 12px; padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; border: 1px solid transparent; }
+.kpi-label { font-size: 12px; color: var(--muted); }
+.kpi-value { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; line-height: 1.2; overflow-wrap: anywhere; }
+.kpi-sub { font-size: 12px; color: var(--muted); }
+.kpi.tone-good { border-color: rgba(46, 204, 113, 0.45); }
+.kpi.tone-good .kpi-value, .tone-good.kpi-sub { color: var(--good); }
+.kpi.tone-bad { border-color: rgba(231, 76, 60, 0.55); }
+.kpi.tone-bad .kpi-value, .tone-bad.kpi-sub { color: var(--bad); }
+.kpi.tone-warn .kpi-value, .tone-warn.kpi-sub { color: var(--warn); }
+.kpi.tone-accent .kpi-value { color: var(--yellow); }
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.card-head h4 { margin-bottom: 6px; }
+details.help { position: relative; flex-shrink: 0; }
+details.help > summary {
+  list-style: none; cursor: pointer; width: 28px; height: 28px; border-radius: 14px; border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center; font-size: 13px; color: var(--muted); user-select: none;
+}
+details.help > summary::-webkit-details-marker { display: none; }
+details.help[open] > summary { background: var(--yellow); color: #1a1407; border-color: var(--yellow); }
+.help-body { font-size: 13px; line-height: 1.55; color: var(--muted); margin: 6px 0; }
+.card-head details.help[open] { flex-basis: 100%; }
+.card-head:has(details.help[open]) { flex-wrap: wrap; }
+.flow-bar { display: flex; height: 28px; border-radius: 7px; overflow: hidden; margin: 4px 0 8px; background: rgba(255, 255, 255, 0.06); }
+.flow-seg { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #15110e; white-space: nowrap; overflow: hidden; min-width: 2px; }
+.pbars-wrap { display: flex; flex-direction: column; gap: 4px; }
+.pbars { display: flex; gap: 3px; height: 92px; position: relative; }
+.pbars::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(255, 255, 255, 0.2); }
+.pbar-col { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; }
+.pbar-half { height: 50%; display: flex; flex-direction: column; }
+.pbar-half.up { justify-content: flex-end; }
+.pbar { width: 100%; min-height: 2px; }
+.pbar.good { background: var(--good); border-radius: 2px 2px 0 0; }
+.pbar.bad { background: var(--bad); border-radius: 0 0 2px 2px; }
+.pbars-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.alerts { display: flex; flex-direction: column; gap: 6px; }
+.alert { border-radius: 10px; padding: 7px 10px; font-size: 13px; line-height: 1.45; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; border: 1px solid; }
+.alert.bad { background: rgba(231, 76, 60, 0.14); border-color: rgba(231, 76, 60, 0.5); }
+.alert.warn { background: rgba(243, 156, 18, 0.12); border-color: rgba(243, 156, 18, 0.45); }
+.alert.info { background: rgba(93, 173, 226, 0.12); border-color: rgba(93, 173, 226, 0.4); }
+.alert.good { background: rgba(46, 204, 113, 0.12); border-color: rgba(46, 204, 113, 0.4); }
+.alert .mini { flex-shrink: 0; }
+.mbar { height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.mbar-fill { height: 100%; border-radius: 5px; background: var(--yellow); }
+.mbar.tone-good .mbar-fill { background: var(--good); }
+.mbar.tone-warn .mbar-fill { background: var(--warn); }
+.mbar.tone-bad .mbar-fill { background: var(--bad); }
+.mbar.tone-info .mbar-fill { background: var(--info); }
+.kv.compact { padding: 3px 0; font-size: 13px; }
+.dash-title { margin: 0 0 8px; font-weight: 800; color: var(--yellow); font-size: 15px; }

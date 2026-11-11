@@ -89,6 +89,25 @@ export function tempFactor(heat: number): number {
   return 0.45 + 0.55 * ((heat - 55) / 30);
 }
 
+/** 盛り付けるトッピング（ヤサイ・ニンニク・アブラ）。カラメはタレの量 */
+const TOPPING_CALLS = ['yasai', 'ninniku', 'abura'] as const;
+
+/**
+ * 頼まれたのに入っていない（足りない）トッピングのうち、今の在庫では足せないもの（切れている）。
+ * 「〇〇切れです」と伝えて出す扱いにする（作り直しても入れられないため。じろ1 P5 の検証で、切れたまま作り直しを繰り返して原価だけかかっていた）
+ */
+export function soldOutCalls(stockOf: (itemId: string) => number, order: Pick<Order, 'call'>, c: BowlContents): ToppingKey[] {
+  const out: ToppingKey[] = [];
+  for (const k of TOPPING_CALLS) {
+    const want = order.call[k];
+    const got = c.toppings[k] ?? 0;
+    if (want <= 0 || got >= want - 0.01) continue;
+    const need = toppingAmount(k, want - got);
+    if (stockOf(need.itemId) + 1e-9 < need.qty) out.push(k);
+  }
+  return out;
+}
+
 /**
  * 丼の中身を注文と照合して品質とミスを判定する。
  * 品質 = 味（麺・スープ・豚・トッピング）× 温度 × 鮮度 − 工程の乱れ

@@ -40,13 +40,14 @@ const hireTwoAfterProfit = (s: GameState, ctx: SimCtx) => {
 };
 
 /** 店の場所の相場の給料で、すぐ働く従業員（社員）を置く（従業員中心の店。日給 = 時給 × 4.5時間 × 1.15） */
-function staffNow(s: GameState, role: 'cook' | 'server', skill: number): void {
+function staffNow(s: GameState, role: 'cook' | 'server', skill: number) {
   const hourly = marketHourly(minWageOf(activeStore(s).location), role, skill, 0, 0.5);
   const daily = Math.round((hourly * BALANCE.staff.employment.fullShiftHours * 1.15) / 10) * 10;
   const e = addBot(s, role, skill, daily);
   // 遅刻・欠勤もある（ふつうの人。ボットの既定は勤怠が最大）
   e.profile.diligence = 0.7;
   e.profile.patience = 0.7;
+  return e;
 }
 
 export interface Pattern {
@@ -124,16 +125,18 @@ export const PATTERNS: Pattern[] = [
   },
   {
     id: 'p9_staff_store',
-    name: '9. 従業員中心の店舗（店主は働かない。社員の調理2人＋接客1人・8席）',
+    name: '9. 従業員中心の店舗（店主は働かない。店長（調理）＋調理＋接客の社員3人・8席）',
     skill: null,
     policy: {
       id: 'p9',
       name: '',
       setup: (s, ctx) => {
         salesMode(s, ctx);
-        staffNow(s, 'cook', 0.5);
+        // 調理担当の1人を店長（社員）にする。店長は担当に関係なく店の仕事を何でもする
+        const mgr = staffNow(s, 'cook', 0.55);
         staffNow(s, 'cook', 0.5);
         staffNow(s, 'server', 0.5);
+        applyAction(s, 'p1', { type: 'assignManager', storeId: activeStore(s).id, employeeId: mgr.id }, ctx);
       },
     },
   },

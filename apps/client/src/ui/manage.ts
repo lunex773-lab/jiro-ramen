@@ -108,6 +108,7 @@ function companyTabVisible(s: GameState): boolean {
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { openStoreMap } from './store-map';
 import { hoursDialog, hoursSummary } from './hours-dialog';
+import { alertBox, cardHead, delta, flowBar, kpi, kpiRow, profitBars, yenSigned } from './kit';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
 import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
 
@@ -601,117 +602,124 @@ export class ManageMenu {
     if (next) await this.act({ type: 'setStoreHours', storeId: entry.id, hours: next }, '営業時間を決めました（次の営業日から）');
   }
 
-  // ───────────────── 経営ダッシュボード ─────────────────
+  // ───────────────── 経営ダッシュボード（じろ1 P6: 数字のカード・お金の流れ・2週間の利益・気をつけること） ─────────────────
   private dash(s: GameState): HTMLElement {
     const d = s.today;
     const op = operatingProfit(d);
+    const net = d.sales - d.refunds;
     const fc = fixedCosts(s);
     const avgSat = d.satisfactionCount > 0 ? d.satisfactionSum / d.satisfactionCount : 0;
     const avgWait = d.served > 0 ? d.totalSeatWait / d.served : 0;
     const arrears = s.arrears.reduce((a, b) => a + b.amount, 0);
     const loan = s.loans.reduce((a, b) => a + b.remaining, 0);
     const lowStock = ['yasai', 'buta', 'garlic', 'abura', 'tare', 'noodle'].filter((id) => stockOf(s, id) < (id === 'noodle' ? 1500 : id === 'buta' ? 6 : 100));
-    const row = (k: string, v: string, cls = '') => h('div', { class: `kv ${cls}` }, h('span', null, k), h('b', null, v));
+    const row = (k: string, v: string, cls = '') => h('div', { class: `kv compact ${cls}` }, h('span', null, k), h('b', null, v));
     const hist = s.history.slice(-14);
-    const maxAbs = Math.max(1, ...hist.map((r) => Math.abs(r.operatingProfit)));
+    const prev = s.history.filter((r) => r.day < s.day).slice(-1)[0] ?? null;
+    const repDelta = delta(s.reputation, prev ? prev.reputation : null, (v) => v.toFixed(2));
+    const cashDelta = s.phase === 'closed' && s.history[s.history.length - 1]?.day === s.day ? s.history[s.history.length - 1]! : null;
+    // ── 数字のカード ──
+    const kpis = kpiRow([
+      kpi('現在資金', yenStr(s.money), cashDelta ? `今日 ${yenSigned(cashDelta.cashEnd - cashDelta.cashStart, true)}` : `翌営業日の支出 ${yenStr(fc.total)}`, s.money < fc.total ? 'bad' : '', cashDelta ? (cashDelta.cashEnd >= cashDelta.cashStart ? 'good' : 'bad') : '', { 'data-kpi': 'cash' }),
+      kpi('今日の営業利益', yenSigned(op, true), `純売上 ${yenStr(net)}`, op > 0 ? 'good' : op < 0 ? 'bad' : '', '', { 'data-kpi': 'op' }),
+      kpi('評判', `★ ${s.reputation.toFixed(2)}`, `${repDelta ? `${repDelta.text}・` : ''}常連 ${s.regulars.length}人`, 'accent', repDelta?.tone ?? '', { 'data-kpi': 'rep' }),
+      kpi('提供 / 来客', `${d.served}杯 / ${d.customers}人`, d.lost + d.balked > 0 ? `帰った客 ${d.lost}人・諦めた ${d.balked}人` : '帰った客なし', '', d.lost > 0 ? 'warn' : '', { 'data-kpi': 'served' }),
+    ]);
+    // ── 気をつけること（色付きの短い文。ボタンで対応できるものはボタンを付ける） ──
+    const alerts: HTMLElement[] = [];
+    const goTab = (tab: ManageTab, label: string) => h('button', { class: 'mini', onclick: () => { this.tab = tab; this.render(); this.body.scrollTop = 0; } }, label);
+    if (arrears > 0) alerts.push(alertBox('bad', `未払金 ${yenStr(arrears)}（期限までに払わないと破産します）`, h('button', { class: 'mini', onclick: () => this.act({ type: 'payArrears' }, '未払金を支払いました') }, '未払金を支払う')));
+    if (s.money < fc.total) alerts.push(alertBox('bad', `資金が翌営業日の支出（${yenStr(fc.total)}）より少ない`));
+    if (lowStock.length > 0) alerts.push(alertBox('bad', `在庫不足: ${lowStock.map((id) => INGREDIENTS[id]?.name ?? id).join('・')}`, goTab('stock', '発注を見る')));
+    if (d.lost > 0) alerts.push(alertBox('warn', `途中で帰った客 ${d.lost}人（待ちすぎ・品切れ）。人手か席を増やすと減ります`));
+    if (d.stockouts > 0) alerts.push(alertBox('warn', `品切れ ${d.stockouts}回`, goTab('stock', '在庫を見る')));
+    if (d.breakdowns > 0) alerts.push(alertBox('warn', `設備故障 ${d.breakdowns}回（定期メンテで減らせます）`, goTab('equip', '設備を見る')));
+    if (loan > 0) alerts.push(alertBox('info', `融資の残り ${yenStr(loan)}`));
+    if (buzzBoostFactor(s) > 1) alerts.push(alertBox('good', `🎥 SNSの話題になりやすさ ×${buzzBoostFactor(s).toFixed(1)}（${Math.max(...(s.events?.buzzBoosts ?? []).map((b) => b.untilDay))}日目まで）`));
+    for (const e of (s.events?.effects ?? []).filter((x) => x.source === 'tv' && (x.fromDay ?? 0) >= s.day)) alerts.push(alertBox('good', `📺 テレビ放送の反響（${e.fromDay}日目） 来客 ×${e.mult.toFixed(1)}`));
+    if (loanAvailable(s))
+      alerts.push(
+        alertBox(
+          'info',
+          '資金が足りないときは緊急融資を受けられます',
+          h(
+            'button',
+            {
+              class: 'mini ghost',
+              onclick: async () => {
+                const L = BALANCE.loan;
+                const ok = await confirmDialog(this.root, '緊急融資', `¥${L.amount.toLocaleString('ja-JP')}を借ります。日利${(L.dailyRate * 100).toFixed(1)}%、${L.days}日で毎日返済します。融資は1件までです。`, '借りる');
+                if (ok) await this.act({ type: 'takeLoan' }, '融資を受けました');
+              },
+            },
+            '融資を受ける',
+          ),
+        ),
+      );
+    if (alerts.length === 0) alerts.push(alertBox('good', '特に気をつけることはありません'));
+    // ── お金の流れ（純売上を100%として、費用と利益） ──
+    const flow = flowBar(
+      [
+        { label: '原価', value: d.cogs + d.waste, color: '#e0a457' },
+        { label: '人件費', value: d.wages, color: '#6fb3e0' },
+        { label: '家賃', value: d.rent, color: '#b48ad6' },
+        { label: 'その他', value: d.upkeep + d.utilities + d.repairs + d.hiring + (d.ads ?? 0), color: '#9aa3ad' },
+      ],
+      op,
+    );
     return h(
       'div',
-      { class: 'grid2' },
+      null,
+      h('p', { class: 'dash-title' }, `${storeDisplayName(s, activeStore(s))} — ${s.day}日目・${STAGES[s.career.stage]?.name ?? ''}`),
+      kpis,
       h(
-        'section',
-        { class: 'card' },
-        h('h4', null, `${storeDisplayName(s, activeStore(s))} — ${s.day}日目`),
-        row('現在資金', yenStr(s.money), s.money < fc.total ? 'bad' : ''),
-        row('評判', `${stars(s.reputation)} ${s.reputation.toFixed(2)}`),
-        row('常連客', `${s.regulars.length}人`),
-        // YouTube の動画・テレビ放送の反響（第2版 11・12）
-        buzzBoostFactor(s) > 1 ? row('🎥 SNSの話題になりやすさ', `×${buzzBoostFactor(s).toFixed(1)}（${Math.max(...(s.events?.buzzBoosts ?? []).map((b) => b.untilDay))}日目まで）`, 'good') : null,
-        ...(s.events?.effects ?? []).filter((e) => e.source === 'tv' && (e.fromDay ?? 0) >= s.day).map((e) => row(`📺 テレビ放送の反響（${e.fromDay}日目）`, `来客 ×${e.mult.toFixed(1)}`, 'good')),
-        row('店舗', STAGES[s.career.stage]?.name ?? ''),
-        arrears > 0 ? row('未払金', yenStr(arrears), 'bad') : null,
-        loan > 0 ? row('融資残高', yenStr(loan), 'warn') : null,
+        'div',
+        { class: 'grid2' },
         h(
-          'div',
-          { class: 'row' },
-          arrears > 0 ? h('button', { class: 'btn', onclick: () => this.act({ type: 'payArrears' }, '未払金を支払いました') }, '未払金を支払う') : null,
-          loanAvailable(s)
-            ? h(
-                'button',
-                {
-                  class: 'btn ghost',
-                  onclick: async () => {
-                    const L = BALANCE.loan;
-                    const ok = await confirmDialog(this.root, '緊急融資', `¥${L.amount.toLocaleString('ja-JP')}を借ります。日利${(L.dailyRate * 100).toFixed(1)}%、${L.days}日で毎日返済します。融資は1件までです。`, '借りる');
-                    if (ok) await this.act({ type: 'takeLoan' }, '融資を受けました');
-                  },
-                },
-                '融資を受ける',
-              )
-            : null,
+          'section',
+          { class: 'card' },
+          cardHead('本日の損益（お金の流れ）', '家賃・給与・維持費・基本光熱費は閉店後の精算で計上されます。食材の仕入れは在庫（資産）になり、使ったときに原価になります。仕入れと設備投資は現金の支出で、損益には入りません。'),
+          flow,
+          row('売上', yenStr(d.sales)),
+          d.refunds > 0 ? row('返金', `−${yenStr(d.refunds)}`) : null,
+          row('食材原価＋廃棄', `−${yenStr(d.cogs + d.waste)}`, d.waste > 0 ? 'warn' : ''),
+          row('人件費', `−${yenStr(d.wages)}`),
+          row('家賃', `−${yenStr(d.rent)}`),
+          row('光熱費・維持費・修理', `−${yenStr(d.utilities + d.upkeep + d.repairs)}`),
+          d.hiring > 0 ? row('採用・解雇', `−${yenStr(d.hiring)}`) : null,
+          (d.ads ?? 0) > 0 ? row('広告', `−${yenStr(d.ads ?? 0)}`) : null,
+          row('営業利益', yenSigned(op, true), op < 0 ? 'bad' : 'good'),
+          d.interest > 0 ? row('利息（融資）', `−${yenStr(d.interest)}`) : null,
+          d.interest > 0 ? row('最終利益', yenSigned(op - d.interest, true), op - d.interest < 0 ? 'bad' : 'good') : null,
+          row('仕入れ・設備投資（現金の支出）', `${yenStr(d.purchases)}・${yenStr(d.capex)}`),
         ),
-      ),
-      this.hoursCard(s, activeStore(s)),
-      h(
-        'section',
-        { class: 'card' },
-        h('h4', null, '本日の損益'),
-        row('売上', yenStr(d.sales)),
-        d.refunds > 0 ? row('返金', `−${yenStr(d.refunds)}`) : null,
-        row('食材原価', `−${yenStr(d.cogs)}`),
-        row('廃棄', `−${yenStr(d.waste)}`, d.waste > 0 ? 'warn' : ''),
-        row('人件費', `−${yenStr(d.wages)}`),
-        row('家賃', `−${yenStr(d.rent)}`),
-        row('維持費', `−${yenStr(d.upkeep)}`),
-        row('光熱費', `−${yenStr(d.utilities)}`),
-        row('修理費', `−${yenStr(d.repairs)}`),
-        d.hiring > 0 ? row('採用・解雇', `−${yenStr(d.hiring)}`) : null,
-        row('営業利益', yenStr(op), op < 0 ? 'bad' : 'good'),
-        d.interest > 0 ? row('利息（融資）', `−${yenStr(d.interest)}`) : null,
-        d.interest > 0 ? row('最終利益', yenStr(op - d.interest), op - d.interest < 0 ? 'bad' : 'good') : null,
-        h('p', { class: 'note' }, '※ 家賃・給与・維持費・基本光熱費は閉店後の精算で計上されます。食材の仕入れは在庫（資産）になり、使ったときに原価になります。'),
-        row('仕入れ（現金支出）', yenStr(d.purchases)),
-        row('設備投資（現金支出）', yenStr(d.capex)),
-      ),
-      h(
-        'section',
-        { class: 'card' },
-        h('h4', null, '本日の営業'),
-        row('来客数', `${d.customers}人`),
-        row('提供数', `${d.served}杯`),
-        row('途中で帰った客', `${d.lost}人`, d.lost > 0 ? 'warn' : ''),
-        row('行列を見て諦めた客', `${d.balked}人`),
-        row('平均待ち時間（着席→提供）', `${avgWait.toFixed(0)}秒`),
-        row('平均満足度', `${Math.round(avgSat * 100)}%`),
-        row('注文ミス / クレーム', `${d.mistakes} / ${d.complaints}`),
-        row('品切れ', `${d.stockouts}回`, d.stockouts > 0 ? 'warn' : ''),
-        row('設備故障', `${d.breakdowns}回`),
-        lowStock.length > 0 ? row('在庫不足', lowStock.map((id) => INGREDIENTS[id]?.name ?? id).join('・'), 'bad') : null,
-      ),
-      h(
-        'section',
-        { class: 'card' },
-        h('h4', null, '翌営業日の予測支出'),
-        row('家賃', yenStr(fc.rent)),
-        row('給与', yenStr(fc.wages)),
-        row('設備維持費', yenStr(fc.upkeep)),
-        row('光熱費（基本）', yenStr(fc.utilities)),
-        fc.loans > 0 ? row('融資返済＋利息', yenStr(fc.loans)) : null,
-        row('合計', yenStr(fc.total), s.money < fc.total ? 'bad' : ''),
-        hist.length > 0
-          ? h(
-              'div',
-              { class: 'bars' },
-              hist.map((r) =>
-                h(
-                  'div',
-                  { class: 'bar-col', title: `${r.day}日目 ${yenStr(r.operatingProfit)}` },
-                  h('div', { class: `bar ${r.operatingProfit < 0 ? 'neg' : ''}`, style: { height: `${(Math.abs(r.operatingProfit) / maxAbs) * 60}px` } }),
-                  h('div', { class: 'bar-label' }, String(r.day)),
-                ),
-              ),
-            )
-          : h('p', { class: 'note' }, '営業日の利益の推移がここに表示されます'),
-      ),
+        h('section', { class: 'card' }, cardHead('この2週間の営業利益'), profitBars(hist.map((r) => ({ day: r.day, value: r.operatingProfit })))),
+        h('section', { class: 'card', 'data-alerts': '' }, cardHead('気をつけること'), h('div', { class: 'alerts' }, alerts)),
+        h(
+          'section',
+          { class: 'card' },
+          cardHead('本日の営業', '平均待ち時間は、席に着いてから提供されるまで。帰った客は、待ちすぎ・品切れで食べずに帰った人。諦めた客は、行列を見て並ばなかった人です。'),
+          row('来客数', `${d.customers}人`),
+          row('提供数', `${d.served}杯`),
+          row('途中で帰った客', `${d.lost}人`, d.lost > 0 ? 'warn' : ''),
+          row('行列を見て諦めた客', `${d.balked}人`),
+          row('平均待ち時間（着席→提供）', `${avgWait.toFixed(0)}秒`),
+          row('平均満足度', `${Math.round(avgSat * 100)}%`),
+          row('注文ミス / クレーム', `${d.mistakes} / ${d.complaints}`),
+          row('品切れ / 設備故障', `${d.stockouts}回 / ${d.breakdowns}回`, d.stockouts > 0 ? 'warn' : ''),
+        ),
+        h(
+          'section',
+          { class: 'card' },
+          cardHead('翌営業日の予測支出'),
+          row('家賃', yenStr(fc.rent)),
+          row('給与', yenStr(fc.wages)),
+          row('設備維持費', yenStr(fc.upkeep)),
+          row('光熱費（基本）', yenStr(fc.utilities)),
+          fc.loans > 0 ? row('融資返済＋利息', yenStr(fc.loans)) : null,
+          row('合計', yenStr(fc.total), s.money < fc.total ? 'bad' : ''),
+        ),
+        this.hoursCard(s, activeStore(s)),
       h(
         'section',
         { class: 'card wide rename-card' },
@@ -745,6 +753,7 @@ export class ManageMenu {
             s.notices.slice(-8).reverse().map((n) => h('div', { class: `notice ${n.level}` }, n.text)),
           )
         : null,
+      ),
     );
   }
 

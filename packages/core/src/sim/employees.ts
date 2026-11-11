@@ -550,7 +550,7 @@ export function buildTasks(s: GameState): Task[] {
     }
     for (const seat of s.seats) {
       const cust = s.customers.find((c) => c.id === seat.customerId);
-      if (cust && cust.state === 'complaint') add('complaint', `complaint:${seat.id}`, [step(seat.id, complaintVerbFor(cust))]);
+      if (cust && cust.state === 'complaint') add('complaint', `complaint:${seat.id}`, [step(seat.id, complaintVerbFor(cust, s))]);
       // 許可のない撮影: ルールを説明 → やめるよう伝える → 退店を促す
       if (cust && unpermittedFilming(cust)) {
         const f = cust.special!.film!;
@@ -651,6 +651,8 @@ function canTake(s: GameState, e: Employee, t: Task): boolean {
   // 店長は担当に関係なく店の仕事を何でもする（店長の営業の計算と同じ前提。Phase 2）。シフトリーダーも全部の仕事をする（じろ1 5.8）
   if (s.company && activeStore(s).managerId === e.id) return true;
   if (e.profile.role === 'leader') return true;
+  // 洗い物は、清掃担当が来ていない日は接客担当もする（丼が尽きて提供が止まらないように。じろ1 P5 の検証で、清掃担当のいない店が丼14個で止まっていた）
+  if (t.kind === 'wash' && e.profile.role === 'server' && !s.employees.some((x) => x.presentToday && !x.commute && x.profile.role === 'cleaner')) return true;
   if (kind.roles.includes(e.profile.role)) {
     // 調理担当の接客系は、接客担当がいないときだけ
     if (e.profile.role === 'cook' && (t.kind === 'serve' || t.kind === 'askCall' || t.kind === 'complaint' || t.kind === 'manner' || t.kind === 'linger' || t.kind === 'film')) {
