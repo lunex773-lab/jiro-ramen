@@ -9,7 +9,7 @@
 //     画面が暗くなって、その日の営業は終わる（精算へ）
 import { BALANCE } from '../data/balance';
 import { WEAPONS, type WeaponDef } from '../data/weapons';
-import { alleyRect, policeCarDoor, policeCarSeat, policeSpawn, stageOf, zoneAt } from '../geometry';
+import { alleyRect, policeCarDoor, policeCarPos, policeCarSeat, policeDoorFront, policeSpawn, stageOf, zoneAt } from '../geometry';
 import type { ArmoryState, ArrestState, Customer, GameState, IncidentState, Officer, Player, Employee, Vec2 } from '../types';
 import { dist, newId } from '../util';
 import { addDirt, startLeaving } from './customers';
@@ -233,6 +233,11 @@ export function updateArmory(s: GameState, dt: number, ctx: SimCtx, endDay: () =
   }
   const inc = incidentToday(s);
   if (!inc) return;
+  // パトカーがサイレンを鳴らして走って来る（警察官はパトカーに乗って来る。オーナーの指示 2026-11-11）
+  if (!inc.siren && s.t >= inc.policeAt - BALANCE.armory.carArriveSec) {
+    inc.siren = true;
+    emit(ctx, { type: 'policeSiren' });
+  }
   if (!inc.police && s.t >= inc.policeAt) policeArrive(s, ctx, inc);
   if (inc.arrest) updateArrest(s, dt, ctx, inc, inc.arrest, endDay);
 }
@@ -332,7 +337,7 @@ function standPoints(target: Vec2, from: Vec2): Vec2[] {
   ];
 }
 
-/** 警察が着いた: 襲った人は動けなくなり、警察官がパトカーから歩いて来る */
+/** パトカーが止まった: 襲った人は動けなくなり、警察官が扉を開けて降りて、歩いて来る */
 function policeArrive(s: GameState, ctx: SimCtx, inc: IncidentState): void {
   inc.police = true;
   const st = stageOf(s);
@@ -340,8 +345,9 @@ function policeArrive(s: GameState, ctx: SimCtx, inc: IncidentState): void {
   const goal = attacker ? attacker.pos : { x: (st.door.x0 + st.door.x1) / 2, z: -0.6 };
   const officers: Officer[] = [];
   for (let i = 0; i < AR().officers; i++) {
-    const pos = policeSpawn(st, i);
-    const route = policeRoute(s, pos, goal);
+    const pos = policeSpawn(st, i % 2);
+    const out = policeDoorFront(st, i % 2);
+    const route = [out, ...policeRoute(s, out, goal)];
     const last = route[route.length - 2] ?? pos;
     const stand = attacker ? standPoints(goal, last)[i] ?? goal : { x: goal.x + i * 0.6, z: goal.z };
     route[route.length - 1] = stand;
@@ -424,17 +430,36 @@ function updateArrest(s: GameState, dt: number, ctx: SimCtx, inc: IncidentState,
     }
     case 'board': {
       if (!attacker) return setPhase(s, a, 'fade');
-      // 後ろの席に乗せる（扉の前から席へ）
+      // 後ろの席に乗せる（扉の前から席へ）。警察官も乗り込む: 前の人は前の扉から、後ろの人は犯人のあとから後ろの扉から
       const k = Math.min(1, Math.max(0, (el - R.boardSec * 0.35) / (R.boardSec * 0.5)));
       const door = policeCarDoor(st);
       const seat = policeCarSeat(st);
       attacker.pos = { x: door.x + (seat.x - door.x) * k, z: door.z + (seat.z - door.z) * k };
-      for (const o of a.officers) {
-        if (o.path.length > 0) walk(o, dt, R.escortSpeed);
-        o.yaw = face(o.pos, seat);
-      }
-      if (el < R.boardSec) return;
+      a.officers.forEach((o, i) => {
+        if (o.inCar) return;
+        const back = i % 2 === 1;
+        // 後ろの人は、犯人が乗るまで扉の横で待つ
+        if (back && k < 1 && o.path.length === 0) {
+          const c = policeCarPos(st);
+          const wait = { x: c.x + 1.4, z: c.z + 1.45 };
+          if (dist(o.pos, wait) > 0.05) o.path = policeRoute(s, o.pos, wait);
+          else o.yaw = face(o.pos, seat);
+        } else if (o.path.length === 0) {
+          const outside = policeDoorFront(st, back ? 1 : 0);
+          const inside = policeSpawn(st, back ? 1 : 0);
+          o.path = dist(o.pos, inside) < 0.05 ? [] : [...(dist(o.pos, outside) > 0.05 ? policeRoute(s, o.pos, outside) : []), inside];
+          if (o.path.length === 0) o.inCar = true;
+        }
+        if (o.path.length > 0 && walk(o, dt, R.walkSpeed) && (!back || k >= 1) && dist(o.pos, policeSpawn(st, back ? 1 : 0)) < 0.05) o.inCar = true;
+      });
+      const allIn = a.officers.every((o) => o.inCar);
+      if (el < R.boardSec || (!allIn && el < R.boardMax)) return;
       attacker.pos = { ...seat };
+      for (const o of a.officers) {
+        o.inCar = true;
+        o.path = [];
+        o.pos = { ...policeSpawn(st, a.officers.indexOf(o) % 2) };
+      }
       setPhase(s, a, 'fade');
       return;
     }

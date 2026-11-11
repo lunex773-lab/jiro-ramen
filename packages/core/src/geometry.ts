@@ -205,9 +205,15 @@ export function policeCarSeat(st: StageDef): Vec2 {
   return { x: c.x + 0.55, z: c.z + 0.25 };
 }
 
-/** 警察官が降りる場所（前と後ろの扉の前） */
+/** 警察官が乗り降りする場所（0 = 前の扉、1 = 後ろの扉。店の側。開いた扉のところ） */
 export function policeSpawn(st: StageDef, i: number): Vec2 {
   const c = policeCarPos(st);
-  return { x: c.x - 0.7 + i * 0.5, z: c.z + 1.25 };
+  return { x: c.x + (i === 0 ? -0.55 : 0.55), z: c.z + 0.85 };
+}
+
+/** 扉の外（乗り降りの前に立つ場所） */
+export function policeDoorFront(st: StageDef, i: number): Vec2 {
+  const p = policeSpawn(st, i);
+  return { x: p.x, z: p.z + 0.45 };
 }
 

@@ -338,9 +338,14 @@ export class Sfx {
         case 'incident':
           for (let i = 0; i < 4; i++) this.tone(i % 2 ? 740 : 980, 0.3, 'sawtooth', 0.04, 0, i * 0.3);
           break;
+        case 'policeSiren':
+          // パトカーが走って来る（サイレン ピーポー）
+          for (let i = 0; i < 10; i++) this.tone(i % 2 ? 770 : 960, 0.45, 'square', 0.05, 0, i * 0.45);
+          break;
         case 'police':
-          // サイレン（ピーポー）
-          for (let i = 0; i < 6; i++) this.tone(i % 2 ? 770 : 960, 0.45, 'square', 0.05, 0, i * 0.45);
+          // 止まって扉を開ける
+          this.tone(180, 0.12, 'square', 0.05, 90);
+          this.tone(150, 0.1, 'square', 0.04, 80, 0.25);
           break;
         case 'accidentReset':
           this.stopEerie(true);

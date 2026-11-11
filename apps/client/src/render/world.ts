@@ -578,6 +578,8 @@ export class World {
     const arrest = arrestOf(s);
     const cuffed = arrest && (arrest.phase === 'cuff' || arrest.phase === 'escort' || arrest.phase === 'board') ? arrest.attackerId : null;
     for (const o of arrest?.officers ?? []) {
+      // パトカーに乗っている間は見えない
+      if (o.inCar) continue;
       const key = `police:${o.id}`;
       seen.add(key);
       const c = this.charEntry(key, 'customer', o.id === 'officer1' ? 7101 : 7202, undefined, 'police');

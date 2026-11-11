@@ -14,6 +14,7 @@ import {
   listVerbs,
   nextDay,
   policeCarSeat,
+  policeSpawn,
   shiftFor,
   speedLocked,
   stageOf,
@@ -121,7 +122,7 @@ describe('襲うと等速に戻り、20秒後に警察が来て逮捕され、�
     expect(speedLocked(s)).toBe(true);
   });
 
-  it('警察官が2人来て、手錠をかけ、パトカーまで連れて行き、乗せる。その間は動けず何もできない', () => {
+  it('パトカーがサイレンを鳴らして走って来て、警察官2人が降りて来る。手錠をかけ、パトカーまで連れて行き、乗せて、警察官も乗り込む。その間は動けず何もできない', () => {
     const { s, ctx } = armed('katana', 86);
     const p = s.players[0]!;
     p.pos = { x: 2, z: 2.3 };
@@ -129,13 +130,18 @@ describe('襲うと等速に戻り、20秒後に警察が来て逮捕され、�
     const inc = s.incident!;
     expect(inc.attackerId).toBe('p1');
     expect(inc.policeAt - inc.startT).toBe(20);
-    // 警察が来るまでは動ける
+    // 警察が来るまでは動ける。止まる少し前からサイレン
+    ctx.events = [];
     run(s, ctx, 19);
     expect(arrestOf(s)).toBeNull();
+    expect(inc.siren).toBe(true);
+    expect(ctx.events.some((e) => e.type === 'policeSiren')).toBe(true);
     run(s, ctx, 1.2);
     const a = arrestOf(s)!;
     expect(a.phase).toBe('approach');
     expect(a.officers).toHaveLength(2);
+    // パトカーの扉から降りて来る（まだ車のそば）
+    a.officers.forEach((o, i) => expect(Math.hypot(o.pos.x - policeSpawn(stageOf(s), i).x, o.pos.z - policeSpawn(stageOf(s), i).z)).toBeLessThan(3));
     expect(a.officers[0]!.say?.text).toContain('警察');
     expect(isArrested(s, 'p1')).toBe(true);
     // 動けない・何もできない
@@ -156,6 +162,8 @@ describe('襲うと等速に戻り、20秒後に警察が来て逮捕され、�
     }
     expect(phases).toEqual(['approach', 'cuff', 'escort', 'board', 'fade']);
     expect(s.phase).toBe('closed');
+    // 警察官もパトカーに乗った
+    expect(s.incident?.arrest?.officers.every((o) => o.inCar)).toBe(true);
     // 歩いて来る〜暗くなるまで 1 分以内
     expect(t).toBeLessThan(60);
     expect(p.pos).toEqual(policeCarSeat(stageOf(s)));

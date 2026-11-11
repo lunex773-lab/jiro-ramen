@@ -452,6 +452,8 @@ export interface IncidentState {
   staffVictims?: number;
   /** 最初に襲った人（逮捕される人） */
   attackerId?: Id;
+  /** パトカーがサイレンを鳴らして走って来た（警察が来る少し前） */
+  siren?: boolean;
   /** 警察が来てからの逮捕の流れ（オーナーの指示 2026-11-11） */
   arrest?: ArrestState;
 }
@@ -479,6 +481,8 @@ export interface Officer {
   yaw: number;
   path: Vec2[];
   say?: { text: string; until: number } | null;
+  /** パトカーに乗っている（見えない） */
+  inCar?: boolean;
 }
 
 export interface DirtSpot {

@@ -96,8 +96,8 @@ export const BALANCE = {
     reputationPenalty: 0.4,
     /** 通報から警察が来るまで（営業の秒）。オーナーの指示 2026-11-11「20秒後に警察が来て逮捕」 */
     policeDelay: 20,
-    /** パトカーが店の前に着くまでの走り（警察が来る前の秒。画面の演出） */
-    carArriveSec: 3,
+    /** パトカーがサイレンを鳴らして走って来て店の前に止まるまで（警察が来る前の秒） */
+    carArriveSec: 4,
     /** 襲われてけがをした店員が療養する日数（オーナーの指示「怪我をした従業員は１週間療養する」） */
     injuryDays: 7,
     /** 逮捕の流れ（営業の秒・m/秒） */
@@ -106,7 +106,9 @@ export const BALANCE = {
       walkSpeed: 2.0,
       escortSpeed: 1.3,
       cuffSec: 3,
+      /** 後ろの席に乗せるまで。警察官が乗り込むまでは待つ（boardMax まで） */
       boardSec: 2.2,
+      boardMax: 9,
       fadeSec: 2.5,
       /** 着けないとき（通れないなど）はそばへ移す */
       approachMax: 20,
