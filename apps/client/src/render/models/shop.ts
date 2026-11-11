@@ -404,8 +404,9 @@ export function createShopShell(stage: StageDef, shopName: string, surroundings:
   }
 
   // ── 客席の壁まわり: お品書き・時計・水差しの棚・ポスター ──
-  b.add(shopTextMat('menuboard', menuBoardTexture()), new THREE.PlaneGeometry(0.8, 1.0), { x: W - 0.005, y: 1.65, z: 1.15, ry: -Math.PI / 2 });
-  b.box(SM.wainscot(), 0.03, 1.06, 0.86, { x: W - 0.012, y: 1.65, z: 1.15 });
+  // 板（裏板）は壁に付け、お品書きはその手前に貼る（前は裏板の中に埋もれて茶色の板だけが見えていた）
+  b.add(shopTextMat('menuboard', menuBoardTexture()), new THREE.PlaneGeometry(0.8, 1.0), { x: W - 0.033, y: 1.65, z: 1.15, ry: -Math.PI / 2 });
+  b.box(SM.wainscot(), 0.03, 1.06, 0.86, { x: W - 0.015, y: 1.65, z: 1.15 });
   b.add(shopTextMat('clock', clockTexture()), new THREE.CircleGeometry(0.16, 24), { x: W * 0.62, y: 2.25, z: D - 0.03, ry: Math.PI });
   b.add(MAT.black(), new THREE.TorusGeometry(0.165, 0.015, 5, 24), { x: W * 0.62, y: 2.25, z: D - 0.035 });
   b.add(shopTextMat('callposter', callPosterTexture()), new THREE.PlaneGeometry(1.0, 0.5), { x: W * 0.45, y: 2.05, z: D - 0.01, ry: Math.PI });

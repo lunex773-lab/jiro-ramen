@@ -1,7 +1,8 @@
 // 隠し扉と武器庫（じろ1 5.12。オーナーの判断: 本物の武器・血の表現あり）。
 // 武器の形（手に持つ・棚に並べる）と、店の右の横の壁の外の物置（壁と同じ見た目の隠し扉・中の武器の棚）
 import * as THREE from 'three';
-import { armoryRect, CELL, WEAPON_IDS, type StageDef } from '@jiro/core';
+import { armoryRect, CELL, STORE_WALL_T, WEAPON_IDS, type StageDef } from '@jiro/core';
+import { CEILING_Y } from './shop';
 import { cached, GeoBuilder, meshesFromMerged, type Disposable } from './common';
 import { MAT, plastic } from './materials';
 
@@ -21,10 +22,15 @@ const WM = {
   rust: () => std('pipe', { color: '#6d6a66', metalness: 0.55, roughness: 0.6 }),
   bomb: () => std('bomb', { color: '#1c1c1e', metalness: 0.2, roughness: 0.55 }),
   fuse: () => std('fuse', { color: '#c8b48a', roughness: 0.9 }),
-  facade: () => std('facade', { color: '#3b3330', roughness: 0.8 }),
-  seam: () => std('seam', { color: '#2c2624', roughness: 0.85 }),
+  // 店の横の壁と同じ色（shop.ts の腰板・しっくい・見切り）
+  wainscot: () => std('wainscot', { color: '#6a4a30', roughness: 0.6 }),
+  plaster: () => MAT.plaster(),
+  trim: () => MAT.woodLight(),
+  seam: () => std('seam', { color: '#4b3a2c', roughness: 0.85 }),
   dark: () => std('closet', { color: '#141110', roughness: 1 }),
   board: () => std('board', { color: '#4d4237', roughness: 0.85 }),
+  // 通りに面した端は店の正面と同じ色（shop.ts の facade）
+  facade: () => std('facade', { color: '#3b3330', roughness: 0.8 }),
 };
 
 /** 武器の形（握る位置が原点。先は -z 方向） */
@@ -81,31 +87,48 @@ export interface ArmoryModel extends Disposable {
 }
 
 /**
- * 店の右の横の壁の外の物置。外から見ると建物の外壁と同じ色・同じ継ぎ目で、扉の形はわからない（隠し扉）。
- * 開くと中に武器の棚がある
+ * 店の右の横の壁の外の「ふかし壁」と、その中の物置（オーナーの指示: 武器庫をわかりにくく）。
+ * 横の壁ぜんぶを同じ厚み・同じ見た目（下は腰板、上はしっくい、0.8m ごとの縦の継ぎ目）にして、その一部を扉にする。
+ * 扉の縁は継ぎ目と同じ位置なので、外から見ても扉の形はわからない。開くと中に武器の棚がある
  */
 export function createArmory(stage: StageDef): ArmoryModel {
   const r = armoryRect(stage);
-  const H = 2.3;
+  const H = CEILING_Y;
+  const LOW = 0.9;
   const group = new THREE.Group();
   group.name = 'armory';
   const b = new GeoBuilder();
   const w = r.x1 - r.x0;
-  const d = r.z1 - r.z0;
-  // 物置の外壁（店の外壁と同じ色）。路地側の面は扉の幅だけ開けておく
-  b.box(WM.facade(), w, 0.25, d, { x: r.x0 + w / 2, y: H + 0.125 - 0.25, z: r.z0 + d / 2 });
-  b.box(WM.facade(), w, H, 0.06, { x: r.x0 + w / 2, y: H / 2, z: r.z0 + 0.03 });
-  b.box(WM.facade(), w, H, 0.06, { x: r.x0 + w / 2, y: H / 2, z: r.z1 - 0.03 });
+  const zFront = -STORE_WALL_T;
+  const zBack = stage.d * CELL + STORE_WALL_T;
   const doorZ0 = r.z0 + 0.2;
   const doorZ1 = r.z1 - 0.2;
-  b.box(WM.facade(), 0.06, H, doorZ0 - r.z0, { x: r.x1 - 0.03, y: H / 2, z: (r.z0 + doorZ0) / 2 });
-  b.box(WM.facade(), 0.06, H, r.z1 - doorZ1, { x: r.x1 - 0.03, y: H / 2, z: (doorZ1 + r.z1) / 2 });
-  b.box(WM.facade(), 0.06, H - 2.0, doorZ1 - doorZ0, { x: r.x1 - 0.03, y: 2.0 + (H - 2.0) / 2, z: (doorZ0 + doorZ1) / 2 });
-  // 外壁の継ぎ目（扉の縁と同じ間隔で横の線を入れ、扉の形をわからなくする）
-  for (let y = 0.5; y < H; y += 0.5) b.box(WM.seam(), 0.065, 0.012, d, { x: r.x1 - 0.03, y, z: r.z0 + d / 2 });
+  const doorH = 2.0;
+  const cx = r.x0 + w / 2;
+  // ふかし壁の塊（物置の前と後ろ）。下は腰板、上はしっくい（店の横の壁と同じ）
+  const block = (z0: number, z1: number) => {
+    if (z1 - z0 < 1e-3) return;
+    b.box(WM.wainscot(), w, LOW, z1 - z0, { x: cx, y: LOW / 2, z: (z0 + z1) / 2 });
+    b.box(WM.plaster(), w, H - LOW, z1 - z0, { x: cx, y: LOW + (H - LOW) / 2, z: (z0 + z1) / 2, uv: 1.5 });
+  };
+  block(zFront, r.z0);
+  block(r.z1, zBack);
+  // 通りから見える端は店の正面の続きに見せる
+  b.box(WM.facade(), w + 0.01, H + 0.02, 0.02, { x: cx, y: (H + 0.02) / 2, z: zFront - 0.01 });
+  // 物置の上（扉の高さより上）と、路地側の面の扉の左右
+  b.box(WM.plaster(), w, H - doorH, r.z1 - r.z0, { x: cx, y: doorH + (H - doorH) / 2, z: (r.z0 + r.z1) / 2, uv: 1.5 });
+  const face = (z0: number, z1: number) => {
+    b.box(WM.wainscot(), 0.06, LOW, z1 - z0, { x: r.x1 - 0.03, y: LOW / 2, z: (z0 + z1) / 2 });
+    b.box(WM.plaster(), 0.06, doorH - LOW, z1 - z0, { x: r.x1 - 0.03, y: LOW + (doorH - LOW) / 2, z: (z0 + z1) / 2, uv: 1.5 });
+  };
+  face(r.z0, doorZ0);
+  face(doorZ1, r.z1);
+  // 腰板の上の見切り（横の壁ぜんぶ）と、縦の継ぎ目（0.8m ごと。扉の縁と同じ位置）
+  b.box(WM.trim(), 0.04, 0.04, zBack - zFront, { x: r.x1 + 0.005, y: LOW + 0.02, z: (zFront + zBack) / 2 });
+  for (let z = 0; z < zBack - 0.05; z += 0.8) b.box(WM.seam(), 0.012, H - 0.02, 0.012, { x: r.x1 + 0.004, y: H / 2, z });
   // 中（暗い）と武器の棚
-  b.box(WM.dark(), 0.02, 2.0, doorZ1 - doorZ0, { x: r.x0 + 0.03, y: 1.0, z: (doorZ0 + doorZ1) / 2 });
-  b.box(WM.board(), 0.03, 1.4, doorZ1 - doorZ0 - 0.06, { x: r.x0 + 0.06, y: 1.05, z: (doorZ0 + doorZ1) / 2 });
+  b.box(WM.dark(), 0.02, doorH, doorZ1 - doorZ0, { x: r.x0 + 0.02, y: doorH / 2, z: (doorZ0 + doorZ1) / 2 });
+  b.box(WM.board(), 0.03, 1.4, doorZ1 - doorZ0 - 0.06, { x: r.x0 + 0.05, y: 1.05, z: (doorZ0 + doorZ1) / 2 });
   const shell = meshesFromMerged(b.merged());
   group.add(shell);
   // 棚の武器（壁に掛ける。先を上に）
@@ -114,22 +137,22 @@ export function createArmory(stage: StageDef): ArmoryModel {
     const m = createWeapon(id);
     const z = doorZ0 + 0.06 + ((doorZ1 - doorZ0 - 0.12) * (i + 0.5)) / n;
     // 先を上にして壁に掛ける（爆弾は下の段に置く）。刃・銃の横の面が路地から見えるように
-    m.position.set(r.x0 + 0.1, id === 'bomb' ? 0.45 : 0.75, z);
+    m.position.set(r.x0 + 0.12, id === 'bomb' ? 0.45 : 0.75, z);
     m.rotation.order = 'YXZ';
     m.rotation.set(id === 'bomb' ? 0 : Math.PI / 2, Math.PI / 2, 0);
     group.add(m);
   });
-  // 隠し扉（蝶番は手前の縁。開くと路地側へ開く）
+  // 隠し扉（蝶番は手前の縁。開くと路地側へ開く）。ふかし壁と同じ腰板・しっくい・見切り
   const hinge = new THREE.Group();
   hinge.position.set(r.x1 - 0.03, 0, doorZ0);
   const db = new GeoBuilder();
-  db.box(WM.facade(), 0.05, 2.0, doorZ1 - doorZ0, { y: 1.0, z: (doorZ1 - doorZ0) / 2 });
-  for (let y = 0.5; y < 2.0; y += 0.5) db.box(WM.seam(), 0.056, 0.012, doorZ1 - doorZ0, { y, z: (doorZ1 - doorZ0) / 2 });
+  const dw = doorZ1 - doorZ0;
+  db.box(WM.wainscot(), 0.05, LOW, dw, { y: LOW / 2, z: dw / 2 });
+  db.box(WM.plaster(), 0.05, doorH - LOW, dw, { y: LOW + (doorH - LOW) / 2, z: dw / 2, uv: 1.5 });
+  db.box(WM.trim(), 0.04, 0.04, dw, { x: 0.035, y: LOW + 0.02, z: dw / 2 });
   hinge.add(meshesFromMerged(db.merged()));
   group.add(hinge);
   let angle = 0;
-  void CELL;
-  void MAT;
   return {
     group,
     setOpen(open: boolean, dt: number) {

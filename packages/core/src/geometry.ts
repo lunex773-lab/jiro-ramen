@@ -96,19 +96,28 @@ export function streetRect(st: StageDef): Rect {
   return { x0: -3, z0: -4.5, x1: st.w * CELL + 6, z1: 0 };
 }
 
-/** 武器庫（店の右の横の壁の外に付いた小さな物置。壁と同じ見た目。じろ1 5.12）の範囲 */
+/** 店の壁の厚み（client の描画と同じ） */
+export const STORE_WALL_T = 0.12;
+/**
+ * 店の右の横の壁の外側の「ふかし壁」の厚み。横の壁ぜんぶを同じ見た目でこの厚みにして、その中に武器庫を隠す
+ * （オーナーの指示: 武器庫をわかりにくく。前は物置だけが出っ張り、店の壁の厚みに入り込んで店の中から透けて見えた）
+ */
+export const ARMORY_DEPTH = 0.5;
+
+/** 武器庫（店の右の横の壁の外のふかし壁の中の小さな物置。じろ1 5.12）の範囲 */
 export function armoryRect(st: StageDef): Rect {
-  return { x0: st.w * CELL, z0: 0.6, x1: st.w * CELL + 0.5, z1: 1.8 };
+  const x0 = st.w * CELL + STORE_WALL_T;
+  return { x0, z0: 0.6, x1: x0 + ARMORY_DEPTH, z1: 1.8 };
 }
 
-/** 隠し扉（物置の路地側の面の真ん中） */
+/** 隠し扉（ふかし壁の路地側の面の真ん中） */
 export function armoryDoorPos(st: StageDef): Vec2 {
-  return { x: st.w * CELL + 0.5, z: 1.2 };
+  return { x: armoryRect(st).x1, z: 1.2 };
 }
 
 /** 隠し扉の前の路地（歩道から店の右の横の壁沿いに入れる） */
 export function alleyRect(st: StageDef): Rect {
-  return { x0: st.w * CELL + 0.5, z0: -0.5, x1: st.w * CELL + 1.9, z1: 2.2 };
+  return { x0: armoryRect(st).x1, z0: -0.5, x1: st.w * CELL + 1.9, z1: 2.2 };
 }
 
 /** 衝突判定用の箱（壁・カウンター・設備） */
