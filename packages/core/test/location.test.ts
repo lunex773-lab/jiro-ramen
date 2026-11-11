@@ -25,8 +25,7 @@ import {
   storeRentMult,
   validateState,
   type GameState,
-  type SimCtx,
-} from '../src';
+  type SimCtx, siteStats } from '../src';
 import { addBot, addSoloBot, newGame, runDay } from './helpers';
 
 const OSAKA = '27100';
@@ -98,7 +97,8 @@ describe('場所つきの出店', () => {
     // 屋号を変えると、自動の名前の支店も合わせる（場所は名前に残る）
     expect(applyAction(s, 'p1', { type: 'rename', name: '豚の星' }, ctx).ok).toBe(true);
     expect(branch.name).toBe('豚の星 大阪市駅前店');
-    expect(storeDemandMult(branch)).toBeCloseTo(1.3 * locationInfo(OSAKA)!.demand, 6);
+    // 候補地の数字（昼夜間人口・商業。じろ2）も少しだけ入る
+    expect(storeDemandMult(branch)).toBeCloseTo(1.3 * locationInfo(OSAKA)!.demand * siteStats(OSAKA, 'station').demandMult, 6);
     expect(storeRentMult(branch)).toBeCloseTo(1.6 * locationInfo(OSAKA)!.rent, 6);
     expect(validateState(s)).toEqual([]);
   });
@@ -112,7 +112,7 @@ describe('場所つきの出店', () => {
     expect(applyAction(s, 'p1', { type: 'setStoreLocation', storeId: home.id, location: OSAKA }, ctx).ok).toBe(true);
     expect(home.location).toBe(OSAKA);
     // 来客は場所の倍率と、地域の値段の許容度（大阪市は少し高くても来る）の分だけ変わる
-    expect(arrivalRate(s)).toBeCloseTo(before * locationInfo(OSAKA)!.demand * priceDemandFactor(s), 6);
+    expect(arrivalRate(s)).toBeCloseTo(before * locationInfo(OSAKA)!.demand * siteStats(OSAKA, 'home').demandMult * priceDemandFactor(s), 6);
     expect(storeRent(s)).toBe(Math.round(STAGES[0]!.rent * locationInfo(OSAKA)!.rent));
     const again = applyAction(s, 'p1', { type: 'setStoreLocation', storeId: home.id, location: TOKYO_SHINJUKU }, ctx);
     expect(again.ok).toBe(false);

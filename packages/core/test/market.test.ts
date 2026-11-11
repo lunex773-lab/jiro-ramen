@@ -7,6 +7,7 @@ import {
   competitionFactors,
   createMarket,
   demandFor,
+  entryRamp,
   finishSync,
   freeSlots,
   jstMidnight,
@@ -371,7 +372,8 @@ describe('共通市場: 0時の同期（仕様書 3.4・12章 4〜9）', () => {
     })();
     expect(mine).toBeCloseTo(d1, 6);
     const ownRec = m.ledger['1']![`${a.id}:${a.state.company.stores[0]!.id}`]!;
-    expect(mine).toBeCloseTo(ownRec / (ownRec + k * recorded), 6);
+    // 新規参入の保護（じろ2）: 1日目は取り合いが1/7の強さ（両方とも新店なので話題性の倍率は同じ）
+    expect(mine).toBeCloseTo(ownRec / (ownRec + k * entryRamp(0, 1) * recorded), 6);
   });
 
   it('同じ種と同じ操作の列なら、同じ結果になる', { timeout: 60_000 }, () => {

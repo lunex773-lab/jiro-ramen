@@ -1556,6 +1556,11 @@ test('会社: 12席・評判★4.0以上の店になると「会社」の画面�
   await expect(map.locator('[data-site]')).toHaveCount(3);
   await map.locator('[data-map-site="residential"] button').click();
   await expect(map.locator('[data-map-site="residential"]')).toContainText('初期費用 ¥450,000');
+  // 出店の見込みと公的な統計（じろ2）
+  await expect(map.locator('[data-map-site="residential"]')).toContainText('見込み: 来客');
+  await expect(map.locator('[data-map-site="residential"]')).toContainText('利益は保証されません');
+  await expect(map.locator('[data-map-daytime]')).toContainText('昼夜間人口比率');
+  await expect(map.locator('[data-map-food]')).toContainText('店');
   await shot(page, '49-store-map');
   await map.locator('[data-map-confirm]').click();
   await expect(page.locator('.modal')).toContainText('大阪府 大阪市の住宅街');

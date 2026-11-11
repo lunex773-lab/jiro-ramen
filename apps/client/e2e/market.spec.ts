@@ -234,6 +234,7 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   await expect(siteMap).toContainText('出店の範囲: 市場の街');
   await siteMap.locator('[data-map-site="station"] button').click();
   await expect(siteMap.locator('[data-map-site="station"]')).toContainText('空き');
+  await expect(siteMap.locator('[data-map-site="station"]')).toContainText('競合 同じ場所');
   await expect(siteMap.locator('[data-map-confirm]')).toBeDisabled();
   await siteMap.locator('[data-map-close]').click();
   await expect(siteMap).toHaveCount(0);

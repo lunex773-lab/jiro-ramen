@@ -5,6 +5,7 @@
 
 import { BALANCE } from '../data/balance';
 import { MUNICIPALITY_AREA_KM2 } from '../data/areas';
+import { MUNICIPALITY_DAYTIME } from '../data/daytime';
 import { MUNICIPALITIES, PREFECTURES } from '../data/municipalities';
 import { PROPERTIES, PROPERTY_CANDIDATES } from '../data/properties';
 import { NATIONAL_ECONOMY, PREFECTURE_ECONOMY } from '../data/regional';
@@ -138,11 +139,90 @@ export function locationProblem(code: string | null | undefined): string | null 
   return null;
 }
 
-/** 店の来客の倍率（立地 × 場所の人口と人口密度） */
+/** 店の来客の倍率（立地 × 場所の人口と人口密度 × 候補地の数字（昼夜間人口・商業。少しだけ）） */
 export function storeDemandMult(entry: StoreEntry | null | undefined): number {
   if (!entry) return 1;
   const prop = PROPERTIES[entry.propertyId] ?? PROPERTIES.home!;
-  return prop.demand * (locationInfo(entry.location)?.demand ?? 1);
+  return prop.demand * (locationInfo(entry.location)?.demand ?? 1) * (entry.location ? siteStats(entry.location, entry.propertyId).demandMult : 1);
+}
+
+// ───────────────────────── 候補地の数字（じろ2: 改修設計書03。公的な統計） ─────────────────────────
+
+export interface SiteStats {
+  /** 昼夜間人口比率（%。昼間人口 ÷ 夜間人口。国勢調査2020）。わからなければ null */
+  dayNightRatio: number | null;
+  /** 昼間人口（人。人口 × 昼夜間人口比率） */
+  daytimePopulation: number | null;
+  /** 小売業・飲食店の事業所数（経済センサス2021） */
+  retail: number | null;
+  food: number | null;
+  /** 人口1万人あたりの小売業・飲食店の数と、全国平均との比 */
+  retailPer10k: number | null;
+  foodPer10k: number | null;
+  retailRatio: number | null;
+  foodRatio: number | null;
+  /** 交通量の目安（1 = ふつう。場所の種類と人口密度から） */
+  traffic: number;
+  trafficLabel: '多い' | 'ふつう' | '少ない';
+  /** 来客の見込みへの倍率（少しだけ） */
+  demandMult: number;
+}
+
+let NATIONAL_PER10K: { retail: number; food: number } | null = null;
+
+/** 全国の人口1万人あたりの小売業・飲食店の数（同梱の表から） */
+function nationalPer10k(): { retail: number; food: number } {
+  if (NATIONAL_PER10K) return NATIONAL_PER10K;
+  let pop = 0;
+  let retail = 0;
+  let food = 0;
+  for (const [code, row] of Object.entries(MUNICIPALITIES)) {
+    const d = MUNICIPALITY_DAYTIME[code];
+    if (!d || d[1] < 0 || d[2] < 0) continue;
+    pop += row[2];
+    retail += d[1];
+    food += d[2];
+  }
+  NATIONAL_PER10K = pop > 0 ? { retail: (retail / pop) * 10_000, food: (food / pop) * 10_000 } : { retail: 1, food: 1 };
+  return NATIONAL_PER10K;
+}
+
+const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/** 候補地の数字（市区町村 × 場所の種類）。表にない市区町村は数字なしで、来客の倍率は 1 */
+export function siteStats(code: string, propertyId: string): SiteStats {
+  const P = L();
+  const l = locationInfo(code);
+  const row = MUNICIPALITY_DAYTIME[code];
+  const ratio = row && row[0] > 0 ? row[0] : null;
+  const pop = l?.population ?? 0;
+  const retail = row && row[1] >= 0 ? row[1] : null;
+  const food = row && row[2] >= 0 ? row[2] : null;
+  const nat = nationalPer10k();
+  const retailPer10k = retail !== null && pop > 0 ? (retail / pop) * 10_000 : null;
+  const foodPer10k = food !== null && pop > 0 ? (food / pop) * 10_000 : null;
+  const retailRatio = retailPer10k !== null ? retailPer10k / nat.retail : null;
+  const foodRatio = foodPer10k !== null ? foodPer10k / nat.food : null;
+  const kind = PROPERTIES[propertyId] ? propertyId : 'home';
+  const traffic = (P.trafficBase[kind] ?? 1) * (1 + P.trafficDensity * (l?.densityIndex ?? 0)) * (kind === 'station' && ratio ? Math.sqrt(clampN(ratio / 100, 0.6, 2)) : 1);
+  let score = 0;
+  if (ratio) score += (P.siteDaytime[kind] ?? 0) * clampN(Math.log2(ratio / 100), -1, 1.5);
+  if (retailRatio) score += P.siteRetail * clampN(Math.log2(retailRatio), -1, 1);
+  if (foodRatio) score -= P.siteFood * clampN(Math.log2(foodRatio), -1, 1);
+  const demandMult = l ? 1 + P.siteSpan * clampN(score, -1.5, 1.5) : 1;
+  return {
+    dayNightRatio: ratio,
+    daytimePopulation: ratio && pop > 0 ? Math.round((pop * ratio) / 100) : null,
+    retail,
+    food,
+    retailPer10k,
+    foodPer10k,
+    retailRatio,
+    foodRatio,
+    traffic,
+    trafficLabel: traffic >= 1.2 ? '多い' : traffic <= 0.85 ? '少ない' : 'ふつう',
+    demandMult,
+  };
 }
 
 /** 店の家賃の倍率（立地 × 場所の人口・人口密度・物価） */

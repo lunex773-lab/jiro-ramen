@@ -62,6 +62,7 @@ import {
   shiftsOf,
   autoOrderTarget,
   autoOrderEnabled,
+  siteStats,
   isClosedDay,
   type StoreHours,
   shelfLifeCap,
@@ -119,6 +120,7 @@ import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './
 import { openStoreMap } from './store-map';
 import { hoursDialog, hoursSummary } from './hours-dialog';
 import { loanControl } from './loan';
+import { forecastLines } from './site-lines';
 import { alertBox, cardHead, delta, flowBar, kpi, kpiRow, profitBars, yenSigned } from './kit';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
 import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
@@ -309,7 +311,7 @@ export class ManageMenu {
         const l = locationInfo(code);
         const rent = Math.round((STAGES[p.stage]?.rent ?? 0) * p.rentMult * (l?.rent ?? 1));
         return {
-          lines: [`初期費用 ${yenStr(p.initialCost)}・家賃 ${yenStr(rent)}/日・来客 ×${(p.demand * (l?.demand ?? 1)).toFixed(2)}・準備 ${p.openingDays}日`],
+          lines: [`初期費用 ${yenStr(p.initialCost)}・家賃 ${yenStr(rent)}/日・来客 ×${(p.demand * (l?.demand ?? 1) * siteStats(code, propertyId).demandMult).toFixed(2)}・準備 ${p.openingDays}日`, ...forecastLines(s, code, propertyId)],
           problem: !closed ? '閉店後に出店できます' : managerId ? (locationProblem(code) ?? openStoreProblem(s, propertyId, managerId, code)) : '店長にする社員がいません',
         };
       },

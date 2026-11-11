@@ -630,10 +630,6 @@ export function refreshMarketRange(m: MarketState, c: MarketCompany, day = m.com
 }
 
 /** 客を取り合う単位: 同じ市区町村の同じ地域（本店は企業の本店の商店街、ほかは物件の種類） */
-function competeKey(m: MarketState, c: MarketCompany, entry: StoreEntry): string {
-  return `${storeLocationIn(m, entry)}|${storeArea(c, entry)}`;
-}
-
 /**
  * 店の見込み（競合なしの来客の見込み。人/日）。manual: 端末で営業する日（プレイヤーがいる店は今の値段で）。
  * そうでなければ方針の値段（店長の営業・自動営業）。プレイヤーがいる店の値段は書き換えない
@@ -668,22 +664,54 @@ function recordLedger(m: MarketState, c: MarketCompany, day: number, manual: boo
 export function demandFor(m: MarketState, c: MarketCompany, day: number): Record<string, number> {
   const k = B().competition;
   const row = m.ledger[String(day)] ?? {};
-  const own = new Map<string, { area: string; d: number }>();
-  for (const entry of c.state.company.stores) own.set(entry.id, { area: competeKey(m, c, entry), d: row[lkey(c, entry)] ?? storeAttractiveness(c.state, entry, false, day) });
-  const others = new Map<string, number>();
+  type Site = { id: string; company: Id; loc: string; area: string; opened: number; d: number };
+  const site = (o: MarketCompany, entry: StoreEntry, d: number): Site => ({ id: entry.id, company: o.id, loc: storeLocationIn(m, entry), area: storeArea(o, entry), opened: entry.openedDay, d: d * entryNovelty(entry.openedDay, day) });
+  const own: Site[] = c.state.company.stores.map((entry) => site(c, entry, row[lkey(c, entry)] ?? storeAttractiveness(c.state, entry, false, day)));
+  const others: Site[] = [];
   for (const o of activeCompanies(m)) {
     if (o.id === c.id) continue;
     const passed = o.progress.lastProcessedGameDate >= day || (o.openDay?.gameDate === day);
     for (const entry of o.state.company.stores) {
       const recorded = row[lkey(o, entry)];
       const d = recorded !== undefined ? recorded : passed ? 0 : storeAttractiveness(o.state, entry, false, day);
-      const area = competeKey(m, o, entry);
-      others.set(area, (others.get(area) ?? 0) + d);
+      if (d > 0) others.push(site(o, entry, d));
     }
   }
   const out: Record<string, number> = {};
-  for (const [id, x] of own) out[id] = x.d > 0 ? x.d / (x.d + k * (others.get(x.area) ?? 0)) : 1;
+  for (const x of own) {
+    if (x.d <= 0) {
+      out[x.id] = 1;
+      continue;
+    }
+    // 取り合う相手: ほかの会社の店と、同じ会社のほかの店（近いほど強く。新しい店は段階的に）
+    let rivals = 0;
+    for (const y of [...others, ...own]) {
+      if (y === x || y.d <= 0) continue;
+      const w = siteWeight(x.loc, x.area, y.loc, y.area);
+      if (w > 0) rivals += w * entryRamp(Math.max(x.opened, y.opened), day) * y.d;
+    }
+    out[x.id] = x.d / (x.d + k * rivals);
+  }
   return out;
+}
+
+/** 2つの店の取り合いの近さ（同じ市区町村の同じ場所 = 1、同じ市区町村の別の場所 = nearShare、ほかの市区町村 = 0） */
+export function siteWeight(locA: string, areaA: string, locB: string, areaB: string): number {
+  if (locA !== locB) return 0;
+  return areaA === areaB ? 1 : B().nearShare;
+}
+
+/** 新店の話題性: 開店から noveltyDays 日は取り合いの重みが noveltyMult 倍 → 1 倍（じろ2） */
+export function entryNovelty(openedDay: number, day: number): number {
+  const E = B().entry;
+  const age = day - openedDay;
+  if (age > E.noveltyDays) return 1;
+  return 1 + (E.noveltyMult - 1) * Math.max(0, Math.min(1, (E.noveltyDays - age + 1) / E.noveltyDays));
+}
+
+/** 新しい店とほかの店の取り合いの強さ: 新しいほうの店の開店から rampDays 日かけて 0 → 1（じろ2） */
+export function entryRamp(newerOpenedDay: number, day: number): number {
+  return Math.max(0, Math.min(1, (day - newerOpenedDay) / B().entry.rampDays));
 }
 
 /** 全社の今の店の倍率（画面の説明・テスト用。各社の次の日付で） */

@@ -239,6 +239,17 @@ export const BALANCE = {
     lowPowerMax: 0.12,
     /** 購買力が高い地域の、高い品の選ばれやすさ = highPowerPremium × (購買力 − 1)（toleranceMax − 1 まで） */
     highPowerPremium: 3,
+    /**
+     * 候補地の数字（じろ2: 改修設計書03。オーナーの判断「公的な統計を同梱」。来客の見込みに少しだけ入れる）。
+     * 来客の倍率 = 1 + siteSpan × 点数（−1.5〜1.5）。点数: 昼夜間人口比率（駅前は昼の人が多いほど、住宅街は夜の人が多いほど良い）＋
+     * 小売業の多さ（人が集まる）− 飲食店の多さ（競争が激しい）。交通量は場所の種類と人口密度から（表示用）
+     */
+    siteSpan: 0.04,
+    siteDaytime: { station: 1, home: 0.5, roadside: 0.25, residential: -0.5 } as Record<string, number>,
+    siteRetail: 0.5,
+    siteFood: 0.25,
+    trafficBase: { station: 1.3, home: 1, roadside: 1.1, residential: 0.7 } as Record<string, number>,
+    trafficDensity: 0.3,
   },
   market: {
     /**
@@ -287,6 +298,17 @@ export const BALANCE = {
      * 同じくらいの店が2つなら、それぞれ 1 ÷ 1.4 ≒ 0.71 倍（地域の客は全体では増える。ラーメンの激戦区）
      */
     competition: 0.4,
+    /**
+     * 距離の取り合い（じろ2: 改修設計書03）: 同じ市区町村の同じ場所の店どうしは competition の強さ、同じ市区町村の別の場所の店とは
+     * その nearShare 倍の弱さで取り合う。同じ会社の店どうしも取り合う（客を食い合う）
+     */
+    nearShare: 0.25,
+    /**
+     * 新規参入の保護（オーナーの判断「話題性＋段階的＋過密の注意」2026-11-11）: 開店から noveltyDays 日は「新店の話題性」で
+     * 取り合いの重みを noveltyMult 倍 → 1 倍へ、ほかの店との取り合いは rampDays 日かけて強める。利益は保証しない。
+     * 同じ場所に crowdedSite 店以上（同じ市区町村に crowdedCity 店以上）あれば出店の地図で「過密」の注意を出す
+     */
+    entry: { noveltyMult: 1.3, noveltyDays: 14, rampDays: 7, crowdedSite: 3, crowdedCity: 8 },
     /** 市場シェア = 直近この日数の純売上の割合 */
     shareDays: 30,
     /**

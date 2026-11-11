@@ -3,7 +3,7 @@
 // マウス・タッチで拡大縮小・ドラッグ・ピンチ。選んだ区域を強調し、候補地に印を出す。戻る・パンくず。スマホ（横向き・回した表示）と PC。
 // 地図データは都道府県を選んだときに、その都道府県の分だけ読む。
 
-import { candidateSites, locationInfo, minWageOf, populationIndex, PROPERTIES, type LocationInfo } from '@jiro/core';
+import { candidateSites, locationInfo, minWageOf, populationIndex, PROPERTIES, siteStats, type LocationInfo } from '@jiro/core';
 import { isRotated, toView } from '../game/orientation';
 import { h, replace } from './dom';
 
@@ -352,6 +352,18 @@ export function openStoreMap(root: HTMLElement, o: StoreMapOptions): { el: HTMLE
       h('div', { class: 'kv' }, h('span', null, '値段の感じ方'), h('b', { 'data-map-feel': '' }, feel)),
       h('div', { class: 'kv' }, h('span', null, '最低賃金'), h('b', null, `${minWageOf(l.code).toLocaleString('ja-JP')}円/時`)),
     ];
+    // 公的な統計（じろ2: 国勢調査2020の昼夜間人口比率・経済センサス2021の小売業・飲食店の数）
+    const st = siteStats(l.code, 'home');
+    if (st.dayNightRatio !== null) {
+      rows.push(h('div', { class: 'kv', 'data-map-daytime': '' }, h('span', null, '昼夜間人口比率'), h('b', null, `${st.dayNightRatio.toFixed(1)}%（昼 ${people(st.daytimePopulation ?? 0)}）`)));
+    }
+    if (st.retail !== null && st.food !== null) {
+      const vs = (r: number | null) => (r === null ? '' : r >= 1.15 ? '（多い）' : r <= 0.85 ? '（少ない）' : '');
+      rows.push(
+        h('div', { class: 'kv', 'data-map-commerce': '' }, h('span', null, '小売業'), h('b', null, `${st.retail.toLocaleString('ja-JP')}店${vs(st.retailRatio)}`)),
+        h('div', { class: 'kv', 'data-map-food': '' }, h('span', null, '飲食店'), h('b', null, `${st.food.toLocaleString('ja-JP')}店${vs(st.foodRatio)}`)),
+      );
+    }
     if (o.mode === 'city') {
       const ci = o.cityInfo?.(l.code) ?? { lines: [], problem: null };
       return h(

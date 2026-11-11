@@ -49,6 +49,7 @@ export * from './sim/commute';
 export * from './sim/company';
 export * from './sim/stores';
 export * from './sim/location';
+export * from './sim/site-forecast';
 export { MUNICIPALITIES, PREFECTURES } from './data/municipalities';
 export { NATIONAL_ECONOMY, PREFECTURE_ECONOMY, type PrefectureEconomy } from './data/regional';
 export * from './sim/manager';

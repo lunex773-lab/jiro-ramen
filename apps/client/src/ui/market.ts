@@ -51,6 +51,7 @@ import { codeBlock } from './room-code';
 import { cardHead, kpi, kpiRow, meterBar, yenSigned } from './kit';
 import { loanControl } from './loan';
 import { creditCard } from './market-credit';
+import { forecastLines } from './site-lines';
 
 /** 市場の画面の上の数字のカード（値の要素に data 属性を付ける。E2E が読む） */
 function stat(label: string, attrs: Record<string, string>, value: string, tone = ''): HTMLElement {
@@ -789,7 +790,11 @@ export class MarketScreen {
         const l = locationInfo(code);
         const rent = Math.round((STAGES[p.stage]?.rent ?? 0) * p.rentMult * (l?.rent ?? 1));
         return {
-          lines: [`空き ${free}件・初期費用 ${yenStr(p.initialCost)}・家賃 ${yenStr(rent)}/日・準備 ${p.openingDays}日${code === city ? '' : '（市場の街の外: この市区町村の店どうしで客を取り合う）'}`],
+          lines: [
+            `空き ${free}件・初期費用 ${yenStr(p.initialCost)}・家賃 ${yenStr(rent)}/日・準備 ${p.openingDays}日${code === city ? '' : '（市場の街の外: この市区町村の店どうしで客を取り合う）'}`,
+            // 見込み（全社の店の場所で競合を数える。自分の店も v.sites に入っている）
+            ...forecastLines(s, code, pid, v.sites ?? [], false),
+          ],
           problem: has
             ? 'この場所のこの物件にはもう出店しています'
             : free <= 0

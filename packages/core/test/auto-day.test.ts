@@ -1,7 +1,7 @@
 // 自動営業（オンライン市場の0時の計算・店長の営業）の日のあとの在庫と常連（オーナーの報告した不具合の回帰テスト）
 import { describe, expect, it } from 'vitest';
 import { autoPlayDay, createMarket, jstMidnight, playerCompany, startDay, type GameState } from '../src';
-import { autoOrderTarget, stockOf } from '../src/sim/inventory';
+import { autoOrderTarget, shelfLifeCap, stockOf } from '../src/sim/inventory';
 import { clone } from './helpers';
 
 function company(): { s: GameState; demand: Record<string, number> } {
@@ -20,7 +20,9 @@ describe('自動営業の日のあと', () => {
       autoPlayDay(s, s.day, demand, { allowLoan: false });
       expect(s.phase).toBe('prep');
       for (const item of ['noodle', 'bones', 'moyashi']) {
-        expect(stockOf(s, item), `${s.day}日目の朝の ${item}`).toBeGreaterThanOrEqual(autoOrderTarget(s, item) * 0.99);
+        // 保存期間のうちに使い切れない分は頼まない（じろ2）ので、目安と保存期間の上限の小さいほうまで。
+        // 新規参入の保護（じろ2）で開店からの数日は客が増えていくため、朝に計算し直した目安（前の日の売れ行きを入れる）より少し少ないことがある
+        expect(stockOf(s, item), `${s.day}日目の朝の ${item}`).toBeGreaterThanOrEqual(Math.min(autoOrderTarget(s, item), shelfLifeCap(s, item)) * 0.85);
       }
     }
   });
