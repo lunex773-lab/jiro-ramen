@@ -93,7 +93,9 @@ test('設備を見ると操作ボタンが出て、丼を取って並べられ�
   await shot(page, '04-assembly');
 });
 
-test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を持って席の客を襲うと血が出て客が逃げ、警察が来てその日の営業が終わる（じろ1 5.12）', async ({ page }) => {
+test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を持って席の客を襲うと血が出て客が逃げ、等速に戻り、警察が来て逮捕され、暗くなってその日の営業が終わる（じろ1 5.12・2026-11-11）', async ({ page }) => {
+  // 警察が来るまで20秒・逮捕の流れ（歩いて来る〜暗くなる）があるので長め
+  test.setTimeout(180_000);
   await startNewGame(page);
   type S = { phase: string; reputation: number; armory?: { doorOpen: boolean }; incident?: { police: boolean } | null; dirt: { kind: string }[]; seats: { id: string; customerId: string | null }[]; customers: { id: string; hurt?: boolean; state: string }[]; players: { hand: { kind: string } }[] };
   const state = () => page.evaluate(() => (window as unknown as { __jiro: { host: { state: S } } }).__jiro.host.state);
@@ -143,6 +145,10 @@ test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を
   await take.click();
   await expect(panel).toHaveCount(0);
   await expect(page.locator('.hud-hand')).toContainText('拳銃');
+  // 倍速にしておく（襲うと等速に戻る。オーナーの指示 2026-11-11）
+  const speed = page.locator('.hud .chip', { hasText: /^×\d$/ });
+  await speed.click();
+  await expect(speed).toHaveText('×2');
   // 席の客を撃つ
   const rep = (await state()).reputation;
   await faceId(seated!);
@@ -155,7 +161,39 @@ test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を
   expect(s1.reputation).toBeLessThan(rep);
   await page.waitForTimeout(300);
   await shot(page, 'armory-shot');
-  // 警察が来て、その日の営業は終わる
+  await expect(speed).toHaveText('×1');
+  await expect(speed).toBeDisabled();
+  // 20秒後に警察が来て、警察官が歩いて来て手錠をかける（その間は動けない）
+  type A = { incident?: { arrest?: { phase: string; officers: unknown[] } } };
+  const tickUntil = (phase: string, extra = 0) =>
+    page.evaluate(
+      ([ph, more]) => {
+        const app = (window as unknown as { __jiro: { host: { state: A; tick(dt: number): void } } }).__jiro;
+        for (let i = 0; i < 1200; i++) {
+          if (app.host.state.incident?.arrest?.phase === ph) {
+            for (let k = 0; k < Number(more) * 10; k++) app.host.tick(0.1);
+            return true;
+          }
+          app.host.tick(0.1);
+        }
+        return false;
+      },
+      [phase, extra] as const,
+    );
+  expect(await tickUntil('approach')).toBe(true);
+  expect(((await state()) as unknown as A).incident?.arrest?.officers).toHaveLength(2);
+  await expect(page.locator('.app.arrest-mode')).toHaveCount(1);
+  expect(await tickUntil('cuff', 1)).toBe(true);
+  await page.waitForTimeout(300);
+  await shot(page, 'arrest-cuff');
+  expect(await tickUntil('escort', 2)).toBe(true);
+  await page.waitForTimeout(300);
+  await shot(page, 'arrest-escort');
+  // パトカーに乗せられたら画面が暗くなる
+  expect(await tickUntil('fade', 1.2)).toBe(true);
+  await expect.poll(async () => Number((await page.locator('[data-arrest-fade]').getAttribute('style'))?.match(/opacity:\s*([\d.]+)/)?.[1] ?? 0), { timeout: 5000 }).toBeGreaterThan(0.3);
+  await shot(page, 'arrest-fade');
+  // 暗くなったら、その日の営業は終わる
   const closed = await page.evaluate(() => {
     const app = (window as unknown as { __jiro: { host: { state: S; tick(dt: number): void } } }).__jiro;
     for (let i = 0; i < 3000; i++) {
@@ -168,6 +206,8 @@ test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を
   const s2 = await state();
   expect(s2.incident?.police).toBe(true);
   expect(s2.players[0]!.hand.kind).toBe('none');
+  // 精算の画面が出たら暗さは消える
+  await expect(page.locator('[data-arrest-fade]')).toBeHidden({ timeout: 5000 });
 });
 
 test('開店すると時計が進み、客が来店する', async ({ page }) => {

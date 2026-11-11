@@ -9,7 +9,7 @@ import { NOODLE_SOURCES, INGREDIENTS } from '../data/ingredients';
 import { PREP_RECIPES, type PrepRecipe } from '../data/prep';
 import { accessPoint, armoryDoorPos, equipmentCenter, seatKitchenPoint, seatPos, stageOf } from '../geometry';
 import { WEAPONS, WEAPON_IDS } from '../data/weapons';
-import { ammoOf, ARMORY_DOOR_ID, ARMORY_RACK_ID, armoryDoorProblem, armoryOf, attack, attackable, buyAmmo, buyWeapon, incidentToday, returnWeapon, takeWeapon, toggleArmoryDoor, weaponOf, weaponOwned } from './armory';
+import { ammoOf, ARMORY_DOOR_ID, ARMORY_RACK_ID, armoryDoorProblem, armoryOf, attack, attackable, staffAttackable, buyAmmo, buyWeapon, incidentToday, returnWeapon, takeWeapon, toggleArmoryDoor, weaponOf, weaponOwned } from './armory';
 import type {
   Bowl,
   Customer,
@@ -61,7 +61,9 @@ export type Target =
   /** 客（店の前でタバコを吸っている客への声かけ・武器を持っているときは店の中の客も。第2版 9・じろ1 5.12） */
   | { kind: 'customer'; id: Id; c: Customer }
   /** 隠し扉と武器庫の棚（店の外の右の横の壁。じろ1 5.12） */
-  | { kind: 'fixture'; id: Id; pos: Vec2 };
+  | { kind: 'fixture'; id: Id; pos: Vec2 }
+  /** 店員（武器を持っているときだけ襲える。オーナーの指示 2026-11-11） */
+  | { kind: 'staff'; id: Id; e: Employee };
 
 export type Args = Record<string, string | number | boolean> | null;
 
@@ -81,6 +83,8 @@ export function resolveTarget(s: GameState, id: Id): Target | null {
   const c = s.customers.find((x) => x.id === id && x.state !== 'left');
   if (c) return { kind: 'customer', id, c };
   if (id === ARMORY_DOOR_ID || id === ARMORY_RACK_ID) return { kind: 'fixture', id, pos: armoryDoorPos(stageOf(s)) };
+  const st = s.employees.find((x) => x.id === id && x.presentToday);
+  if (st) return { kind: 'staff', id, e: st };
   return null;
 }
 
@@ -102,6 +106,8 @@ export function targetPoints(s: GameState, t: Target): Vec2[] {
     case 'fixture':
       // 扉の前の路地に立って操作する
       return [{ x: t.pos.x + 0.6, z: t.pos.z }];
+    case 'staff':
+      return [t.e.pos];
   }
 }
 
@@ -1087,7 +1093,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'attack',
-    match: (t) => t.kind === 'customer' || (t.kind === 'seat' && !!t.seat.customerId),
+    match: (t) => t.kind === 'customer' || t.kind === 'staff' || (t.kind === 'seat' && !!t.seat.customerId),
     phases: ['prep', 'open', 'closing'],
     skill: 'general',
     visible: (_s, a) => a.hand.kind === 'weapon',
@@ -1095,16 +1101,20 @@ const VERBS: VerbDef[] = [
     plan: (s, a, t) => {
       const w = weaponOf(a);
       if (!w) return no('襲う', '武器を持っていません');
-      const c = t.kind === 'customer' ? t.c : s.customers.find((x) => x.id === (t as { seat: Seat }).seat.customerId);
       const label = w.kind === 'gun' ? `${w.name}で${w.verb}（弾${ammoOf(s, w.id)}発）` : `${w.name}で${w.verb}`;
-      if (!c || !attackable(c)) return no(label, '襲える客がいません');
+      if (t.kind === 'staff') {
+        if (t.e === a || !staffAttackable(t.e)) return no(label, '襲える人がいません');
+      } else {
+        const c = t.kind === 'customer' ? t.c : s.customers.find((x) => x.id === (t as { seat: Seat }).seat.customerId);
+        if (!c || !attackable(c)) return no(label, '襲える客がいません');
+      }
       if (w.kind === 'gun' && ammoOf(s, w.id) <= 0) return no(label, '弾がありません（武器庫で買えます）');
       return ok(label, 0, 1);
     },
     applyUnit: (s, a, t, _args, ctx) => {
       const w = weaponOf(a);
-      const c = t.kind === 'customer' ? t.c : s.customers.find((x) => x.id === (t as { seat: Seat }).seat.customerId);
-      if (w && c) attack(s, ctx, a, c, w);
+      const v = t.kind === 'staff' ? t.e : t.kind === 'customer' ? t.c : s.customers.find((x) => x.id === (t as { seat: Seat }).seat.customerId);
+      if (w && v) attack(s, ctx, a, v, w);
     },
   },
 

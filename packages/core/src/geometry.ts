@@ -187,3 +187,27 @@ export function zoneAt(s: GameState, p: Vec2): 'kitchen' | 'dining' | 'street' |
   if (gz === st.counter.z0 && gx < st.counter.x0) return 'kitchen';
   return 'out';
 }
+
+/** 警察のパトカーを止める場所（店の前の道。車体は x の向きに長い。画面の armory-fx と同じ） */
+export function policeCarPos(st: StageDef): Vec2 {
+  return { x: st.w * CELL + 2.5, z: -6.2 };
+}
+
+/** パトカーの後ろの扉の前（乗せる人が立つ場所） */
+export function policeCarDoor(st: StageDef): Vec2 {
+  const c = policeCarPos(st);
+  return { x: c.x + 0.55, z: c.z + 1.3 };
+}
+
+/** パトカーの後ろの席 */
+export function policeCarSeat(st: StageDef): Vec2 {
+  const c = policeCarPos(st);
+  return { x: c.x + 0.55, z: c.z + 0.25 };
+}
+
+/** 警察官が降りる場所（前と後ろの扉の前） */
+export function policeSpawn(st: StageDef, i: number): Vec2 {
+  const c = policeCarPos(st);
+  return { x: c.x - 0.7 + i * 0.5, z: c.z + 1.25 };
+}
+

@@ -32,7 +32,7 @@ export interface CharacterOpts {
   seed: number;
   color?: string;
   /** 見た目の指定（珍しい客）。なければ seed から決まる */
-  look?: 'blonde_woman' | 'boyfriend' | null;
+  look?: 'blonde_woman' | 'boyfriend' | 'police' | null;
 }
 // 従業員（kind 'employee'）の制服・小物は seed から staffLook で決まる（経営メニューの説明と同じ）
 
@@ -271,6 +271,20 @@ function chooseLook(o: CharacterOpts): Look {
       look.pants = '#2a2f3e';
       look.glasses = false;
       look.backpack = null;
+    } else if (o.look === 'police') {
+      // 警察官（紺の制服・水色のシャツ・制帽）
+      look.body = { s: rr(r, 1.0, 1.06), w: rr(r, 1.0, 1.12), female: false };
+      look.outfit = 'suit';
+      look.top = '#1f2a44';
+      look.top2 = '#a9c4e0';
+      look.tie = '#1a2238';
+      look.pants = '#1a2236';
+      look.shoes = '#111111';
+      look.hair = 'cap';
+      look.capColor = '#18223a';
+      look.glasses = false;
+      look.backpack = null;
+      look.longSleeve = true;
     } else if (o.look === 'boyfriend') {
       look.body = { s: rr(r, 1.0, 1.06), w: rr(r, 0.95, 1.1), female: false };
       look.hair = 'side';
@@ -879,6 +893,10 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       const obj = createHeldItem(kind);
       if (kind === 'clean' || kind === 'dirty') {
         obj.position.set(0, 0, 0);
+        heldAnchor.add(obj);
+      } else if (kind === 'handcuffs') {
+        // 手錠は胸の前（両手を前に出した姿勢で使う）
+        obj.position.set(0, -0.08 * s, 0.06);
         heldAnchor.add(obj);
       } else if (kind === 'tvcamera') {
         // 右肩にかつぐ

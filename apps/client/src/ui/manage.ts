@@ -70,6 +70,7 @@ import {
   shiftIssues,
   attendanceOn,
   shiftFor,
+  injuredOn,
   hasDateShift,
   shiftTimeText,
   staffLog,
@@ -170,10 +171,10 @@ function roleCounts(list: Employee[]): string {
 }
 
 /** 実際の勤務の短い説明 */
-function attText(a: { absent: boolean; workedMin: number; lateMin: number; overtimeMin: number; calledIn: boolean }): string {
+function attText(a: { absent: boolean; workedMin: number; lateMin: number; overtimeMin: number; calledIn: boolean; injured?: boolean }): string {
   if (a.absent) return '欠勤';
   const hm = `${Math.floor(a.workedMin / 60)}時間${a.workedMin % 60 > 0 ? `${a.workedMin % 60}分` : ''}`;
-  return `${hm}${a.lateMin > 0 ? `・遅刻${a.lateMin}分` : ''}${a.overtimeMin >= 10 ? `・残業${a.overtimeMin}分` : ''}${a.calledIn ? '・呼び出し' : ''}`;
+  return `${hm}${a.lateMin > 0 ? `・遅刻${a.lateMin}分` : ''}${a.overtimeMin >= 10 ? `・残業${a.overtimeMin}分` : ''}${a.calledIn ? '・呼び出し' : ''}${a.injured ? '・けがをして帰った' : ''}`;
 }
 
 /** 表のマスに入る短いシフト（「11-15」） */
@@ -1562,7 +1563,7 @@ export class ManageMenu {
           'div',
           { class: 'kv', 'data-cal-emp': e.id },
           h('span', null, `${e.profile.name}（${ROLE_LABEL[e.profile.role]}）`),
-          h('b', null, `${isClosedDay(hrs, d) ? '定休日' : this.shiftText(sh)}${past && att ? `・実際 ${attText(att)}` : ''}`),
+          h('b', null, `${isClosedDay(hrs, d) ? '定休日' : injuredOn(e, d) && !past ? 'けがの療養中' : this.shiftText(sh)}${past && att ? `・実際 ${attText(att)}` : ''}`),
         );
       });
     const byRole = this.calGroup === 'role';
@@ -1594,12 +1595,14 @@ export class ManageMenu {
       if (d < s.day || (d === s.day && s.phase === 'closed')) {
         const a = attendanceOn(e, d);
         if (!a) return ['', ''];
+        if (a.injured) return ['傷', 'bad'];
         if (a.absent) return ['欠', 'bad'];
         if (a.lateMin > 0) return ['遅', 'warn'];
         if (a.overtimeMin >= 10) return ['残', 'info'];
         return ['✓', 'ok'];
       }
       if (isClosedDay(hrs, d)) return ['定', 'closed'];
+      if (injuredOn(e, d)) return ['療', 'bad'];
       const sh = shiftFor(e, d);
       return sh ? [shiftShort(sh, hrs), 'plan'] : ['休', 'off'];
     };
@@ -1677,12 +1680,15 @@ export class ManageMenu {
           const sh = shiftFor(e, sel);
           const part = isPartTime(e);
           const notYet = e.availableFrom !== undefined && e.availableFrom > sel;
+          const injured = injuredOn(e, sel);
           return h(
             'div',
             { class: 'kv' },
             h('span', null, `${e.profile.name}（${ROLE_LABEL[e.profile.role]}）`),
             notYet
               ? h('b', null, `${e.availableFrom}日目から出勤`)
+              : injured
+                ? h('b', null, `けがの療養中（${e.injury!.until + 1}日目から出勤）`)
               : part && host
                 ? h(
                     'select',
@@ -1810,6 +1816,10 @@ export class ManageMenu {
       }
       if (e.availableFrom !== undefined && d < e.availableFrom) {
         cells.push(h('button', { class: `cal-day pending ${d === s.day ? 'today' : ''}`, 'data-day': String(d), disabled: true }, h('b', null, `${d}日目${d === s.day ? '・今日' : ''}`), h('small', null, '手続き中')));
+        continue;
+      }
+      if (injuredOn(e, d)) {
+        cells.push(h('button', { class: `cal-day pending ${d === s.day ? 'today' : ''}`, 'data-day': String(d), disabled: true }, h('b', null, `${d}日目${d === s.day ? '・今日' : ''}`), h('small', null, '療養')));
         continue;
       }
       const sh = shiftFor(e, d);

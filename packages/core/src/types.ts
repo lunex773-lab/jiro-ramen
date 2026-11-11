@@ -175,7 +175,7 @@ export interface ShiftDay {
 }
 
 /** 勤務の出来事（実際に起きたことだけを記録する） */
-export type StaffLogKind = 'late' | 'absent' | 'slack' | 'private' | 'postpone' | 'argue' | 'rude' | 'abandon' | 'calm' | 'promoted' | 'calledIn' | 'offWish' | 'quit';
+export type StaffLogKind = 'late' | 'absent' | 'slack' | 'private' | 'postpone' | 'argue' | 'rude' | 'abandon' | 'calm' | 'promoted' | 'calledIn' | 'offWish' | 'quit' | 'injured';
 
 export interface StaffLogEntry {
   day: number;
@@ -219,6 +219,8 @@ export interface AttendanceRecord {
   /** 予定より長く働いた分（閉店のあと並んだ客に提供した分など） */
   overtimeMin: number;
   calledIn: boolean;
+  /** その日に武器で襲われてけがをした（このあと療養） */
+  injured?: boolean;
 }
 
 /** その日の出勤の状況（毎朝の出勤確認で作る） */
@@ -284,7 +286,8 @@ export interface EmployeeProfile {
  *   break:  休憩（「休憩いただきます！」→ 歩いて店の外へ）
  *   away:   勝手に持ち場を離れる（何も言わずに店の外へ）
  */
-export type CommuteKind = 'arrive' | 'return' | 'back' | 'leave' | 'break' | 'away';
+/** injured: 武器で襲われて、けがをして店の外へ逃げる（あいさつなし） */
+export type CommuteKind = 'arrive' | 'return' | 'back' | 'leave' | 'break' | 'away' | 'injured';
 
 export interface Commute {
   kind: CommuteKind;
@@ -355,6 +358,11 @@ export interface Employee extends ActorBase {
   availableFrom?: number;
   /** 満足度（0〜1）。希望外の日の勤務・疲れで下がり、ふだんは基準へ戻る。低いと遅刻・欠勤が増え、辞めることがある。古い状態にはない → 基準 */
   morale?: number;
+  /**
+   * けが（武器で襲われた。オーナーの指示 2026-11-11「怪我をした従業員は１週間療養する」）。
+   * day にけがをして店を出て、until の日まで療養して出勤しない（day + 1 〜 day + 7）
+   */
+  injury?: { day: number; until: number };
 }
 
 export interface TaskStep {
@@ -440,6 +448,37 @@ export interface IncidentState {
   victims: number;
   /** イベントの記録の id（じろ2） */
   eventId?: Id;
+  /** 襲われてけがをした店員の数（victims に含む） */
+  staffVictims?: number;
+  /** 最初に襲った人（逮捕される人） */
+  attackerId?: Id;
+  /** 警察が来てからの逮捕の流れ（オーナーの指示 2026-11-11） */
+  arrest?: ArrestState;
+}
+
+/**
+ * 逮捕の流れ: approach（警察官がパトカーから歩いて来る。襲った人は動けない）→ cuff（手錠をかける）→
+ * escort（パトカーまで連れて行く）→ board（後ろの席に乗せて扉を閉める）→ fade（画面が暗くなる）→ その日の営業は終わり
+ */
+export interface ArrestState {
+  phase: 'approach' | 'cuff' | 'escort' | 'board' | 'fade';
+  /** その段階が始まった営業の秒 */
+  since: number;
+  /** 逮捕される人（いなくなったときは null。警察は来て、武器を取り上げて帰る） */
+  attackerId: Id | null;
+  officers: Officer[];
+  /** パトカーまで連れて行く道（escort の間） */
+  path?: Vec2[];
+  /** 暗くなって、その日の営業を終えた */
+  done?: boolean;
+}
+
+export interface Officer {
+  id: Id;
+  pos: Vec2;
+  yaw: number;
+  path: Vec2[];
+  say?: { text: string; until: number } | null;
 }
 
 export interface DirtSpot {

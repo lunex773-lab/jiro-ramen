@@ -16,6 +16,7 @@ import {
   type GameState,
   type Target,
   resolveTarget,
+  staffAttackable,
 } from '@jiro/core';
 
 export interface Box {
@@ -55,6 +56,13 @@ export function interactableBoxes(s: GameState): Box[] {
     const target = armed && !c.seatId && c.state !== 'leaving' && c.state !== 'left' && c.state !== 'crew' && !c.hurt;
     if (!smoking && !target) continue;
     out.push({ id: c.id, min: [c.pos.x - 0.3, 0, c.pos.z - 0.3], max: [c.pos.x + 0.3, 1.8, c.pos.z + 0.3] });
+  }
+  // 武器を持っている人がいるときは店員も（オーナーの指示 2026-11-11）
+  if (armed) {
+    for (const e of s.employees) {
+      if (!staffAttackable(e)) continue;
+      out.push({ id: e.id, min: [e.pos.x - 0.28, 0, e.pos.z - 0.28], max: [e.pos.x + 0.28, 1.8, e.pos.z + 0.28] });
+    }
   }
   // 隠し扉（外壁の一部に見える）と、開いているときは奥の武器の棚
   const ar = armoryRect(st);
@@ -178,5 +186,7 @@ export function targetName(s: GameState, t: Target): string {
     case 'fixture':
       // 隠し扉は、開くまでただの外壁に見える
       return t.id === ARMORY_RACK_ID ? '武器の棚' : s.armory?.doorOpen ? '隠し扉' : '外壁';
+    case 'staff':
+      return `店員（${t.e.profile.name}）`;
   }
 }

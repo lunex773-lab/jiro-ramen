@@ -34,6 +34,7 @@ import {
   SEC_PER_MIN,
   todayHours,
   WEAPONS,
+  speedLocked,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 import { targetName, type FocusResult } from '../game/targeting';
@@ -227,8 +228,8 @@ export class Hud {
                 class: 'chip',
                 title: 'ゲーム速度',
                 onclick: () => {
-                  // 爆発事故の間は倍速にできない（等速で火事を見せる）
-                  if (this.host.state.events?.accident) {
+                  // 爆発事故・人を襲った事件の間は倍速にできない（等速で見せる）
+                  if (speedLocked(this.host.state)) {
                     this.host.speed = 1;
                     this.lastTopKey = '';
                     return;
@@ -263,7 +264,7 @@ export class Hud {
 
   private updateTop(s: GameState): void {
     const buzz = buzzLeftMinutes(s);
-    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}|${buzz}|${s.events?.accident ? 1 : 0}`;
+    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}|${buzz}|${speedLocked(s) ? 1 : 0}`;
     if (key === this.lastTopKey) return;
     this.lastTopKey = key;
     const t = (this.topParts ??= this.buildTop());
@@ -289,9 +290,9 @@ export class Hud {
     t.buzz.hidden = buzz === null;
     if (this.host.mode === 'local') {
       t.speed.textContent = `×${this.host.speed}`;
-      const locked = !!s.events?.accident;
+      const locked = speedLocked(s);
       (t.speed as HTMLButtonElement).disabled = locked;
-      t.speed.title = locked ? '事故の間は倍速にできません' : 'ゲーム速度';
+      t.speed.title = locked ? (s.events?.accident ? '事故の間は倍速にできません' : '事件の間は倍速にできません') : 'ゲーム速度';
     }
     else {
       t.speed.className = `chip conn ${this.host.conn}`;

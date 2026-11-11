@@ -8,7 +8,7 @@ import { MAT, plastic } from './materials';
 import { BOWL_DIMS, bowlDirtyPool, bowlShellGeometry, bowlStainGeometry, bowlStainMaterial } from './bowl';
 import { canvasTexture, JP_FONT, texGrime, texSpill } from './textures';
 
-export type HeldKind = 'bowl' | 'clean' | 'dirty' | 'mop' | 'lostItem' | 'trash' | 'phone' | 'cigarette' | 'tvcamera' | `weapon:${string}`;
+export type HeldKind = 'bowl' | 'clean' | 'dirty' | 'mop' | 'lostItem' | 'trash' | 'phone' | 'cigarette' | 'tvcamera' | 'handcuffs' | `weapon:${string}`;
 
 type Parts = { geo: THREE.BufferGeometry; mat: THREE.Material }[];
 
@@ -153,6 +153,19 @@ function cigaretteParts(): Parts {
   });
 }
 
+/** 手錠（2つの輪と鎖。逮捕のとき。オーナーの指示 2026-11-11） */
+function handcuffParts(): Parts {
+  return cached('handcuffs', () => {
+    const b = new GeoBuilder();
+    const steel = std('cuff-steel', { color: '#d4d8de', metalness: 0.45, roughness: 0.3 });
+    const ring = new THREE.TorusGeometry(0.038, 0.007, 8, 20);
+    b.add(steel, ring, { x: -0.06 });
+    b.add(steel, ring, { x: 0.06 });
+    for (let i = 0; i < 3; i++) b.box(steel, 0.012, 0.006, 0.006, { x: -0.014 + i * 0.014 });
+    return b.merged();
+  });
+}
+
 function phoneParts(): Parts {
   return cached('phone', () => {
     const b = new GeoBuilder();
@@ -205,6 +218,8 @@ export function createHeldItem(kind: HeldKind): THREE.Object3D {
     }
     case 'tvcamera':
       return instantiate(tvCameraParts());
+    case 'handcuffs':
+      return instantiate(handcuffParts(), false);
     default:
       // 武器（じろ1 5.12）
       return createWeapon(kind.slice('weapon:'.length));

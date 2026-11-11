@@ -100,7 +100,7 @@ describe('客を襲う（罰は軽い: 評判 −0.4・警察が来てその日�
     expect(p.hand.kind).toBe('none');
     expect(s.armory!.doorOpen).toBe(false);
     expect(s.phase).toBe('closed');
-    expect(s.notices.find((n) => n.code === 'incident')?.text).toContain('警察');
+    expect(s.notices.find((n) => n.code === 'incident')?.text).toContain('逮捕');
   });
 
   it('包丁は近くでないと届かない。拳銃は離れていても撃てる。散弾銃は近くの客にも当たる', () => {

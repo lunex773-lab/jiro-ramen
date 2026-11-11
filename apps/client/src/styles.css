@@ -1007,6 +1007,12 @@ input, select { font: inherit; }
 .app.accident-mode .hud { visibility: hidden; }
 .app.accident-mode .hud .chip.menu { visibility: visible; }
 .app.accident-mode .hint, .app.accident-mode .tutorial-panel { display: none !important; }
+/* 逮捕された人は営業の画面を隠す。パトカーに乗せられたら画面が暗くなる（オーナーの指示 2026-11-11） */
+.app.arrest-mode .hud { visibility: hidden; }
+.app.arrest-mode .hint, .app.arrest-mode .tutorial-panel { display: none !important; }
+.arrest-fade { position: absolute; inset: 0; background: #000; z-index: 8; pointer-events: none; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.arrest-fade[hidden] { display: none; }
+.arrest-fade p { color: #eee; font-size: 15px; text-align: center; margin: 0; }
 /* 設定: プレイヤー名の欄が広すぎて見出しが折り返していた（第2版 21-2） */
 .screen.settings .kv > span { white-space: nowrap; }
 .screen.settings .kv input.input { width: min(260px, 55%); }

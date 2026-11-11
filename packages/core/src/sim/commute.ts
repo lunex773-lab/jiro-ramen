@@ -29,6 +29,7 @@ const NOTE: Record<CommuteKind, string> = {
   leave: '退勤中',
   break: '休憩に入るところ',
   away: '持ち場を離れている',
+  injured: 'けがをして店の外へ逃げている',
 };
 
 /** 歩いて来る・帰っていく店の外の場所（order 番目の人ほど遠く） */
@@ -80,9 +81,10 @@ export function startArrive(s: GameState, e: Employee, kind: 'arrive' | 'return'
 }
 
 /** 店を出る（退勤・休憩・持ち場を離れる）。手ぶらで、作業の途中でないこと（呼び出し側が確かめる） */
-export function startLeave(s: GameState, e: Employee, kind: 'leave' | 'break' | 'away'): void {
+export function startLeave(s: GameState, e: Employee, kind: 'leave' | 'break' | 'away' | 'injured'): void {
   resetAi(e);
-  if (kind === 'away') {
+  // 持ち場を離れる・けがをして逃げるときは、あいさつせずにすぐ歩き出す
+  if (kind === 'away' || kind === 'injured') {
     e.commute = { kind, phase: 'walkOut', t: 0, since: s.t };
     e.ai.state = 'moving';
   } else {
@@ -133,7 +135,7 @@ export function updateCommute(s: GameState, e: Employee, dt: number, _ctx: SimCt
   if (!c) return;
   // 詰まったとき（レイアウトで通れないなど）は打ち切る
   if (s.t - c.since > C.giveUpSec) {
-    if (c.kind === 'leave' || c.kind === 'break' || c.kind === 'away') gone(e);
+    if (c.kind === 'leave' || c.kind === 'break' || c.kind === 'away' || c.kind === 'injured') gone(e);
     else {
       const g = greetPoint(s);
       e.pos = { x: g.x, z: g.z };
@@ -167,7 +169,7 @@ export function updateCommute(s: GameState, e: Employee, dt: number, _ctx: SimCt
       e.ai.state = 'idle';
       c.t -= dt;
       if (c.t > 0) return;
-      c.phase = c.kind === 'leave' || c.kind === 'break' || c.kind === 'away' ? 'walkOut' : 'toSink';
+      c.phase = c.kind === 'leave' || c.kind === 'break' || c.kind === 'away' || c.kind === 'injured' ? 'walkOut' : 'toSink';
       return;
     }
     case 'toSink': {
@@ -205,7 +207,8 @@ export function updateCommute(s: GameState, e: Employee, dt: number, _ctx: SimCt
         e.ai.path = r ? r.points : [out];
       }
       e.ai.state = 'moving';
-      if (moveAlong(e, dt, walkSpeed(s, e))) gone(e);
+      // けがをした人は急いで逃げる
+      if (moveAlong(e, dt, walkSpeed(s, e) * (c.kind === 'injured' ? 1.5 : 1))) gone(e);
       return;
     }
   }

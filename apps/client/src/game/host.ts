@@ -12,6 +12,7 @@ import {
   type GameState,
   type PeerInfo,
   type SimCtx,
+  speedLocked,
 } from '@jiro/core';
 
 export type ConnState = 'local' | 'connecting' | 'online' | 'reconnecting' | 'paused' | 'closed';
@@ -79,20 +80,21 @@ export class LocalHost implements GameHost {
   tick(dtReal: number): void {
     // 爆発事故（発火してから焼け跡のあいだ）は倍速をやめて等速にする（オーナーの指示: 15秒の火事をそのまま体験してから爆発する）。
     // 発火がフレームの途中で始まっても倍速で進みすぎないよう、細かく区切って進める
+    // 人を襲った日の事件の間（襲った瞬間から営業が終わるまで）も等速に戻す（オーナーの指示 2026-11-11）
     let real = Math.min(0.25, dtReal);
     while (real > 1e-9) {
-      if (this.state.events?.accident) this.speed = 1;
+      if (speedLocked(this.state)) this.speed = 1;
       const r = Math.min(real, 0.05);
       step(this.state, r * this.speed, this.ctx);
       real -= r;
     }
-    if (this.state.events?.accident) this.speed = 1;
+    if (speedLocked(this.state)) this.speed = 1;
     this.flush();
   }
 
-  /** 倍速にできるか（爆発事故の間はできない） */
+  /** 倍速にできないか（爆発事故・人を襲った事件の間） */
   get speedLocked(): boolean {
-    return !!this.state.events?.accident;
+    return speedLocked(this.state);
   }
 
   onEvents(cb: (ev: GameEvent[]) => void): () => void {

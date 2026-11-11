@@ -16,7 +16,7 @@ import { defOf, effectSum, updateRepairs } from './equipment';
 import { assignBowls, completeProcess, progressWork, roleOf } from './interact';
 import { receiveDeliveries, stockOf } from './inventory';
 import { managerExpressCheck } from './store-manager';
-import { incidentStopsArrivals, updateArmory } from './armory';
+import { incidentHoldsDay, incidentStopsArrivals, updateArmory } from './armory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { updateTutorial } from './tutorial';
 import { accidentHalted } from './events';
@@ -63,8 +63,8 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
   // 店長: 閉店までに足りなくなりそうな材料を当日便で先に仕入れる（オーナーの指示 2026-11-11）
   managerExpressCheck(s, dt, ctx);
 
-  // 隠し扉の武器庫: 投げた爆弾の爆発・警察の到着（その日の営業は終わる。じろ1 5.12）
-  updateArmory(s, ctx, () => {
+  // 隠し扉の武器庫: 投げた爆弾の爆発・警察の到着と逮捕（暗くなったらその日の営業は終わる。じろ1 5.12・2026-11-11）
+  updateArmory(s, dt, ctx, () => {
     if (s.phase === 'open') {
       startClosing(s, ctx);
       // 中休みのある日でも、その日の営業はここで終わり
@@ -100,10 +100,12 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
   if (s.phase === 'open' && s.openT >= sessionEndT(s)) startClosing(s, ctx);
   // 閉店の時刻のあと、並んだ客に提供している時間（光熱費に入る）
   else if (afterHoursService(s)) s.today.afterHoursSec = (s.today.afterHoursSec ?? 0) + dt;
+  // 逮捕の途中（警察が来てから暗くなるまで）は、閉店の時刻を過ぎても精算・中休みに進まない
+  const arresting = incidentHoldsDay(s);
   // 中休みの前: 店内のお客さんがいなくなったら、仕込みの時間に戻る（従業員は帰らない。じろ1 5.1）
-  if (s.phase === 'closing' && s.breakPending && allCustomersGone(s)) startBreak(s, ctx);
+  if (s.phase === 'closing' && !arresting && s.breakPending && allCustomersGone(s)) startBreak(s, ctx);
   // お客さんがいなくなったら、従業員が「お疲れ様でした！」と言って帰るのを待ってから精算する
-  else if (s.phase === 'closing' && allCustomersGone(s) && sendStaffHome(s, ctx)) {
+  else if (s.phase === 'closing' && !arresting && allCustomersGone(s) && sendStaffHome(s, ctx)) {
     settleDay(s, ctx);
   }
   if (s.tutorial) updateTutorial(s, ctx);

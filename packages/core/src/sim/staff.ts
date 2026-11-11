@@ -132,8 +132,15 @@ export function setRestDays(s: GameState, ctx: SimCtx, employeeId: string, days:
 export function shiftFor(e: Employee, day: number): ShiftDay | null {
   // 通常の採用は、採用の2日後から出勤できる（それまでは手続き・研修で来ない）
   if (e.availableFrom !== undefined && day < e.availableFrom) return null;
+  // けがの療養中は出勤しない（武器で襲われた日の翌日から1週間。オーナーの指示 2026-11-11）
+  if (injuredOn(e, day)) return null;
   if (isPartTime(e) && e.dateShifts && Object.prototype.hasOwnProperty.call(e.dateShifts, String(day))) return e.dateShifts[String(day)] ?? null;
   return shiftsOf(e)[weekdayOf(day)] ?? null;
+}
+
+/** その日はけがの療養中か（けがをした日も含む。その日は店を出たあと戻らない） */
+export function injuredOn(e: Employee, day: number): boolean {
+  return !!e.injury && day >= e.injury.day && day <= e.injury.until;
 }
 
 /** その日が日にちごとの予定か（くりかえしと違う予定を入れた日） */
@@ -328,6 +335,7 @@ export function attendanceText(e: Employee, s: GameState): string {
   const hours = sh ? `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start, th)}〜${shiftTimeText(Math.min(sh.end, openMinutesOf(th)), th, true)}` : '';
   switch (a.status) {
     case 'off':
+      if (injuredOn(e, s.day)) return `けがの療養中（${e.injury!.until + 1}日目から出勤）`;
       return e.availableFrom !== undefined && s.day < e.availableFrom ? `${e.availableFrom}日目から出勤（採用の手続き中）` : '今日は休み';
     case 'absent':
       return '当日欠勤';
@@ -340,6 +348,7 @@ export function attendanceText(e: Employee, s: GameState): string {
     case 'break':
       return `休憩中（${shiftTimeText(Math.round(a.breakTo / SEC_PER_MIN), th, true)}まで）`;
     case 'left':
+      if (e.injury?.day === s.day) return `けがをして帰った（${e.injury.until + 1}日目から出勤）`;
       return '退勤済み';
     case 'working':
       if (e.conduct?.kind && e.conduct.until > s.openT) return e.conduct.kind === 'private' ? '持ち場を離れている' : '手が止まっている';
@@ -481,6 +490,8 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
   let order = 0;
   for (const e of s.employees) {
     pruneDateShifts(e, s.day);
+    // 療養が終わった人は今日から出勤できる
+    if (e.injury && s.day > e.injury.until) delete e.injury;
     e.pos = { x: st.staffSpawn.x + 0.2, z: st.staffSpawn.z + 0.2 };
     e.hand = { kind: 'none' };
     e.work = null;
@@ -584,7 +595,7 @@ export function sendStaffHome(s: GameState, ctx: SimCtx): boolean {
 }
 
 /** このバージョンより前の状態（出勤の記録がない）で始まった日の従業員に、出勤の記録を補う（出勤していれば一日中いる扱い） */
-function ensureAttendance(s: GameState, e: Employee): Attendance {
+export function ensureAttendance(s: GameState, e: Employee): Attendance {
   if (e.att && e.att.day === s.day) return e.att;
   const sh = e.presentToday ? (shiftFor(e, s.day) ?? fullDayShift()) : null;
   const a: Attendance = {
@@ -828,7 +839,16 @@ function recordAttendance(s: GameState, e: Employee): void {
   const openMin = openMinutesOf(todayHours(s));
   const plannedMin = a.shift ? Math.round(shiftPaidHours({ ...a.shift, fromPrep: false }, openMin) * 60) : 0;
   const workedMin = a.absent ? 0 : Math.round(a.workedSec / SEC_PER_MIN);
-  const rec = { day: s.day, plannedMin, workedMin, lateMin: a.absent ? 0 : a.lateMin, absent: a.absent, overtimeMin: Math.max(0, workedMin - plannedMin), calledIn: a.calledIn };
+  const rec = {
+    day: s.day,
+    plannedMin,
+    workedMin,
+    lateMin: a.absent ? 0 : a.lateMin,
+    absent: a.absent,
+    overtimeMin: Math.max(0, workedMin - plannedMin),
+    calledIn: a.calledIn,
+    ...(e.injury?.day === s.day ? { injured: true } : {}),
+  };
   const log = (e.attLog ??= []).filter((r) => r.day !== s.day);
   log.push(rec);
   e.attLog = log.slice(-ATT_LOG_DAYS);

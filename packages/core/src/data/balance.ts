@@ -94,8 +94,24 @@ export const BALANCE = {
   armory: {
     /** 評判の下がり方（その日の最初の事件だけ） */
     reputationPenalty: 0.4,
-    /** 通報から警察が来るまで（営業の秒） */
+    /** 通報から警察が来るまで（営業の秒）。オーナーの指示 2026-11-11「20秒後に警察が来て逮捕」 */
     policeDelay: 20,
+    /** パトカーが店の前に着くまでの走り（警察が来る前の秒。画面の演出） */
+    carArriveSec: 3,
+    /** 襲われてけがをした店員が療養する日数（オーナーの指示「怪我をした従業員は１週間療養する」） */
+    injuryDays: 7,
+    /** 逮捕の流れ（営業の秒・m/秒） */
+    arrest: {
+      officers: 2,
+      walkSpeed: 2.0,
+      escortSpeed: 1.3,
+      cuffSec: 3,
+      boardSec: 2.2,
+      fadeSec: 2.5,
+      /** 着けないとき（通れないなど）はそばへ移す */
+      approachMax: 20,
+      escortMax: 25,
+    },
   },
 
   /** アルバイトのシフトを組む目安（sim/shift-plan.ts。オーナーの指示 2026-11-11） */

@@ -1,8 +1,13 @@
 // アプリ全体の流れ: タイトル → スロット選択 → 店内（一人称）→ 営業終了 → 経営 → 翌日 …
 
 import {
+  arrestOf,
   BALANCE,
   createGame,
+  incidentToday,
+  policeCarDoor,
+  policeCarSeat,
+  stageOf,
   locationProblem,
   setStoreLocation,
   equipmentCenter,
@@ -108,6 +113,10 @@ export class App {
   private requestPrompt: RequestPrompt | null = null;
   private lastAccidentId: string | null = null;
   private accidentMode = false;
+  private arrestMode = false;
+  private arrestFadeEl: HTMLElement | null = null;
+  private arrestFade = 0;
+  private lastArrestPos = { x: 0, z: 0 };
   /** 表示済みの覆面調査員の記事 */
   private shownCritics = new Set<string>();
   /** チュートリアルで目立たせている対象（変わったときだけ画面を更新する） */
@@ -704,8 +713,12 @@ export class App {
     // 爆発事故: 気を失っている間は動けない。営業の画面は隠し、焼け跡を歩けるようにする
     const acc = s.events?.accident ?? null;
     const av = accidentView(acc);
-    c.enabled = !blocking && av.awake;
+    // 逮捕（オーナーの指示 2026-11-11）: 警察に取り押さえられた人は動けず、何もできない
+    const arrest = arrestOf(s);
+    const arrestedMe = !!arrest && arrest.attackerId === host.playerId;
+    c.enabled = !blocking && av.awake && !arrestedMe;
     this.setAccidentMode(acc?.stage === 'destroyed');
+    this.setArrestMode(arrestedMe);
     // シングルプレイではメニュー中は時間を止める
     const pauseLocal = host.mode === 'local' && (blocking || s.phase === 'closed' || !!this.marketBusy);
     if (!pauseLocal) host.tick(dt);
@@ -726,7 +739,23 @@ export class App {
         this.localPos = next;
       }
     }
-    if (me) {
+    if (me && arrestedMe && arrest) {
+      // 視点: 警察官の方を向き、手錠をかけられるときは手元を見て、パトカーまで歩かされる。乗せられたら扉の前から車の中を見る
+      const st = stageOf(s);
+      const boarding = arrest.phase === 'board' || arrest.phase === 'fade';
+      const door = policeCarDoor(st);
+      const seat = policeCarSeat(st);
+      const wantYaw = boarding ? Math.atan2(seat.x - door.x, seat.z - door.z) : me.yaw;
+      const wantPitch = arrest.phase === 'cuff' ? -0.7 : arrest.phase === 'escort' ? -0.12 : boarding ? -0.2 : 0;
+      const target = boarding ? door : me.pos;
+      this.localPos = { x: this.localPos.x + (target.x - this.localPos.x) * Math.min(1, dt * 8), z: this.localPos.z + (target.z - this.localPos.z) * Math.min(1, dt * 8) };
+      if (Math.hypot(target.x - this.localPos.x, target.z - this.localPos.z) > 3) this.localPos = { ...target };
+      const dy = Math.atan2(Math.sin(wantYaw - c.yaw), Math.cos(wantYaw - c.yaw));
+      c.yaw += dy * Math.min(1, dt * 3);
+      c.pitch += (wantPitch - c.pitch) * Math.min(1, dt * 3);
+      moving = arrest.phase === 'escort' && (me.pos.x !== this.lastArrestPos.x || me.pos.z !== this.lastArrestPos.z);
+      this.lastArrestPos = { ...me.pos };
+    } else if (me) {
       if (host.mode === 'local') {
         if (moving || Math.abs(me.yaw - c.yaw) > 0.01) {
           host.move(this.localPos.x, this.localPos.z, c.yaw);
@@ -747,7 +776,7 @@ export class App {
     world.setCamera(this.localPos.x, this.localPos.z, c.yaw, c.pitch, moving, dt);
     // 注視対象（自分の位置はローカル予測を使う）。1 秒に 10 回で足りる（HUD の更新も同じ間隔）
     this.focusAcc += dt;
-    if (me && !blocking) {
+    if (me && !blocking && !arrestedMe) {
       if (this.focusAcc >= 0.1) {
         this.focusAcc = 0;
         const actor = { ...me, pos: this.localPos };
@@ -770,11 +799,49 @@ export class App {
       });
     }
     this.hud?.update(dt);
+    this.updateArrestFade(s, dt);
     this.accidentUi?.update(s, av);
     this.checkAccidentReset(s);
     this.updateTutorial(s, dt);
     this.updateHint(s, dt);
     this.checkPhaseScreens(false);
+  }
+
+  /** 逮捕された人は営業の画面（操作ボタン・案内など）を隠し、押していた指は離したことにする */
+  private setArrestMode(on: boolean): void {
+    if (on === this.arrestMode) return;
+    this.arrestMode = on;
+    this.root.classList.toggle('arrest-mode', on);
+    if (on) this.controls?.releaseAll();
+  }
+
+  /**
+   * 逮捕の最後: パトカーに乗せられたら画面が暗くなり、その日の営業は終わる（オーナーの指示 2026-11-11）。
+   * 精算の画面が出たら暗さを消す
+   */
+  private updateArrestFade(s: GameState, dt: number): void {
+    const a = incidentToday(s)?.arrest;
+    let want = 0;
+    if (a && s.phase !== 'closed') {
+      if (a.done) want = 1;
+      else if (a.phase === 'fade') want = Math.min(1, (s.t - a.since) / BALANCE.armory.arrest.fadeSec);
+    }
+    this.arrestFade = want >= this.arrestFade ? want : Math.max(want, this.arrestFade - dt * 1.6);
+    if (this.arrestFade <= 0.001) {
+      if (this.arrestFadeEl) this.arrestFadeEl.hidden = true;
+      return;
+    }
+    if (!this.arrestFadeEl) {
+      this.arrestFadeEl = h('div', { class: 'arrest-fade', 'data-arrest-fade': '1' }, h('p', null, ''));
+      this.root.append(this.arrestFadeEl);
+    }
+    const el = this.arrestFadeEl;
+    el.hidden = false;
+    el.style.opacity = this.arrestFade.toFixed(3);
+    const p = el.firstElementChild as HTMLElement;
+    const who = a ? s.players.find((x) => x.id === a.attackerId) : undefined;
+    const text = !a?.attackerId ? '今日の営業は終わりです' : a.attackerId === this.host?.playerId ? '逮捕された……今日の営業は終わりです' : `${who?.name ?? '店主'}さんが警察に連れて行かれました。今日の営業は終わりです`;
+    if (p.textContent !== text) p.textContent = text;
   }
 
   /** 事故の間は営業の画面（伝票・操作ボタン・案内など）を隠す */

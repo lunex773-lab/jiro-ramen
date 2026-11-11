@@ -19,6 +19,7 @@ import { emit, type SimCtx } from './notices';
 import { currentTutorialStep, inBasicsTutorial, tutorialAction, updateTutorial, type TutorialOp } from './tutorial';
 import { accidentHalted, EVENT_KINDS } from './events';
 import { accidentFainted, resetAccident } from './accident';
+import { isArrested } from './armory';
 import { forceEvent } from './visitors';
 import { promote, promoteLeader, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
 import { autoShifts } from './shift-plan';
@@ -154,6 +155,11 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
   if (accidentHalted(s)) {
     if (a.type === 'move' && accidentFainted(s)) return { ok: true, corrected: { ...player.pos } };
     if (a.type !== 'move' && a.type !== 'accidentReset') return fail('店が壊滅しています（「リセットする」で事故の前に戻れます）');
+  }
+  // 警察に取り押さえられている間（警察が来てから営業が終わるまで）は、動けず何もできない（オーナーの指示 2026-11-11）
+  if (isArrested(s, actorId)) {
+    if (a.type === 'move') return { ok: true, corrected: { ...player.pos } };
+    return fail('警察に取り押さえられています');
   }
   switch (a.type) {
     case 'move': {

@@ -14,6 +14,7 @@ import { lookSeedOf } from './staff-look';
 
 import {
   activeStore,
+  arrestOf,
   CELL,
   BALANCE,
   EQUIPMENT,
@@ -434,7 +435,7 @@ export class World {
     }
   }
 
-  private charEntry(id: string, kind: 'customer' | 'employee' | 'player', seed: number, color?: string, look?: Customer['look']): CharEntry {
+  private charEntry(id: string, kind: 'customer' | 'employee' | 'player', seed: number, color?: string, look?: Customer['look'] | 'police'): CharEntry {
     let c = this.chars.get(id);
     if (!c) {
       const model = createCharacter({ kind, seed, color, look });
@@ -573,15 +574,30 @@ export class World {
       const pose: CharacterPose = e.work || cm?.phase === 'wash' ? 'work' : c.moving > 0 ? (e.hand.kind !== 'none' ? 'carry' : 'walk') : 'stand';
       c.model.update(pose, t, dt);
     }
+    // 逮捕（オーナーの指示 2026-11-11）: 警察官と、手錠をかけられた人
+    const arrest = arrestOf(s);
+    const cuffed = arrest && (arrest.phase === 'cuff' || arrest.phase === 'escort' || arrest.phase === 'board') ? arrest.attackerId : null;
+    for (const o of arrest?.officers ?? []) {
+      const key = `police:${o.id}`;
+      seen.add(key);
+      const c = this.charEntry(key, 'customer', o.id === 'officer1' ? 7101 : 7202, undefined, 'police');
+      this.placeChar(c, o.pos.x, o.pos.z, o.yaw, dt, smooth);
+      c.model.setHeld(null);
+      c.model.update(c.moving > 0 ? 'walk' : 'stand', t, dt);
+    }
     for (const p of s.players) {
       if (p.id === myId || !p.connected) continue;
+      // パトカーに乗せられたら見えない
+      if (arrest?.attackerId === p.id && arrest.phase === 'fade') continue;
       seen.add(p.id);
       const c = this.charEntry(p.id, 'player', hashId(p.id), p.color);
       c.model.setLabel(p.name);
       this.placeChar(c, p.pos.x, p.pos.z, p.yaw, dt, true);
-      c.model.setHeld(heldKind(p.hand));
-      const pose: CharacterPose = p.work ? 'work' : c.moving > 0 ? (p.hand.kind !== 'none' ? 'carry' : 'walk') : 'stand';
-      c.model.update(pose, t, dt);
+      const cuffs = cuffed === p.id;
+      c.model.setHeld(cuffs ? 'handcuffs' : heldKind(p.hand));
+      // 手錠をかけられた人は両手を前に出したまま（止まっているときは足を動かさない）
+      const pose: CharacterPose = p.work ? 'work' : cuffs ? 'carry' : c.moving > 0 ? (p.hand.kind !== 'none' ? 'carry' : 'walk') : 'stand';
+      c.model.update(pose, t, dt, cuffs && c.moving <= 0 ? 0 : undefined);
     }
     for (const [id, c] of this.chars) {
       if (seen.has(id)) continue;
@@ -712,10 +728,12 @@ export class World {
     }
   }
 
-  /** 一人称の手元（持っている物） */
+  /** 一人称の手元（持っている物。逮捕されたときは手錠） */
   private syncViewModel(s: GameState, me: Player | undefined, t: number): void {
     const hand = me?.hand ?? { kind: 'none' as const };
-    const kind = hand.kind === 'weapon' ? `weapon:${hand.weaponId}` : hand.kind;
+    const arrest = arrestOf(s);
+    const cuffed = !!me && arrest?.attackerId === me.id && (arrest.phase === 'cuff' || arrest.phase === 'escort' || arrest.phase === 'board');
+    const kind = cuffed ? 'handcuffs' : hand.kind === 'weapon' ? `weapon:${hand.weaponId}` : hand.kind;
     if (this.view && this.view.kind !== kind) {
       this.camera.remove(this.view.obj);
       this.view.bowl?.dispose();
@@ -728,14 +746,19 @@ export class World {
         bowl.setDetail('high');
         this.view = { kind, obj: bowl.group, bowl };
       } else {
-        const hk = heldKind(hand);
+        const hk = cuffed ? 'handcuffs' : heldKind(hand);
         if (!hk) return;
         this.view = { kind, obj: createHeldItem(hk), bowl: null };
       }
       this.camera.add(this.view.obj);
     }
     const o = this.view.obj;
-    if (hand.kind === 'weapon') {
+    if (cuffed) {
+      // 手錠は両手の前（かけられた直後は下から上がってくる）
+      const k = arrest?.phase === 'cuff' ? Math.min(1, (s.t - arrest.since) / 0.8) : 1;
+      o.position.set(0, -0.3 + 0.12 * k + Math.sin(this.bob * 2) * 0.006, -0.42);
+      o.rotation.set(0.7, 0, 0);
+    } else if (hand.kind === 'weapon') {
       // 武器は前に向けて右手に構える（じろ1 5.12）
       o.position.set(0.2, -0.24 + Math.sin(this.bob * 2) * 0.008, -0.42);
       o.rotation.set(0.06, 0.1, 0);
@@ -937,6 +960,15 @@ export class World {
       // 出退勤のあいさつは普通の吹き出し、火事などのイベントはイベントの縁、口論・言い返しは怒りの色
       const cls = e.say.kind === 'greet' ? 'bubble staff greet' : e.say.kind === 'event' ? 'bubble staff event' : 'bubble angry staff event';
       show(`say:${e.id}`, e.say.text, head, cls, e.say.kind === 'greet' ? 1 : 2);
+    }
+    // 警察官のセリフ
+    for (const o of arrestOf(s)?.officers ?? []) {
+      if (!o.say || o.say.until <= s.t) continue;
+      const c = this.chars.get(`police:${o.id}`);
+      if (!c) continue;
+      const head = c.model.group.position.clone();
+      head.y += 1.95;
+      show(`say:police:${o.id}`, o.say.text, head, 'bubble angry event', 3);
     }
     // 上部の表示（日付・時刻・資金・メニュー）の下から置く
     for (const p of layoutBubbles(items, w, hgt, 6, 46)) {

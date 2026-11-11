@@ -1,7 +1,8 @@
 // 隠し扉と武器庫の演出（じろ1 5.12。オーナーの判断: 本物の武器・血の表現あり）。
 // 物置と扉の開け閉め・投げた爆弾・血しぶき・発砲の光と弾の線・爆発・警察（パトカーの赤色灯）
 import * as THREE from 'three';
-import { incidentToday, STAGES, stageOf, type GameEvent, type GameState } from '@jiro/core';
+import { BALANCE, incidentToday, policeCarPos, STAGES, stageOf, type GameEvent, type GameState } from '@jiro/core';
+import { canvasTexture, JP_FONT } from './models/textures';
 import { createArmory, createWeapon, type ArmoryModel } from './models/weapons';
 
 interface Particle {
@@ -21,6 +22,8 @@ export class ArmoryFx {
   private parts: Particle[] = [];
   private police: THREE.Group | null = null;
   private policeLight: THREE.Mesh | null = null;
+  private policeDoor: THREE.Group | null = null;
+  private doorAngle = 0;
   private last: GameState | null = null;
   private bloodGeo = new THREE.SphereGeometry(0.025, 6, 4);
   private bloodMat = new THREE.MeshBasicMaterial({ color: '#8a0d0d' });
@@ -57,16 +60,29 @@ export class ArmoryFx {
       this.scene.remove(o);
       this.bombs.delete(id);
     }
-    // 警察（その日の事件で警察が来たら、店の前にパトカー）
+    // 警察（その日の事件で通報されたら、警察が来る少し前にパトカーが道を走って来て店の前に止まる）
     const inc = incidentToday(s);
-    const showPolice = !!inc?.police && s.phase !== 'prep';
+    const arrive = BALANCE.armory.carArriveSec;
+    const showPolice = !!inc && (inc.police || s.t >= inc.policeAt - arrive);
     if (showPolice && !this.police) this.addPolice(s);
     if (!showPolice && this.police) {
       this.scene.remove(this.police);
       this.police = null;
       this.policeLight = null;
+      this.policeDoor = null;
     }
-    if (this.policeLight) (this.policeLight.material as THREE.MeshBasicMaterial).color.set(Math.floor(t * 4) % 2 ? '#ff2020' : '#2050ff');
+    if (this.police && inc) {
+      const c = policeCarPos(stageOf(s));
+      // 右から走って来て、止まる前にゆっくりになる
+      const k = inc.police ? 0 : Math.max(0, Math.min(1, (inc.policeAt - s.t) / arrive));
+      this.police.position.set(c.x + k * k * 26, 0, c.z);
+      // 後ろの扉: 乗せるときに開き、暗くなるときに閉まる
+      const ph = inc.arrest?.phase;
+      const open = ph === 'escort' || ph === 'board' ? -1.15 : 0;
+      this.doorAngle += (open - this.doorAngle) * Math.min(1, dt * 4);
+      if (this.policeDoor) this.policeDoor.rotation.y = this.doorAngle;
+    }
+    if (this.policeLight) (this.policeLight.material as THREE.MeshBasicMaterial).color.set(Math.floor(t * 4) % 2 ? '#ff2020' : '#7a0808');
     // 粒
     for (const p of this.parts) {
       p.life += dt;
@@ -97,7 +113,7 @@ export class ArmoryFx {
           break;
         case 'gunshot': {
           const a = [...s.players, ...s.employees].find((x) => x.id === ev.actorId);
-          const c = s.customers.find((x) => x.id === ev.targetId);
+          const c = s.customers.find((x) => x.id === ev.targetId) ?? s.employees.find((x) => x.id === ev.targetId);
           if (a && c) this.tracer(a.pos.x, a.pos.z, c.pos.x, c.pos.z);
           break;
         }
@@ -147,24 +163,64 @@ export class ArmoryFx {
     }
   }
 
+  /** パトカー（白黒。車体は x の向きに長く、前は -x。店の側（+z）の後ろの扉が開く） */
   private addPolice(s: GameState): void {
-    const W = stageOf(s).w * 0.5;
+    const c = policeCarPos(stageOf(s));
     const g = new THREE.Group();
-    const white = new THREE.MeshStandardMaterial({ color: '#f2f2f2', roughness: 0.4 });
-    const black = new THREE.MeshStandardMaterial({ color: '#141414', roughness: 0.4 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.7, 1.7), black);
-    body.position.y = 0.55;
-    const doors = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.72, 1.72), white);
-    doors.position.y = 0.55;
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.55, 1.5), white);
-    cabin.position.set(-0.2, 1.15, 0);
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.12, 0.3), new THREE.MeshBasicMaterial({ color: '#ff2020' }));
-    bar.position.set(-0.2, 1.5, 0);
-    g.add(body, doors, cabin, bar);
-    g.position.set(W + 2.5, 0, -6.2);
+    const white = new THREE.MeshStandardMaterial({ color: '#f2f2f2', roughness: 0.35 });
+    const black = new THREE.MeshStandardMaterial({ color: '#121212', roughness: 0.35 });
+    const glass = new THREE.MeshStandardMaterial({ color: '#1e2a33', roughness: 0.1, metalness: 0.4 });
+    const tire = new THREE.MeshStandardMaterial({ color: '#0b0b0b', roughness: 0.9 });
+    const box = (m: THREE.Material, w: number, h: number, d: number, x: number, y: number, z: number) => {
+      const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+      o.position.set(x, y, z);
+      g.add(o);
+      return o;
+    };
+    // 下は白（扉の面）、ボンネット・屋根・トランクは黒
+    box(white, 4.3, 0.5, 1.7, 0, 0.55, 0);
+    box(black, 4.3, 0.18, 1.72, 0, 0.33, 0);
+    box(black, 1.1, 0.06, 1.66, -1.6, 0.83, 0);
+    box(black, 0.8, 0.06, 1.66, 1.75, 0.83, 0);
+    box(glass, 2.3, 0.5, 1.5, -0.05, 1.08, 0);
+    box(black, 2.1, 0.08, 1.46, 0, 1.36, 0);
+    const bar = box(new THREE.MeshBasicMaterial({ color: '#ff2020' }), 0.95, 0.12, 0.32, -0.1, 1.46, 0);
+    for (const [x, z] of [[-1.35, 0.78], [1.35, 0.78], [-1.35, -0.78], [1.35, -0.78]] as const) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.24, 16), tire);
+      w.rotation.x = Math.PI / 2;
+      w.position.set(x, 0.33, z);
+      g.add(w);
+    }
+    // 前の扉の「警察」の文字（店の側）
+    const tex = canvasTexture(256, 96, (ctx, w, h) => {
+      ctx.fillStyle = '#f2f2f2';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#111';
+      ctx.font = `900 64px ${JP_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('警 察', w / 2, h / 2 + 4);
+    });
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.3), new THREE.MeshBasicMaterial({ map: tex }));
+    label.position.set(-0.55, 0.6, 0.856);
+    g.add(label);
+    // 後ろの扉（蝶番は前の縁）。乗せるときに開く
+    const hinge = new THREE.Group();
+    hinge.position.set(0.1, 0, 0.88);
+    const door = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.04), white);
+    door.position.set(0.45, 0.55, 0);
+    const win = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.42, 0.03), glass);
+    win.position.set(0.45, 1.06, -0.01);
+    hinge.add(door, win);
+    g.add(hinge);
+    // 開いた扉の奥（後ろの席）は暗く
+    box(new THREE.MeshStandardMaterial({ color: '#1a1a1a', roughness: 1 }), 0.86, 0.48, 0.006, 0.55, 0.55, 0.856);
+    g.position.set(c.x, 0, c.z);
     this.scene.add(g);
     this.police = g;
     this.policeLight = bar;
+    this.policeDoor = hinge;
+    this.doorAngle = 0;
   }
 
   dispose(): void {
