@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { ResolutionGovernor } from './resolution';
 import { Aftermath, hash01, type FireSpot } from './aftermath';
+import { ArmoryFx } from './armory-fx';
 import { equipmentWreck, lingeringFires } from './wreck';
 import { eatenContents, eatenStep, eatMotion, eatProgress } from './eat-motion';
 import { createSteam } from './models/fx';
@@ -30,6 +31,7 @@ import {
   type GameState,
   type Hand,
   type Player,
+  type GameEvent,
 } from '@jiro/core';
 import {
   createBowl,
@@ -127,6 +129,8 @@ export class World {
   private burned = false;
   /** カメラの演出（揺れ・目の高さ・傾き。爆発で倒れて、目覚めて起き上がる） */
   private camFx = { shake: 0, eyeY: EYE_HEIGHT, roll: 0 };
+  /** 隠し扉と武器庫の演出（じろ1 5.12） */
+  private armoryFx: ArmoryFx;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -168,7 +172,13 @@ export class World {
     this.tutEdge.textContent = '➤';
     this.overlay.appendChild(this.tutEdge);
     this.after = new Aftermath(this.scene);
+    this.armoryFx = new ArmoryFx(this.scene);
     this.resize();
+  }
+
+  /** ゲームの出来事（武器庫の演出: 血しぶき・発砲・爆発） */
+  onEvents(events: GameEvent[]): void {
+    this.armoryFx.onEvents(events);
   }
 
   /** 爆発事故の状態（なければ null）。毎フレーム渡す */
@@ -705,7 +715,7 @@ export class World {
   /** 一人称の手元（持っている物） */
   private syncViewModel(s: GameState, me: Player | undefined, t: number): void {
     const hand = me?.hand ?? { kind: 'none' as const };
-    const kind = hand.kind;
+    const kind = hand.kind === 'weapon' ? `weapon:${hand.weaponId}` : hand.kind;
     if (this.view && this.view.kind !== kind) {
       this.camera.remove(this.view.obj);
       this.view.bowl?.dispose();
@@ -725,8 +735,14 @@ export class World {
       this.camera.add(this.view.obj);
     }
     const o = this.view.obj;
-    o.position.set(0.16, -0.36 + Math.sin(this.bob * 2) * 0.008, -0.48);
-    o.rotation.set(0.35, 0, 0);
+    if (hand.kind === 'weapon') {
+      // 武器は前に向けて右手に構える（じろ1 5.12）
+      o.position.set(0.2, -0.24 + Math.sin(this.bob * 2) * 0.008, -0.42);
+      o.rotation.set(0.06, 0.1, 0);
+    } else {
+      o.position.set(0.16, -0.36 + Math.sin(this.bob * 2) * 0.008, -0.48);
+      o.rotation.set(0.35, 0, 0);
+    }
     if (this.view.bowl && hand.kind === 'bowl') {
       const b = s.bowls.find((x) => x.id === hand.bowlId);
       const key = b?.contents ? `${b.contents.steps.length}|${b.contents.buta}|${Object.values(b.contents.toppings).join(',')}|${b.contents.tare}|${Math.round(b.contents.heat / 10)}` : 'x';
@@ -769,6 +785,7 @@ export class World {
     this.syncBowls(s, myId);
     this.syncDirtAndLost(s);
     this.syncViewModel(s, s.players.find((p) => p.id === myId), t);
+    this.armoryFx.update(s, dt, t);
     this.updateTutorialMarker(s, t);
     for (const m of this.bowls.values()) (m as BowlModel & { tick?: (t: number) => void }).tick?.(t);
     tickModels(t);
@@ -943,6 +960,7 @@ export class World {
     for (const c of this.chars.values()) c.model.dispose();
     for (const b of this.bowls.values()) b.dispose();
     this.shell?.dispose();
+    this.armoryFx.dispose();
     for (const b of this.bubbles.values()) b.el.remove();
     this.tutEdge.remove();
     this.renderer.dispose();
@@ -983,6 +1001,8 @@ function heldKind(h: Hand): HeldKind | null {
       return 'lostItem';
     case 'trash':
       return 'trash';
+    case 'weapon':
+      return `weapon:${h.weaponId}`;
   }
 }
 

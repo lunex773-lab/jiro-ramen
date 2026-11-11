@@ -432,8 +432,14 @@ export function createShopShell(stage: StageDef, shopName: string, surroundings:
   const nbH = neighborHeight(surroundings);
   b.box(SM.shutter(), -WALL_T - sx0, 2.4, 0.06, { x: (sx0 - WALL_T) / 2, y: 1.2, z: -WALL_T - 0.05, uv: 1.0 });
   b.box(SM.building(0), -WALL_T - sx0, nbH, 0.4, { x: (sx0 - WALL_T) / 2, y: nbH / 2, z: 0.2 });
-  b.box(SM.shutter(), sx1 - W - WALL_T, 2.4, 0.06, { x: (W + WALL_T + sx1) / 2, y: 1.2, z: -WALL_T - 0.05, uv: 1.0 });
-  b.box(SM.building(1), sx1 - W - WALL_T, nbH, 0.4, { x: (W + WALL_T + sx1) / 2, y: nbH / 2, z: 0.2 });
+  // 右の隣の店は、店との間に路地をあける（店の右の横の壁の外に物置と隠し扉がある。じろ1 5.12）
+  const alleyX = W + 1.9;
+  b.box(SM.shutter(), sx1 - alleyX, 2.4, 0.06, { x: (alleyX + sx1) / 2, y: 1.2, z: -WALL_T - 0.05, uv: 1.0 });
+  b.box(SM.building(1), sx1 - alleyX, nbH, 0.4, { x: (alleyX + sx1) / 2, y: nbH / 2, z: 0.2 });
+  // 路地: 床・隣の建物の横の壁・奥の塀
+  b.box(MAT.sidewalk(), alleyX - W, 0.05, 2.45, { x: (W + alleyX) / 2, y: -0.025, z: 2.3 / 2 - 0.08, uv: 1.0 });
+  b.box(SM.building(1), 0.2, nbH, 2.5, { x: alleyX + 0.1, y: nbH / 2, z: 1.25 });
+  b.box(SM.facade(), alleyX - W, 2.6, 0.12, { x: (W + alleyX) / 2, y: 1.3, z: 2.36 });
   // 向かいの建物（出店先の地域の特性。じろ1 5.10）
   buildSurroundings(b, surroundings, r, sx0, sx1);
   // 電柱

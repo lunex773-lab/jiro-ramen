@@ -33,6 +33,7 @@ import {
   clockText as clockLabel,
   SEC_PER_MIN,
   todayHours,
+  WEAPONS,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 import { targetName, type FocusResult } from '../game/targeting';
@@ -519,6 +520,7 @@ export class Hud {
       const item = s.lostItems.find((l) => l.id === (hd as { lostItemId: string }).lostItemId);
       text = `忘れ物（${item?.kind ?? ''}）`;
     } else if (hd.kind === 'trash') text = 'ゴミ';
+    else if (hd.kind === 'weapon') text = WEAPONS[hd.weaponId]?.name ?? '武器';
     const label = text ? `✋ ${text}` : '';
     if (this.hand.textContent === label) return;
     this.hand.textContent = label;

@@ -516,6 +516,8 @@ export class App {
       c.yaw = me.yaw;
     }
     this.unsub.push(host.onEvents((ev) => this.sfx.onEvents(ev, host.playerId)));
+    // 武器庫の演出（血しぶき・発砲・爆発。じろ1 5.12）
+    this.unsub.push(host.onEvents((ev) => this.world?.onEvents(ev)));
     // 共同経営: ルームが終了した（ホストがタイトルに戻った など）ら、ゲストに知らせてタイトルへ戻す
     if (host.mode === 'remote') {
       let told = false;

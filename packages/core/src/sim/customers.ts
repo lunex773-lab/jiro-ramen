@@ -1085,7 +1085,7 @@ function finishEating(s: GameState, c: Customer, seat: Seat, ctx: SimCtx): void 
   }
 }
 
-export function addDirt(s: GameState, pos: Vec2, kind: 'grime' | 'spill', zone: 'kitchen' | 'dining'): void {
+export function addDirt(s: GameState, pos: Vec2, kind: 'grime' | 'spill' | 'blood', zone: 'kitchen' | 'dining'): void {
   const near = s.dirt.find((d) => d.kind === kind && dist(d.pos, pos) < 0.5);
   if (near) {
     near.amount = Math.min(3, near.amount + 0.5);

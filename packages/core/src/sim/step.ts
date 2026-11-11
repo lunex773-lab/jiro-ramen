@@ -16,6 +16,7 @@ import { defOf, effectSum, updateRepairs } from './equipment';
 import { assignBowls, completeProcess, progressWork, roleOf } from './interact';
 import { receiveDeliveries, stockOf } from './inventory';
 import { managerExpressCheck } from './store-manager';
+import { incidentStopsArrivals, updateArmory } from './armory';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { updateTutorial } from './tutorial';
 import { accidentHalted } from './events';
@@ -62,8 +63,19 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
   // 店長: 閉店までに足りなくなりそうな材料を当日便で先に仕入れる（オーナーの指示 2026-11-11）
   managerExpressCheck(s, dt, ctx);
 
-  // 火事の間は新しいお客さんは来ない（店の中の人は騒ぐが残る）
-  if (s.phase === 'open' && !s.events?.accident) {
+  // 隠し扉の武器庫: 投げた爆弾の爆発・警察の到着（その日の営業は終わる。じろ1 5.12）
+  updateArmory(s, ctx, () => {
+    if (s.phase === 'open') {
+      startClosing(s, ctx);
+      // 中休みのある日でも、その日の営業はここで終わり
+      s.breakPending = false;
+    } else if (s.phase === 'prep') {
+      s.phase = 'closing';
+      s.breakPending = false;
+    } else if (s.phase === 'closing') s.breakPending = false;
+  });
+  // 火事の間は新しいお客さんは来ない（店の中の人は騒ぐが残る）。客を襲った日も来ない
+  if (s.phase === 'open' && !s.events?.accident && !incidentStopsArrivals(s)) {
     updateArrivals(s, dt, ctx);
     spawnLostItemOwners(s, ctx);
   }

@@ -50,6 +50,17 @@ const FACES: Record<string, [icon: string, short: string]> = {
   'prep:boil_moyashi': ['🌱', 'もやし'],
   'prep:simmer_soup': ['🍲', '炊く'],
   'prep:make_noodles': ['🍝', '製麺'],
+  // 隠し扉と武器庫（じろ1 5.12）
+  armory_door: ['🚪', '押す'],
+  'weapon:katana': ['🗡️', '日本刀'],
+  'weapon:knife': ['🔪', '包丁'],
+  'weapon:bat': ['🏏', 'バット'],
+  'weapon:pipe': ['🔧', 'パイプ'],
+  'weapon:pistol': ['🔫', '拳銃'],
+  'weapon:shotgun': ['🔫', '散弾銃'],
+  'weapon:bomb': ['💣', '爆弾'],
+  weapon_return: ['↩️', '戻す'],
+  attack: ['⚔️', '襲う'],
 };
 
 export interface VerbFace {
@@ -64,7 +75,10 @@ export function verbFace(verb: string, label: string): VerbFace {
   let short = f?.[1] ?? label.replace(/（.*$/, '').slice(0, 4);
   // 丼を持っているときの「丼を置く」
   if (verb === 'bowls_place' && label.startsWith('丼を置く')) short = '置く';
+  // 武器の操作は「〇〇で斬る / 撃つ / 投げる」の動詞を出す
+  if (verb === 'attack') short = label.replace(/^.*で/, '') || short;
   const m = /（(?:見込み|汚れ)?(\d+)(玉|杯|枚|%|秒)）/.exec(label);
   const badge = m ? `${m[1]}${m[2] === '%' || m[2] === '秒' ? m[2] : ''}` : null;
-  return { icon: f?.[0] ?? '👉', short, badge };
+  const icon = verb === 'attack' ? (label.includes('撃つ') ? '🔫' : label.includes('投げる') ? '💣' : label.includes('斬る') || label.includes('刺す') ? '🗡️' : '🏏') : (f?.[0] ?? '👉');
+  return { icon, short, badge };
 }

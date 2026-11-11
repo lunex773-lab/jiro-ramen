@@ -3,6 +3,9 @@
 // 何にも重なっていないときだけ、カーソルのすぐ近く（約4°以内）にある手の届く物を選ぶ（スマホで狙いやすくするため）。
 
 import {
+  ARMORY_DOOR_ID,
+  ARMORY_RACK_ID,
+  armoryRect,
   CELL,
   EQUIPMENT,
   equipmentRect,
@@ -45,11 +48,20 @@ export function interactableBoxes(s: GameState): Box[] {
   for (const d of s.dirt) {
     out.push({ id: d.id, min: [d.pos.x - 0.4, 0, d.pos.z - 0.4], max: [d.pos.x + 0.4, 0.08, d.pos.z + 0.4] });
   }
-  // 店の前でタバコを吸っている客（店の外。声をかけられる）
+  // 店の前でタバコを吸っている客（店の外。声をかけられる）。武器を持っている人がいるときは、席に着いていない客も（じろ1 5.12）
+  const armed = s.players.some((p) => p.hand.kind === 'weapon');
   for (const c of s.customers) {
-    if (c.state !== 'smoking' || c.path.length > 0) continue;
+    const smoking = c.state === 'smoking' && c.path.length === 0;
+    const target = armed && !c.seatId && c.state !== 'leaving' && c.state !== 'left' && c.state !== 'crew' && !c.hurt;
+    if (!smoking && !target) continue;
     out.push({ id: c.id, min: [c.pos.x - 0.3, 0, c.pos.z - 0.3], max: [c.pos.x + 0.3, 1.8, c.pos.z + 0.3] });
   }
+  // 隠し扉（外壁の一部に見える）と、開いているときは奥の武器の棚
+  const ar = armoryRect(st);
+  // 開いた扉は路地側へ開く（蝶番は手前の縁）ので、開いているときは扉の箱を入口からどける（奥の棚を狙えるように）
+  if (s.armory?.doorOpen) out.push({ id: ARMORY_DOOR_ID, min: [ar.x1, 0, ar.z0 + 0.12], max: [ar.x1 + 0.75, 2.0, ar.z0 + 0.3] });
+  else out.push({ id: ARMORY_DOOR_ID, min: [ar.x1 - 0.1, 0, ar.z0 + 0.2], max: [ar.x1 + 0.05, 2.0, ar.z1 - 0.2] });
+  if (s.armory?.doorOpen) out.push({ id: ARMORY_RACK_ID, min: [ar.x0, 0.3, ar.z0 + 0.25], max: [ar.x1 - 0.12, 1.8, ar.z1 - 0.25] });
   return out;
 }
 
@@ -158,10 +170,13 @@ export function targetName(s: GameState, t: Target): string {
       return `${t.seat.index + 1}番席${c ? '（お客さん）' : ''}`;
     }
     case 'dirt':
-      return t.dirt.kind === 'spill' ? 'こぼれたスープ' : '床の汚れ';
+      return t.dirt.kind === 'spill' ? 'こぼれたスープ' : t.dirt.kind === 'blood' ? '血の跡' : '床の汚れ';
     case 'lost':
       return `忘れ物（${t.lost.kind}）`;
     case 'customer':
-      return '店の前でタバコを吸っている客（禁煙）';
+      return t.c.state === 'smoking' ? '店の前でタバコを吸っている客（禁煙）' : 'お客さん';
+    case 'fixture':
+      // 隠し扉は、開くまでただの外壁に見える
+      return t.id === ARMORY_RACK_ID ? '武器の棚' : s.armory?.doorOpen ? '隠し扉' : '外壁';
   }
 }

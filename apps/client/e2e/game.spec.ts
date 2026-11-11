@@ -93,6 +93,65 @@ test('設備を見ると操作ボタンが出て、丼を取って並べられ�
   await shot(page, '04-assembly');
 });
 
+test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を持って席の客を襲うと血が出て客が逃げ、警察が来てその日の営業が終わる（じろ1 5.12）', async ({ page }) => {
+  await startNewGame(page);
+  type S = { phase: string; reputation: number; armory?: { doorOpen: boolean }; incident?: { police: boolean } | null; dirt: { kind: string }[]; seats: { id: string; customerId: string | null }[]; customers: { id: string; hurt?: boolean; state: string }[]; players: { hand: { kind: string } }[] };
+  const state = () => page.evaluate(() => (window as unknown as { __jiro: { host: { state: S } } }).__jiro.host.state);
+  const faceId = async (id: string) => {
+    expect(await page.evaluate((x) => (window as unknown as { __jiro: Jiro }).__jiro.debugFace(x), id)).toBe(true);
+    await page.waitForTimeout(400);
+  };
+  await page.getByRole('button', { name: /開店する/ }).click();
+  // 席に客が座るまでゲーム内時間を進める
+  const seated = await page.evaluate(() => {
+    const app = (window as unknown as { __jiro: { host: { state: S; tick(dt: number): void } } }).__jiro;
+    for (let i = 0; i < 2400; i++) {
+      const seat = app.host.state.seats.find((x) => x.customerId);
+      if (seat) return seat.id;
+      app.host.tick(0.1);
+    }
+    return null;
+  });
+  expect(seated).not.toBeNull();
+  // 外壁（隠し扉）を押す
+  await faceId('armory_door');
+  const push = page.locator('.act[aria-label^="壁を押す"]');
+  await expect(push).toBeVisible();
+  await press(push);
+  await expect.poll(async () => (await state()).armory?.doorOpen ?? false).toBe(true);
+  await faceId('armory_rack');
+  const take = page.locator('.act[aria-label^="拳銃を持つ"]');
+  await expect(take).toBeVisible();
+  await shot(page, 'armory-open');
+  await press(take);
+  await expect(page.locator('.hud-hand')).toContainText('拳銃');
+  // 席の客を撃つ
+  const rep = (await state()).reputation;
+  await faceId(seated!);
+  const shoot = page.locator('.act[aria-label^="拳銃で撃つ"]');
+  await expect(shoot).toBeVisible();
+  await press(shoot);
+  await expect.poll(async () => (await state()).customers.some((c) => c.hurt)).toBe(true);
+  const s1 = await state();
+  expect(s1.dirt.some((d) => d.kind === 'blood')).toBe(true);
+  expect(s1.reputation).toBeLessThan(rep);
+  await page.waitForTimeout(300);
+  await shot(page, 'armory-shot');
+  // 警察が来て、その日の営業は終わる
+  const closed = await page.evaluate(() => {
+    const app = (window as unknown as { __jiro: { host: { state: S; tick(dt: number): void } } }).__jiro;
+    for (let i = 0; i < 3000; i++) {
+      if (app.host.state.phase === 'closed') return true;
+      app.host.tick(0.1);
+    }
+    return false;
+  });
+  expect(closed).toBe(true);
+  const s2 = await state();
+  expect(s2.incident?.police).toBe(true);
+  expect(s2.players[0]!.hand.kind).toBe('none');
+});
+
 test('開店すると時計が進み、客が来店する', async ({ page }) => {
   await startNewGame(page);
   await page.getByRole('button', { name: /開店する/ }).click();

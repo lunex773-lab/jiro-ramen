@@ -7,7 +7,9 @@ import type { EquipmentRole } from '../data/equipment';
 import { CALLS, DEFAULT_CALL, MENU, callToSpoken } from '../data/menu';
 import { NOODLE_SOURCES, INGREDIENTS } from '../data/ingredients';
 import { PREP_RECIPES, type PrepRecipe } from '../data/prep';
-import { accessPoint, equipmentCenter, seatKitchenPoint, seatPos } from '../geometry';
+import { accessPoint, armoryDoorPos, equipmentCenter, seatKitchenPoint, seatPos, stageOf } from '../geometry';
+import { WEAPONS, WEAPON_IDS } from '../data/weapons';
+import { ARMORY_DOOR_ID, ARMORY_RACK_ID, armoryDoorProblem, armoryOf, attack, attackable, incidentToday, toggleArmoryDoor, weaponOf } from './armory';
 import type {
   Bowl,
   Customer,
@@ -56,8 +58,10 @@ export type Target =
   | { kind: 'seat'; id: Id; seat: Seat }
   | { kind: 'dirt'; id: Id; dirt: DirtSpot }
   | { kind: 'lost'; id: Id; lost: LostItem }
-  /** 店の前でタバコを吸っている客（第2版 9） */
-  | { kind: 'customer'; id: Id; c: Customer };
+  /** 客（店の前でタバコを吸っている客への声かけ・武器を持っているときは店の中の客も。第2版 9・じろ1 5.12） */
+  | { kind: 'customer'; id: Id; c: Customer }
+  /** 隠し扉と武器庫の棚（店の外の右の横の壁。じろ1 5.12） */
+  | { kind: 'fixture'; id: Id; pos: Vec2 };
 
 export type Args = Record<string, string | number | boolean> | null;
 
@@ -74,8 +78,9 @@ export function resolveTarget(s: GameState, id: Id): Target | null {
   if (dirt) return { kind: 'dirt', id, dirt };
   const lost = s.lostItems.find((x) => x.id === id);
   if (lost) return { kind: 'lost', id, lost };
-  const c = s.customers.find((x) => x.id === id && x.state === 'smoking');
+  const c = s.customers.find((x) => x.id === id && x.state !== 'left');
   if (c) return { kind: 'customer', id, c };
+  if (id === ARMORY_DOOR_ID || id === ARMORY_RACK_ID) return { kind: 'fixture', id, pos: armoryDoorPos(stageOf(s)) };
   return null;
 }
 
@@ -94,6 +99,9 @@ export function targetPoints(s: GameState, t: Target): Vec2[] {
     }
     case 'customer':
       return [t.c.pos];
+    case 'fixture':
+      // 扉の前の路地に立って操作する
+      return [{ x: t.pos.x + 0.6, z: t.pos.z }];
   }
 }
 
@@ -181,12 +189,16 @@ function handLabel(h: Hand): string {
       return '忘れ物';
     case 'trash':
       return 'ゴミ';
+    case 'weapon':
+      return WEAPONS[h.weaponId]?.name ?? '武器';
   }
 }
 
 export { handLabel };
 
 const COOKING_PHASES: DayPhase[] = ['prep', 'open', 'closing'];
+/** 営業の前後もできる操作（隠し扉など） */
+const ALL_PHASES: DayPhase[] = ['prep', 'open', 'closing', 'closed'];
 
 /** 依存設備（盛り付け台から見たスープ寸胴など）を探す */
 function dependency(s: GameState, from: Equipment, role: EquipmentRole, needUsable = true): { e: Equipment; d: number } | null {
@@ -227,6 +239,10 @@ interface VerbDef {
   applyUnit: (s: GameState, a: Actor, t: Target, args: Args, ctx: SimCtx, index: number) => void;
   /** 全単位の完了後 */
   finish?: (s: GameState, a: Actor, t: Target, args: Args, ctx: SimCtx) => void;
+  /** ふつうの手の届く距離に足す距離（銃・爆弾は離れていても狙える） */
+  reach?: (a: Actor) => number;
+  /** 操作の一覧に出すか（ない → 出す）。武器を持っていないときに「撃つ」を出さない */
+  visible?: (s: GameState, a: Actor, t: Target) => boolean;
 }
 
 const isRole = (role: EquipmentRole) => (t: Target) => t.kind === 'equipment' && roleOf(t.e) === role;
@@ -948,7 +964,7 @@ const VERBS: VerbDef[] = [
   filmVerb('leave'),
   {
     id: 'smoke_warn',
-    match: (t) => t.kind === 'customer',
+    match: (t) => t.kind === 'customer' && t.c.state === 'smoking',
     phases: ['open', 'closing'],
     skill: 'service',
     plan: (_s, _a, t) => {
@@ -959,6 +975,78 @@ const VERBS: VerbDef[] = [
     applyUnit: (s, a, t, _args, ctx) => warnSmoker(s, ctx, (t as { c: Customer }).c, a),
   },
 
+  // ── 隠し扉と武器庫（じろ1 5.12） ──
+  {
+    id: 'armory_door',
+    match: (t) => t.kind === 'fixture' && t.id === ARMORY_DOOR_ID,
+    phases: ALL_PHASES,
+    skill: 'general',
+    plan: (s, a) => {
+      const label = armoryOf(s).doorOpen ? '扉を閉める' : '壁を押す';
+      const why = armoryDoorProblem(s, a);
+      return why ? no(label, why) : ok(label, 0, 1);
+    },
+    applyUnit: (s, _a, _t, _args, ctx) => toggleArmoryDoor(s, ctx),
+  },
+  ...WEAPON_IDS.map(
+    (id): VerbDef => ({
+      id: `weapon:${id}`,
+      match: (t) => t.kind === 'fixture' && t.id === ARMORY_RACK_ID,
+      phases: ALL_PHASES,
+      skill: 'general',
+      visible: (s) => armoryOf(s).doorOpen,
+      plan: (s, a) => {
+        const label = `${WEAPONS[id]!.name}を持つ`;
+        if (!armoryOf(s).doorOpen) return no(label, '扉が閉まっています');
+        const why = armoryDoorProblem(s, a);
+        if (why) return no(label, why);
+        if (incidentToday(s)?.police) return no(label, '警察に取り上げられました');
+        if (a.hand.kind !== 'none') return no(label, '手がふさがっています');
+        return ok(label, 0, 1);
+      },
+      applyUnit: (_s, a, _t, _args, ctx) => {
+        a.hand = { kind: 'weapon', weaponId: id };
+        emit(ctx, { type: 'weaponTake', actorId: a.id, text: id });
+      },
+    }),
+  ),
+  {
+    id: 'weapon_return',
+    match: (t) => t.kind === 'fixture' && t.id === ARMORY_RACK_ID,
+    phases: ALL_PHASES,
+    skill: 'general',
+    visible: (s, a) => armoryOf(s).doorOpen && a.hand.kind === 'weapon',
+    plan: (s, a) => {
+      if (a.hand.kind !== 'weapon') return no('武器を戻す', '武器を持っていません');
+      if (!armoryOf(s).doorOpen) return no('武器を戻す', '扉が閉まっています');
+      return ok(`${WEAPONS[a.hand.weaponId]?.name ?? '武器'}を戻す`, 0, 1);
+    },
+    applyUnit: (_s, a) => {
+      a.hand = { kind: 'none' };
+    },
+  },
+  {
+    id: 'attack',
+    match: (t) => t.kind === 'customer' || (t.kind === 'seat' && !!t.seat.customerId),
+    phases: ['prep', 'open', 'closing'],
+    skill: 'general',
+    visible: (_s, a) => a.hand.kind === 'weapon',
+    reach: (a) => (a.hand.kind === 'weapon' ? (WEAPONS[a.hand.weaponId]?.reach ?? 0) : 0),
+    plan: (s, a, t) => {
+      const w = weaponOf(a);
+      if (!w) return no('襲う', '武器を持っていません');
+      const c = t.kind === 'customer' ? t.c : s.customers.find((x) => x.id === (t as { seat: Seat }).seat.customerId);
+      const label = `${w.name}で${w.verb}`;
+      if (!c || !attackable(c)) return no(label, '襲える客がいません');
+      return ok(label, 0, 1);
+    },
+    applyUnit: (s, a, t, _args, ctx) => {
+      const w = weaponOf(a);
+      const c = t.kind === 'customer' ? t.c : s.customers.find((x) => x.id === (t as { seat: Seat }).seat.customerId);
+      if (w && c) attack(s, ctx, a, c, w);
+    },
+  },
+
   // ── 床の汚れ ──
   {
     id: 'mop',
@@ -967,7 +1055,7 @@ const VERBS: VerbDef[] = [
     skill: 'clean',
     plan: (_s, a, t) => {
       const d = (t as { dirt: DirtSpot }).dirt;
-      const label = d.kind === 'spill' ? 'こぼれたスープを拭く' : '床の汚れを掃除する';
+      const label = d.kind === 'spill' ? 'こぼれたスープを拭く' : d.kind === 'blood' ? '血の跡を拭く' : '床の汚れを掃除する';
       if (a.hand.kind !== 'mop') return no(label, 'モップが必要です（掃除用具入れ）');
       return ok(label, BALANCE.cleaning.mopTime * (0.5 + d.amount * 0.5), 1);
     },
@@ -1278,6 +1366,7 @@ export function listVerbs(s: GameState, actorId: Id, targetId: Id): VerbInfo[] {
   for (const v of VERBS) {
     if (!v.match(t)) continue;
     if (!v.phases.includes(s.phase)) continue;
+    if (v.visible && !v.visible(s, a, t)) continue;
     const p = scaledPlan(s, a, t, v, null);
     out.push({
       verb: v.id,
@@ -1323,7 +1412,7 @@ export function interact(s: GameState, actorId: Id, targetId: Id, verb: string, 
   if (!v || !v.match(t)) return { ok: false, reason: 'その操作はできません' };
   if (!v.phases.includes(s.phase)) return { ok: false, reason: 'この時間帯にはできません' };
   if (a.work) return { ok: false, reason: '作業中です' };
-  if (!inReach(s, a, t)) return { ok: false, reason: '遠すぎます' };
+  if (!inReach(s, a, t, v.reach?.(a) ?? 0)) return { ok: false, reason: '遠すぎます' };
   const p = scaledPlan(s, a, t, v, args);
   if (p.reason !== null) return { ok: false, reason: p.reason };
   if (p.unitTime <= 0) {

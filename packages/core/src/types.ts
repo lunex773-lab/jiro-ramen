@@ -96,7 +96,9 @@ export type Hand =
   | { kind: 'dirty'; bowlIds: Id[] }
   | { kind: 'mop' }
   | { kind: 'lostItem'; lostItemId: Id }
-  | { kind: 'trash'; amount: number };
+  | { kind: 'trash'; amount: number }
+  /** 隠し扉の奥の武器庫から持ち出した武器（じろ1 5.12） */
+  | { kind: 'weapon'; weaponId: string };
 
 /** 時間のかかる作業（長押し作業）。 */
 export interface Work {
@@ -396,11 +398,26 @@ export interface Seat {
   lostItemId: Id | null;
 }
 
+export interface ArmoryState {
+  doorOpen: boolean;
+  /** 投げた爆弾（爆発する営業の秒） */
+  bombs: { id: Id; pos: Vec2; at: number }[];
+}
+
+export interface IncidentState {
+  day: number;
+  startT: number;
+  /** 警察が来る営業の秒 */
+  policeAt: number;
+  police: boolean;
+  victims: number;
+}
+
 export interface DirtSpot {
   id: Id;
   pos: Vec2;
   amount: number;
-  kind: 'grime' | 'spill';
+  kind: 'grime' | 'spill' | 'blood';
   zone: 'kitchen' | 'dining';
 }
 
@@ -517,6 +534,8 @@ export interface Customer {
   partyId?: Id | null;
   /** 見た目の指定（珍しい客）。なければ appearance から決まる */
   look?: CustomerLook | null;
+  /** 武器で襲われた（じろ1 5.12。逃げる・血の表現） */
+  hurt?: boolean;
   /** SNS を見て来た客 */
   fromBuzz?: boolean;
   /** 吹き出しの種類（小声） */
@@ -1114,6 +1133,10 @@ export interface GameState {
   seats: Seat[];
   bowls: Bowl[];
   dirt: DirtSpot[];
+  /** 隠し扉と武器庫（じろ1 5.12。古いセーブにはない） */
+  armory?: ArmoryState;
+  /** 客を襲った日の事件（警察が来てその日の営業が終わる。古いセーブにはない） */
+  incident?: IncidentState | null;
   /** 厨房全体の汚れ 0..1 */
   kitchenGrime: number;
   lostItems: LostItem[];

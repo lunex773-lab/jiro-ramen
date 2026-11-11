@@ -96,6 +96,21 @@ export function streetRect(st: StageDef): Rect {
   return { x0: -3, z0: -4.5, x1: st.w * CELL + 6, z1: 0 };
 }
 
+/** 武器庫（店の右の横の壁の外に付いた小さな物置。壁と同じ見た目。じろ1 5.12）の範囲 */
+export function armoryRect(st: StageDef): Rect {
+  return { x0: st.w * CELL, z0: 0.6, x1: st.w * CELL + 0.5, z1: 1.8 };
+}
+
+/** 隠し扉（物置の路地側の面の真ん中） */
+export function armoryDoorPos(st: StageDef): Vec2 {
+  return { x: st.w * CELL + 0.5, z: 1.2 };
+}
+
+/** 隠し扉の前の路地（歩道から店の右の横の壁沿いに入れる） */
+export function alleyRect(st: StageDef): Rect {
+  return { x0: st.w * CELL + 0.5, z0: -0.5, x1: st.w * CELL + 1.9, z1: 2.2 };
+}
+
 /** 衝突判定用の箱（壁・カウンター・設備） */
 export function colliders(s: GameState): Rect[] {
   const st = stageOf(s);
@@ -123,7 +138,9 @@ export function isWalkable(s: GameState, p: Vec2, radius: number): boolean {
   const inInterior = p.x >= radius && p.x <= W - radius && p.z >= radius && p.z <= D - radius;
   const inStreet = p.x >= street.x0 && p.x <= street.x1 && p.z >= street.z0 && p.z <= -radius;
   const inDoor = p.x >= st.door.x0 + radius && p.x <= st.door.x1 - radius && p.z > -radius - 0.01 && p.z < radius + 0.01;
-  if (!inInterior && !inStreet && !inDoor) return false;
+  const alley = alleyRect(st);
+  const inAlley = p.x >= alley.x0 + radius && p.x <= alley.x1 - radius && p.z >= alley.z0 && p.z <= alley.z1 - radius;
+  if (!inInterior && !inStreet && !inDoor && !inAlley) return false;
   for (const r of colliders(s)) {
     if (inRect(p, r, radius)) return false;
   }

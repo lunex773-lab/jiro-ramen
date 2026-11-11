@@ -309,6 +309,39 @@ export class Sfx {
           this.explosion();
           this.startEerie();
           break;
+        // 隠し扉と武器庫（じろ1 5.12）
+        case 'armoryOpen':
+        case 'armoryClose':
+          this.noise(0.5, 300, 2, 0.08, 'lowpass');
+          this.tone(110, 0.4, 'triangle', 0.04, -30);
+          break;
+        case 'weaponTake':
+          this.tone(1800, 0.08, 'triangle', 0.05);
+          break;
+        case 'weaponHit':
+          this.noise(0.12, 500, 1, 0.25, 'lowpass');
+          this.tone(90, 0.15, 'sine', 0.2, -40);
+          break;
+        case 'gunshot':
+          this.noise(0.25, 1800, 0.6, 0.45, 'bandpass');
+          this.tone(70, 0.2, 'sine', 0.35, -40);
+          break;
+        case 'bombThrow':
+          this.noise(0.3, 3000, 1, 0.05, 'highpass');
+          break;
+        case 'bombBlast':
+          this.explosion();
+          break;
+        case 'hurt':
+          if (this.throttle('hurt', 0.3)) this.tone(880, 0.35, 'sawtooth', 0.06, 500);
+          break;
+        case 'incident':
+          for (let i = 0; i < 4; i++) this.tone(i % 2 ? 740 : 980, 0.3, 'sawtooth', 0.04, 0, i * 0.3);
+          break;
+        case 'police':
+          // サイレン（ピーポー）
+          for (let i = 0; i < 6; i++) this.tone(i % 2 ? 770 : 960, 0.45, 'square', 0.05, 0, i * 0.45);
+          break;
         case 'accidentReset':
           this.stopEerie(true);
           [523, 784, 1046].forEach((f, i) => this.tone(f, 0.25, 'sine', 0.07, 0, i * 0.14));

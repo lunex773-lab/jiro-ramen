@@ -8,7 +8,7 @@ import { MAT, plastic } from './materials';
 import { BOWL_DIMS, bowlDirtyPool, bowlShellGeometry, bowlStainGeometry, bowlStainMaterial } from './bowl';
 import { canvasTexture, JP_FONT, texGrime, texSpill } from './textures';
 
-export type HeldKind = 'bowl' | 'clean' | 'dirty' | 'mop' | 'lostItem' | 'trash' | 'phone' | 'cigarette' | 'tvcamera';
+export type HeldKind = 'bowl' | 'clean' | 'dirty' | 'mop' | 'lostItem' | 'trash' | 'phone' | 'cigarette' | 'tvcamera' | `weapon:${string}`;
 
 type Parts = { geo: THREE.BufferGeometry; mat: THREE.Material }[];
 
@@ -205,6 +205,9 @@ export function createHeldItem(kind: HeldKind): THREE.Object3D {
     }
     case 'tvcamera':
       return instantiate(tvCameraParts());
+    default:
+      // 武器（じろ1 5.12）
+      return createWeapon(kind.slice('weapon:'.length));
   }
 }
 
@@ -343,11 +346,27 @@ const DIRT_MAT = {
         polygonOffsetUnits: -4,
       }),
     ),
+  /** 血の跡（じろ1 5.12。こぼれたスープの形を暗い赤で） */
+  blood: () =>
+    cached('mat:blood', () =>
+      new THREE.MeshStandardMaterial({
+        map: texSpill(),
+        color: '#7a0b0b',
+        transparent: true,
+        depthWrite: false,
+        roughness: 0.2,
+        metalness: 0,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -4,
+      }),
+    ),
 };
 
-/** 床の汚れ（油汚れ / こぼれたスープ）。原点=床 */
-export function createDirt(kind: 'grime' | 'spill'): THREE.Object3D {
-  const m = new THREE.Mesh(decalGeometry(kind === 'grime' ? 0.7 : 0.55), kind === 'grime' ? DIRT_MAT.grime() : DIRT_MAT.spill());
+/** 床の汚れ（油汚れ / こぼれたスープ / 血の跡）。原点=床 */
+export function createDirt(kind: 'grime' | 'spill' | 'blood'): THREE.Object3D {
+  const mat = kind === 'grime' ? DIRT_MAT.grime() : kind === 'blood' ? DIRT_MAT.blood() : DIRT_MAT.spill();
+  const m = new THREE.Mesh(decalGeometry(kind === 'grime' ? 0.7 : kind === 'blood' ? 0.6 : 0.55), mat);
   m.receiveShadow = true;
   m.renderOrder = 1;
   m.rotation.y = Math.random() * Math.PI * 2;
@@ -355,3 +374,4 @@ export function createDirt(kind: 'grime' | 'spill'): THREE.Object3D {
 }
 
 export { meshesFromMerged };
+import { createWeapon } from './weapons';
