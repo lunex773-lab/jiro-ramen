@@ -698,10 +698,28 @@ test('従業員: みんなの勤務のカレンダーで日を選んでシフト
   const empId = s1.employees[0]!.id;
   await edit.locator(`[data-team-shift="${empId}"]`).selectOption({ label: '→ 休み' });
   await expect(body.locator('[data-team-day="3"] .td-count')).toHaveText('0人');
-  // 仕込みの目安（在庫・発注のタブ）
+  // 月の表（じろ2）: 従業員別の行。職種別にすると職種の行。日の見出しを押すとその日の見方
+  await body.locator('[data-cal-view-btn="month"]').click();
+  await expect(body.locator(`[data-cal-row="${empId}"]`)).toBeVisible();
+  await expect(body.locator(`[data-cal-cell="${empId}:3"]`)).toHaveText('休');
+  await body.locator('[data-cal-group="role"]').click();
+  await expect(body.locator('[data-cal-role]').first()).toBeVisible();
+  await shot(page, 'calendar-month');
+  await body.locator('[data-cal-head="3"]').click();
+  await expect(body.locator('[data-cal-day="3"]')).toBeVisible();
+  await body.locator('[data-cal-group="staff"]').click();
+  await expect(body.locator(`[data-cal-emp="${empId}"]`)).toContainText('休み');
+  await body.locator('[data-cal-view-btn="twoWeeks"]').click();
+  // 仕込みの目安（在庫・発注のタブ）。「○人前」で選ぶ（じろ2）
   await page.getByRole('button', { name: '在庫・発注', exact: true }).click();
+  await expect(body.locator('[data-prep-target="yasai"] option').nth(2)).toContainText('人前');
+  await expect(body.locator('[data-prep-row="yasai"]')).toContainText('1人前');
   await body.locator('[data-prep-target="yasai"]').selectOption({ index: 2 });
   await expect.poll(async () => (await state()).prepTargets?.yasai ?? 0).toBeGreaterThan(0);
+  // 食材ごとの自動の仕入れ（じろ2）と仕入れの記録
+  await body.locator('[data-auto-item="moyashi"]').click();
+  await expect(body.locator('[data-auto-item="moyashi"]')).toHaveText('自動 OFF');
+  await expect(body.locator('[data-purchase-log]')).toBeVisible();
   // 社員にして、能力が足りればシフトリーダーにできる
   await page.evaluate(() => {
     const e = (window as unknown as { __jiro: { host: { state: S } } }).__jiro.host.state.employees[0]!;

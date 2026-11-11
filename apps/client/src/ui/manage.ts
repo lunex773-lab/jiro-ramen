@@ -61,6 +61,13 @@ import {
   shiftProblem,
   shiftsOf,
   autoOrderTarget,
+  autoOrderEnabled,
+  isClosedDay,
+  type StoreHours,
+  shelfLifeCap,
+  prepPerBowl,
+  shiftIssues,
+  attendanceOn,
   shiftFor,
   hasDateShift,
   shiftTimeText,
@@ -84,6 +91,7 @@ import {
   type ShiftDay,
   leaderWageFor,
   prepTargetItems,
+  forecastNextDay,
   promoteLeaderProblem,
   storeHours,
   shiftTable,
@@ -148,6 +156,27 @@ function lockControls(root: HTMLElement): void {
   }
 }
 
+/** 職種ごとの人数（「調理2・接客1」） */
+function roleCounts(list: Employee[]): string {
+  const m = new Map<string, number>();
+  for (const e of list) m.set(ROLE_LABEL[e.profile.role], (m.get(ROLE_LABEL[e.profile.role]) ?? 0) + 1);
+  return [...m].map(([k, n]) => `${k}${n}`).join('・');
+}
+
+/** 実際の勤務の短い説明 */
+function attText(a: { absent: boolean; workedMin: number; lateMin: number; overtimeMin: number; calledIn: boolean }): string {
+  if (a.absent) return '欠勤';
+  const hm = `${Math.floor(a.workedMin / 60)}時間${a.workedMin % 60 > 0 ? `${a.workedMin % 60}分` : ''}`;
+  return `${hm}${a.lateMin > 0 ? `・遅刻${a.lateMin}分` : ''}${a.overtimeMin >= 10 ? `・残業${a.overtimeMin}分` : ''}${a.calledIn ? '・呼び出し' : ''}`;
+}
+
+/** 表のマスに入る短いシフト（「11-15」） */
+function shiftShort(sh: ShiftDay, hrs: StoreHours): string {
+  const a = shiftTimeText(sh.start, hrs).replace(/:00$/, '');
+  const b = shiftTimeText(sh.end, hrs, true).replace(/:00$/, '');
+  return `${a}-${b}`;
+}
+
 /** イベントの記録の種類の名前 */
 const EVENT_LOG_LABEL: Record<string, string> = {
   sns_buzz: '📱 SNSのバズ',
@@ -173,6 +202,9 @@ export class ManageMenu {
   private shiftEdit: { id: string; days: number[]; draft?: ShiftDay | null } | null = null;
   /** みんなの勤務のカレンダーで選んだ日 */
   private teamDay: number | null = null;
+  /** 勤務のカレンダーの見方（じろ2: 日・2週間・月）と並べ方（従業員別・職種別） */
+  private calView: 'day' | 'twoWeeks' | 'month' = 'twoWeeks';
+  private calGroup: 'staff' | 'role' = 'staff';
   private tabButtons = new Map<ManageTab, HTMLElement>();
   /** 押している最中は自動更新しない（押した要素が差し替わるとタップが外れる） */
   private pressing = false;
@@ -818,16 +850,27 @@ export class ManageMenu {
               h(
                 'div',
                 { class: 'tauto' },
-                h('span', null, '自動:'),
+                // 食材ごとに自動の仕入れを止める・戻す（目安の量は残る。じろ2）
+                h(
+                  'button',
+                  {
+                    class: `mini ${autoOrderEnabled(s, d.id) ? 'on' : 'ghost'}`,
+                    'data-auto-item': d.id,
+                    onclick: () => this.act({ type: 'setAutoOrderItem', itemId: d.id, enabled: !autoOrderEnabled(s, d.id) }, `${d.name}の自動の仕入れを${autoOrderEnabled(s, d.id) ? '止めました' : '戻しました'}`),
+                  },
+                  autoOrderEnabled(s, d.id) ? '自動 ON' : '自動 OFF',
+                ),
                 h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setAutoOrder', itemId: d.id, qty: Math.max(0, target - d.packQty) }) }, '−'),
                 h('b', null, target > 0 ? `${target.toLocaleString('ja-JP')}${d.unit}` : 'なし'),
                 h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setAutoOrder', itemId: d.id, qty: target + d.packQty }) }, '＋'),
                 s.autoOrderMode === 'sales' && target > 0 ? h('small', { class: 'auto-now' }, `今夜の目安 ${autoOrderTarget(s, d.id).toLocaleString('ja-JP')}${d.unit}`) : null,
+                Number.isFinite(shelfLifeCap(s, d.id)) ? h('small', { class: 'auto-now' }, `保存期間の上限 ${Math.round(shelfLifeCap(s, d.id)).toLocaleString('ja-JP')}${d.unit}`) : null,
               ),
             );
           }),
         ),
       ),
+      this.purchaseLogCard(s),
       h(
         'section',
         { class: 'card wide' },
@@ -835,6 +878,27 @@ export class ManageMenu {
         this.prepTargetRows(s),
         h('div', { class: 'table' }, prepared.map((d) => h('div', { class: 'trow' }, h('div', { class: 'tname' }, d.name), h('div', { class: 'tsub' }, `${Math.floor(stockOf(s, d.id)).toLocaleString('ja-JP')}${d.unit}`), h('div', { class: 'tsub' }, d.shelfLifeDays === 0 ? '当日限り' : `${d.shelfLifeDays}日もつ`)))),
       ),
+    );
+  }
+
+  /** 仕入れの記録（じろ2: いつ・何を・いくつ・いくら・誰が。新しい順に20件） */
+  private purchaseLogCard(s: GameState): HTMLElement {
+    const log = (s.purchaseLog ?? []).slice().reverse().slice(0, 20);
+    const byText = { manual: '自分', auto: '自動発注', manager: '店長' } as const;
+    return h(
+      'section',
+      { class: 'card wide', 'data-purchase-log': '' },
+      cardHead('仕入れの記録（最近20件）', '頼んだ日・食材・パック数・代金・当日便か・誰が頼んだか（自分・自動発注・店長）です。自動発注は、保存期間のうちに使い切れない分は頼みません。'),
+      log.length === 0
+        ? h('p', { class: 'note' }, 'まだ仕入れていません')
+        : log.map((p) =>
+            h(
+              'div',
+              { class: 'kv' },
+              h('span', null, `${p.day}日目 ${INGREDIENTS[p.itemId]?.name ?? p.itemId} ×${p.packs}${p.express ? '（当日便）' : ''}`),
+              h('b', null, `${yenStr(p.cost)}・${byText[p.by]}`),
+            ),
+          ),
     );
   }
 
@@ -869,26 +933,49 @@ export class ManageMenu {
     );
   }
 
-  /** 仕込みの目安（品ごとに「自動」か量。じろ1 5.8） */
+  /**
+   * 仕込みの目安（品ごとに「自動」か量。じろ1 5.8）。じろ2（改修設計書02）: 「○人前」で選べ、在庫と予想の杯数と比べて見る。
+   * 1人前は最近の日報の使用量 ÷ 杯数
+   */
   private prepTargetRows(s: GameState): HTMLElement {
     const items = prepTargetItems().filter((x) => isUnlocked(s, INGREDIENTS[x.itemId]?.unlock));
+    const fc = forecastNextDay(s);
+    const expect = fc && !fc.closed ? fc.bowls : null;
     return h(
       'div',
       { class: 'prep-targets' },
-      h('p', { class: 'note' }, '仕込みの目安: 在庫がこの量より少なくなったら、店員が仕込みます。「自動」は売れ行きから決めます（ピークの時間に足りる量）。'),
+      h(
+        'p',
+        { class: 'note' },
+        `仕込みの目安: 在庫がこの量より少なくなったら、店員が仕込みます。「自動」は売れ行きから決めます（ピークの時間に足りる量）。${expect !== null ? `あすの予想は約${expect}杯です。` : ''}`,
+      ),
       h(
         'div',
         { class: 'table' },
         items.map(({ itemId, minQty }) => {
           const d = INGREDIENTS[itemId]!;
+          const per = prepPerBowl(s, itemId);
+          const servings = (q: number) => Math.round(q / Math.max(1e-9, per));
           const cur = s.prepTargets?.[itemId];
           const opts: [string, string][] = [['', '自動']];
-          for (const k of [1, 2, 3, 5, 8]) opts.push([String(minQty * k), `${(minQty * k).toLocaleString('ja-JP')}${d.unit}`]);
-          if (cur !== undefined && !opts.some(([v]) => v === String(cur))) opts.push([String(cur), `${cur.toLocaleString('ja-JP')}${d.unit}`]);
+          const seen = new Set<string>();
+          for (const n of [5, 10, 20, 30, 50, 80, 120]) {
+            const q = Math.round(n * per);
+            if (q <= 0 || q > minQty * 20 || seen.has(String(q))) continue;
+            seen.add(String(q));
+            opts.push([String(q), `${n}人前（${q.toLocaleString('ja-JP')}${d.unit}）`]);
+          }
+          if (cur !== undefined && !opts.some(([v]) => v === String(cur))) opts.push([String(cur), `${servings(cur)}人前（${cur.toLocaleString('ja-JP')}${d.unit}）`]);
+          const stock = stockOf(s, itemId);
           return h(
             'div',
-            { class: 'trow' },
-            h('div', { class: 'tname' }, d.name, h('small', null, `在庫 ${Math.floor(stockOf(s, itemId)).toLocaleString('ja-JP')}${d.unit}`)),
+            { class: 'trow', 'data-prep-row': itemId },
+            h(
+              'div',
+              { class: 'tname' },
+              d.name,
+              h('small', null, `在庫 ${Math.floor(stock).toLocaleString('ja-JP')}${d.unit}（約${servings(stock)}人前）・1人前 約${per < 10 ? per.toFixed(1) : Math.round(per)}${d.unit}${expect !== null ? `・あすの予想${expect}杯なら約${Math.round(expect * per).toLocaleString('ja-JP')}${d.unit}` : ''}`),
+            ),
             h(
               'select',
               {
@@ -896,7 +983,7 @@ export class ManageMenu {
                 'data-prep-target': itemId,
                 onchange: (ev: Event) => {
                   const v = (ev.target as HTMLSelectElement).value;
-                  void this.act({ type: 'setPrepTarget', itemId, qty: v === '' ? null : Number(v) }, `${d.name}の仕込みの目安を${v === '' ? '自動' : `${Number(v).toLocaleString('ja-JP')}${d.unit}`}にしました`);
+                  void this.act({ type: 'setPrepTarget', itemId, qty: v === '' ? null : Number(v) }, `${d.name}の仕込みの目安を${v === '' ? '自動' : `${servings(Number(v))}人前（${Number(v).toLocaleString('ja-JP')}${d.unit}）`}にしました`);
                 },
               },
               opts.map(([v, label]) => h('option', { value: v, selected: v === (cur === undefined ? '' : String(cur)) }, label)),
@@ -1382,7 +1469,135 @@ export class ManageMenu {
    * みんなの勤務のカレンダー（じろ1 5.8。オーナーの指示）: 今日から2週間の日ごとに、出る人の数と名前。日を押すと、
    * その日の全員のシフトを見て、アルバイトはその日だけのシフトを変えられる（社員は毎日・休みの曜日は「休み」）
    */
+  /**
+   * 勤務のカレンダー（じろ1 5.8・じろ2: 改修設計書02）。見方: 日（1日の全員の予定と実際）・2週間（日ごとの人数。日を押すと変えられる）・
+   * 月（4週の表。過ぎた日は実際の勤務: ✓・遅刻・欠勤・残業）。並べ方: 従業員別・職種別。予定のおかしさ（休憩・7日続けて勤務など）も出す
+   */
   private teamCalendar(s: GameState): HTMLElement {
+    const views: [typeof this.calView, string][] = [['day', '日'], ['twoWeeks', '2週間'], ['month', '月']];
+    const groups: [typeof this.calGroup, string][] = [['staff', '従業員別'], ['role', '職種別']];
+    const issues = shiftIssues(s, s.day, 14);
+    const nameOf = (id: string) => s.employees.find((e) => e.id === id)?.profile.name ?? '';
+    return h(
+      'div',
+      { class: 'team-calendar', 'data-cal-view': this.calView },
+      h(
+        'div',
+        { class: 'row wrap cal-head' },
+        h('h5', null, '📅 勤務のカレンダー'),
+        views.map(([v, label]) => h('button', { class: `mini ${this.calView === v ? 'on' : 'ghost'}`, 'data-cal-view-btn': v, 'data-guest-ok': '1', onclick: () => { this.calView = v; this.render(); } }, label)),
+        groups.map(([g, label]) => h('button', { class: `mini ${this.calGroup === g ? 'on' : 'ghost'}`, 'data-cal-group': g, 'data-guest-ok': '1', onclick: () => { this.calGroup = g; this.render(); } }, label)),
+      ),
+      issues.length > 0
+        ? h(
+            'div',
+            { class: 'cal-issues', 'data-shift-issues': String(issues.length) },
+            issues.slice(0, 6).map((x) => h('p', { class: `note ${x.level === 'bad' ? 'bad' : 'warn'}` }, `⚠ ${x.day}日目 ${nameOf(x.employeeId)}: ${x.text}`)),
+            issues.length > 6 ? h('p', { class: 'note' }, `ほか${issues.length - 6}件`) : null,
+          )
+        : null,
+      this.calView === 'day' ? this.dayView(s) : this.calView === 'month' ? this.monthTable(s) : this.twoWeekGrid(s),
+    );
+  }
+
+  /** 1日の見方: 全員の予定と、過ぎた日は実際の勤務（遅刻・欠勤・残業） */
+  private dayView(s: GameState): HTMLElement {
+    const d = this.teamDay ?? s.day;
+    const hrs = storeHours(s);
+    const past = d < s.day || (d === s.day && s.phase === 'closed');
+    const rows = (list: Employee[]) =>
+      list.map((e) => {
+        const sh = shiftFor(e, d);
+        const att = attendanceOn(e, d);
+        return h(
+          'div',
+          { class: 'kv', 'data-cal-emp': e.id },
+          h('span', null, `${e.profile.name}（${ROLE_LABEL[e.profile.role]}）`),
+          h('b', null, `${isClosedDay(hrs, d) ? '定休日' : this.shiftText(sh)}${past && att ? `・実際 ${attText(att)}` : ''}`),
+        );
+      });
+    const byRole = this.calGroup === 'role';
+    return h(
+      'div',
+      { class: 'cal-day', 'data-cal-day': String(d) },
+      h(
+        'div',
+        { class: 'row wrap' },
+        h('button', { class: 'mini ghost', 'data-guest-ok': '1', onclick: () => { this.teamDay = d - 1; this.render(); } }, '← 前の日'),
+        h('b', null, `${d}日目（${WEEKDAY_LABEL[weekdayOf(d)]}曜）${d === s.day ? '・今日' : ''}`),
+        h('button', { class: 'mini ghost', 'data-guest-ok': '1', onclick: () => { this.teamDay = d + 1; this.render(); } }, '次の日 →'),
+      ),
+      byRole
+        ? (Object.keys(ROLE_LABEL) as EmployeeRole[]).map((r) => {
+            const list = s.employees.filter((e) => e.profile.role === r);
+            return list.length > 0 ? h('div', null, h('h6', null, ROLE_LABEL[r]), rows(list)) : null;
+          })
+        : rows(s.employees),
+      d >= s.day ? h('p', { class: 'note' }, '変えるときは「2週間」でその日を押すか、各人の「📅 シフト」から。') : null,
+    );
+  }
+
+  /** 月の見方（4週の表）: 過ぎた7日は実際の勤務、今日から21日は予定。日の見出しを押すとその日の見方へ */
+  private monthTable(s: GameState): HTMLElement {
+    const days = Array.from({ length: 28 }, (_, i) => s.day - 7 + i).filter((d) => d >= 1);
+    const hrs = storeHours(s);
+    const cell = (e: Employee, d: number): [string, string] => {
+      if (d < s.day || (d === s.day && s.phase === 'closed')) {
+        const a = attendanceOn(e, d);
+        if (!a) return ['', ''];
+        if (a.absent) return ['欠', 'bad'];
+        if (a.lateMin > 0) return ['遅', 'warn'];
+        if (a.overtimeMin >= 10) return ['残', 'info'];
+        return ['✓', 'ok'];
+      }
+      if (isClosedDay(hrs, d)) return ['定', 'closed'];
+      const sh = shiftFor(e, d);
+      return sh ? [shiftShort(sh, hrs), 'plan'] : ['休', 'off'];
+    };
+    const head = h(
+      'tr',
+      null,
+      h('th', null, ''),
+      days.map((d) => h('th', { class: d === s.day ? 'today' : '', 'data-cal-head': String(d), onclick: () => { this.teamDay = d; this.calView = 'day'; this.render(); } }, `${d}`, h('small', null, WEEKDAY_LABEL[weekdayOf(d)]!))),
+    );
+    let rows: HTMLElement[];
+    if (this.calGroup === 'role') {
+      rows = (Object.keys(ROLE_LABEL) as EmployeeRole[])
+        .filter((r) => s.employees.some((e) => e.profile.role === r))
+        .map((r) => {
+          const list = s.employees.filter((e) => e.profile.role === r);
+          return h(
+            'tr',
+            { 'data-cal-role': r },
+            h('th', null, ROLE_LABEL[r]),
+            days.map((d) => {
+              const n = list.filter((e) => ['✓', '遅', '残'].includes(cell(e, d)[0]) || cell(e, d)[1] === 'plan').length;
+              return h('td', { class: n === 0 ? 'off' : 'plan' }, String(n));
+            }),
+          );
+        });
+    } else {
+      rows = s.employees.map((e) =>
+        h(
+          'tr',
+          { 'data-cal-row': e.id },
+          h('th', null, e.profile.name.split(' ')[0] ?? e.profile.name),
+          days.map((d) => {
+            const [t, c] = cell(e, d);
+            return h('td', { class: c, 'data-cal-cell': `${e.id}:${d}` }, t);
+          }),
+        ),
+      );
+    }
+    return h(
+      'div',
+      { class: 'shift-table-wrap' },
+      h('table', { class: 'team-table' }, h('thead', null, head), h('tbody', null, rows)),
+      h('p', { class: 'note' }, '過ぎた日: ✓ 出勤・遅 遅刻・欠 欠勤・残 残業（10分以上）。今日から先: 予定の時間・休 休み・定 定休日。職種別は出る人数。'),
+    );
+  }
+
+  private twoWeekGrid(s: GameState): HTMLElement {
     const days = Array.from({ length: 14 }, (_, i) => s.day + i);
     const sel = this.teamDay !== null && this.teamDay >= s.day && this.teamDay < s.day + 14 ? this.teamDay : null;
     const short = (name: string) => name.split(' ')[0] ?? name;
@@ -1397,7 +1612,7 @@ export class ManageMenu {
           { class: `team-day${d === sel ? ' on' : ''}${wd >= 5 ? ' weekend' : ''}`, 'data-team-day': String(d), 'data-guest-ok': '1', onclick: () => { this.teamDay = d === sel ? null : d; this.render(); } },
           h('span', { class: 'td-date' }, `${d}日目（${WEEKDAY_LABEL[wd]}）`),
           h('b', { class: 'td-count' }, `${on.length}人`),
-          h('small', { class: 'td-names' }, on.map((e) => short(e.profile.name)).join('・') || '—'),
+          h('small', { class: 'td-names' }, (this.calGroup === 'role' ? roleCounts(on) : on.map((e) => short(e.profile.name)).join('・')) || '—'),
         );
       }),
     );
@@ -1440,7 +1655,7 @@ export class ManageMenu {
         h('p', { class: 'note' }, 'アルバイトは、この日だけのシフトに変わります（毎週くりかえす・細かい時間は各人の「📅 シフト」から）。社員の休みの曜日は各人の「📅 シフト」で決めます。'),
       );
     }
-    return h('div', { class: 'team-calendar' }, h('h5', null, '📅 みんなの勤務（2週間）'), grid, editor);
+    return h('div', null, grid, editor);
   }
 
   /**

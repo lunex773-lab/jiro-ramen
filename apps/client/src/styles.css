@@ -1270,3 +1270,21 @@ details.help:not([open]) > .help-body { display: none; }
 .armory-row small { opacity: 0.85; flex: 1; }
 .armory-row .armory-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .armory-panel > .note { margin: 0; font-size: 12px; }
+
+/* 勤務のカレンダーの見方（じろ2） */
+.team-calendar .cal-head { gap: 6px; align-items: center; }
+.team-calendar .cal-head h5 { margin: 0 6px 0 0; }
+.cal-issues { margin: 4px 0 6px; }
+.cal-issues .note { margin: 2px 0; font-size: 12px; }
+.cal-day h6 { margin: 6px 0 2px; color: var(--muted); }
+.team-table { border-collapse: separate; border-spacing: 2px; font-size: 11px; }
+.team-table th { font-weight: 600; white-space: nowrap; padding: 2px 4px; }
+.team-table thead th { cursor: pointer; text-align: center; }
+.team-table thead th small { display: block; color: var(--muted); font-weight: 400; }
+.team-table thead th.today { color: var(--yellow); }
+.team-table td { text-align: center; padding: 3px 4px; border-radius: 4px; background: #1d1814; white-space: nowrap; }
+.team-table td.ok { color: var(--good); }
+.team-table td.warn { color: var(--warn); }
+.team-table td.bad { color: var(--bad); font-weight: 700; }
+.team-table td.info { color: #6fb3e0; }
+.team-table td.off, .team-table td.closed { color: var(--muted); }

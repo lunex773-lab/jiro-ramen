@@ -173,6 +173,25 @@ export function setPrepTarget(s: GameState, itemId: string, qty: number | null):
   return { ok: true };
 }
 
+/** 1杯にふつう使う量（日報がまだないときの目安。じろ2: 仕込みの目安を「○人前」で見る） */
+const DEFAULT_PER_BOWL: Record<string, number> = { buta: 3, yasai: 250, garlic: 10, abura: 25, homemade_noodle: 330 };
+
+/** 仕込み品の1人前（1杯に使う量）。最近の営業日の使用量 ÷ 杯数。日報がなければ目安 */
+export function prepPerBowl(s: GameState, itemId: string): number {
+  let used = 0;
+  let served = 0;
+  let n = 0;
+  for (let i = s.history.length - 1; i >= 0 && n < 7; i--) {
+    const r = s.history[i]!;
+    if (r.served <= 0) continue;
+    n += 1;
+    used += r.usedItems?.[itemId] ?? 0;
+    served += r.served;
+  }
+  const v = served > 0 ? used / served : 0;
+  return v > 0 ? v : (DEFAULT_PER_BOWL[itemId] ?? 1);
+}
+
 /** 1杯盛るのに最低限必要な量（これを下回ったら補充を最優先） */
 const MIN_FOR_BOWL: Record<string, number> = { buta: 5, yasai: 540, garlic: 36, abura: 75 };
 
@@ -665,11 +684,15 @@ function canTake(s: GameState, e: Employee, t: Task): boolean {
   return override !== undefined && override > 0;
 }
 
-function taskScore(e: Employee, t: Task, isManager = false): number {
+/** 客の対応（提供・クレーム・こぼれの清掃）の優先度。仕込みはこれより先にしない（じろ2: 改修設計書02「客を放置しない」） */
+const CUSTOMER_FIRST = TASK_KINDS.serve!.base;
+
+export function taskScore(e: Employee, t: Task, isManager = false): number {
   const override = e.priorities[t.kind] ?? 0;
-  // 店長は、仕込み品が切れそうなとき（急ぎの仕込み）にほかの仕事より先に仕込む（オーナーの指示 2026-11-11）
-  const mgr = isManager && t.kind === 'prepUrgent' ? BALANCE.storeManager.urgentPrepBonus : 0;
-  return t.priority + override + mgr - dist(e.pos, t.at) * 2;
+  // 店長は、仕込み品が切れそうなとき（急ぎの仕込み）にほかの仕事より先に仕込む（オーナーの指示 2026-11-11）。
+  // ただし、できた丼の提供・クレームなど客の対応よりは先にしない（じろ2）
+  const base = isManager && t.kind === 'prepUrgent' ? Math.min(t.priority + BALANCE.storeManager.urgentPrepBonus, CUSTOMER_FIRST - 1) : t.priority;
+  return base + override - dist(e.pos, t.at) * 2;
 }
 
 // ───────────────────────── 実行 ─────────────────────────

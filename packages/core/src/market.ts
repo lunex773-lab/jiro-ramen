@@ -1433,6 +1433,7 @@ export const MARKET_ACTIONS: ReadonlySet<Action['type']> = new Set<Action['type'
   'takeLoan',
   'payArrears',
   'setAutoOrderMode',
+  'setAutoOrderItem',
   'rename',
   'renameStore',
 ]);

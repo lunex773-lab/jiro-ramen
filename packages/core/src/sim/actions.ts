@@ -13,7 +13,7 @@ import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipm
 import { fire, hire, hireTemp, setPrepTarget, setPriority, setRole } from './employees';
 import { nextDay, openShop, payArrears, takeLoan, declareBankruptcy, updateFinanceWarnings } from './day';
 import { cancelWork, dropHand, getActor, interact, type Args } from './interact';
-import { placeOrder } from './inventory';
+import { placeOrder, setAutoOrderItem } from './inventory';
 import { autoPlace, expand, placeEquipment, storeEquipment } from './layout';
 import { emit, type SimCtx } from './notices';
 import { currentTutorialStep, inBasicsTutorial, tutorialAction, updateTutorial, type TutorialOp } from './tutorial';
@@ -71,6 +71,7 @@ export type Action =
   | { type: 'setPrice'; menuId: string; price: number }
   | { type: 'pauseMenu'; menuId: string; paused: boolean }
   | { type: 'takeLoan'; amount?: number }
+  | { type: 'setAutoOrderItem'; itemId: string; enabled: boolean }
   | { type: 'payArrears' }
   | { type: 'rename'; name: string }
   | { type: 'renameStore'; storeId: Id; name: string }
@@ -346,6 +347,8 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
     }
     case 'takeLoan':
       return takeLoan(s, ctx, a.amount);
+    case 'setAutoOrderItem':
+      return setAutoOrderItem(s, a.itemId, a.enabled);
     case 'payArrears': {
       const paid = payArrears(s, ctx);
       updateFinanceWarnings(s, ctx);

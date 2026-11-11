@@ -5,7 +5,7 @@ import { BALANCE } from '../data/balance';
 import { EQUIPMENT } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
 import { PREP_RECIPES } from '../data/prep';
-import type { DayReport, DayStats, GameState, Lot, ManagerForecast } from '../types';
+import type { DayReport, DayStats, GameState, Lot, ManagerForecast, PurchaseRecord } from '../types';
 import { clamp01, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { activeStore } from './company';
@@ -322,7 +322,7 @@ export interface OrderResult {
  * 食材を発注する（パック単位）。代金は発注時に支払う。
  * express=true は当日便（60秒後に到着, 3割高）。false は翌朝便。
  */
-export function placeOrder(s: GameState, ctx: SimCtx, itemId: string, packs: number, express: boolean): OrderResult {
+export function placeOrder(s: GameState, ctx: SimCtx, itemId: string, packs: number, express: boolean, by: PurchaseRecord['by'] = 'manual'): OrderResult {
   const def = INGREDIENTS[itemId];
   if (!def || !def.purchasable) return { ok: false, reason: 'この食材は仕入れできません' };
   if (def.unlock && !s.career.unlocked.includes(def.unlock)) return { ok: false, reason: 'まだ解放されていません' };
@@ -351,7 +351,50 @@ export function placeOrder(s: GameState, ctx: SimCtx, itemId: string, packs: num
     arriveAt: arriveNow ? s.t + 60 : null,
   });
   emit(ctx, { type: 'order', text: `${def.name}を${packs}パック発注`, value: cost });
+  // 仕入れの記録（じろ2）
+  const log = (s.purchaseLog ??= []);
+  log.push({ day: s.day, itemId, packs, cost, express, by });
+  if (log.length > PURCHASE_LOG_KEEP) log.splice(0, log.length - PURCHASE_LOG_KEEP);
   return { ok: true, cost };
+}
+
+/** 保存期間の上限の余裕 */
+const SHELF_MARGIN = 1.2;
+
+/** 残す仕入れの記録の数 */
+const PURCHASE_LOG_KEEP = 60;
+
+/** 自動の仕入れ（自動発注・店長の発注・当日便）をする食材か（じろ2: 食材ごとの有効/無効） */
+export function autoOrderEnabled(s: GameState, itemId: string): boolean {
+  return !(s.autoOrderOff ?? []).includes(itemId);
+}
+
+/** 食材ごとに自動の仕入れを止める・戻す（目安の量はそのまま） */
+export function setAutoOrderItem(s: GameState, itemId: string, enabled: boolean): { ok: boolean; reason?: string } {
+  const def = INGREDIENTS[itemId];
+  if (!def || !def.purchasable) return { ok: false, reason: '仕入れできる食材ではありません' };
+  const off = new Set(s.autoOrderOff ?? []);
+  if (enabled) off.delete(itemId);
+  else off.add(itemId);
+  if (off.size === 0) delete s.autoOrderOff;
+  else s.autoOrderOff = [...off];
+  return { ok: true };
+}
+
+/**
+ * 保存期間のうちに使い切れる量（じろ2: 改修設計書02「保存期間を過ぎる買いすぎを防ぐ」）。
+ * 最近の営業日の1日の使用量 × 保存期間の日数（仕込み1回分は持てる）。使用量がわからなければ上限なし
+ */
+export function shelfLifeCap(s: GameState, itemId: string): number {
+  const def = INGREDIENTS[itemId];
+  if (!def) return Number.POSITIVE_INFINITY;
+  const rows = recentOpenDays(s);
+  const used = rows.reduce((a, r) => a + (r.usedItems?.[itemId] ?? 0), 0);
+  if (rows.length === 0 || used <= 0) return Number.POSITIVE_INFINITY;
+  const daily = used / rows.length;
+  const life = Math.max(def.shelfLifeDays, def.frozenShelfLifeDays && freezerCapacity(s) > 0 ? def.frozenShelfLifeDays : 0);
+  // 少し余裕を持たせる（使用量は品切れの日に少なく出るため）
+  return Math.max((PREP_BATCH[itemId] ?? 0) + def.packQty, daily * life * SHELF_MARGIN);
 }
 
 /** 到着した配送を在庫に入れる */
@@ -385,10 +428,18 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
   const needs: Need[] = [];
   const mgr = managerOrders(s);
   const forecast = mgr ? forecastNextDay(s) : null;
+  const shelfCut: string[] = [];
   for (const itemId of Object.keys(s.autoOrder)) {
-    const target = mgr ? managerOrderTarget(s, itemId, forecast) : autoOrderTarget(s, itemId);
+    if (!autoOrderEnabled(s, itemId)) continue;
+    let target = mgr ? managerOrderTarget(s, itemId, forecast) : autoOrderTarget(s, itemId);
     const def = INGREDIENTS[itemId];
     if (!def || !def.purchasable || target <= 0) continue;
+    // 保存期間のうちに使い切れない分は頼まない（じろ2）
+    const cap = shelfLifeCap(s, itemId);
+    if (target > cap) {
+      target = Math.round(cap);
+      if (stockOf(s, itemId) + pendingOf(s, itemId) < target + def.packQty) shelfCut.push(itemId);
+    }
     if (def.unlock && !s.career.unlocked.includes(def.unlock)) continue;
     const have = stockOf(s, itemId) + pendingOf(s, itemId);
     if (have >= target) continue;
@@ -447,7 +498,7 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
       n.packs = Math.max(0, Math.min(n.packs, afford));
       if (n.packs <= 0) continue;
     }
-    const r = placeOrder(s, ctx, n.itemId, Math.min(50, n.packs), false);
+    const r = placeOrder(s, ctx, n.itemId, Math.min(50, n.packs), false, mgr ? 'manager' : 'auto');
     if (r.ok && mgr) {
       const cost = Math.round(Math.min(50, n.packs) * def.packQty * purchaseUnitCost(n.itemId, false, s));
       budget -= cost;
@@ -467,6 +518,8 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
     if (summary.skipped > 0) notify(s, ctx, 'autoorder:budget', 'warn', `店長: 資金が少ないため、翌朝便を${summary.skipped}パック減らしました（手元に翌日の固定費の2日分を残す）`);
     else clearNotice(s, 'autoorder:budget');
   }
+  if (shelfCut.length > 0) notify(s, ctx, 'autoorder:shelf', 'info', `保存期間のうちに使い切れない分は頼みませんでした（${shelfCut.map((id) => INGREDIENTS[id]?.name ?? id).join('・')}）`);
+  else clearNotice(s, 'autoorder:shelf');
   if (reduced.length > 0) {
     notify(
       s,

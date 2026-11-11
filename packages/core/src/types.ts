@@ -736,6 +736,18 @@ export type TxnType =
   | 'companyRepay'
   | 'companyCollect';
 
+/** 仕入れの記録（じろ2: 改修設計書02） */
+export interface PurchaseRecord {
+  day: number;
+  itemId: string;
+  packs: number;
+  cost: number;
+  /** 当日便 */
+  express: boolean;
+  /** 誰が頼んだか: 自分・自動発注・店長 */
+  by: 'manual' | 'auto' | 'manager';
+}
+
 export interface Txn {
   id: Id;
   day: number;
@@ -1179,6 +1191,10 @@ export interface GameState {
   autoOrderMode?: 'manual' | 'sales';
   /** 仕込みの目安（作った品の量。品の id → 量）。ない品は自動（売れ行きから。じろ1 5.8） */
   prepTargets?: Record<string, number>;
+  /** 自動の仕入れ（自動発注・店長の発注・当日便）をしない食材（じろ2: 食材ごとの有効/無効。目安の量は残る） */
+  autoOrderOff?: string[];
+  /** 仕入れの記録（新しいものが後ろ。60件。じろ2） */
+  purchaseLog?: PurchaseRecord[];
   /** 今日の営業時間（朝に店の設定から決まる。前のセーブにはない → 11:00〜15:00。じろ1 5.1） */
   todayHours?: StoreHours;
   /** 今日の何番目の営業の枠か（0〜。中休みのあとの開店で1つ進む） */
@@ -1283,7 +1299,9 @@ export type StoreKey =
   | 'pausedMenu'
   | 'history'
   | 'closedForConstruction'
-  | 'prepTargets';
+  | 'prepTargets'
+  | 'autoOrderOff'
+  | 'purchaseLog';
 
 
 /** プレイヤーがいない店の中身（店の段階 = 席の数の段階も店ごと） */

@@ -12,7 +12,7 @@ import type { Employee, GameState, ManagerForecast } from '../types';
 import { dateLabel } from './calendar';
 import { activeStore } from './company';
 import { hourDemand, sessionSpans, todayHours } from './hours';
-import { managerOrderBudget, managerOrders, packPriceOf, pendingOf, placeOrder, stockOf } from './inventory';
+import { autoOrderEnabled, managerOrderBudget, managerOrders, packPriceOf, pendingOf, placeOrder, stockOf } from './inventory';
 import { clearNotice, notify, type SimCtx } from './notices';
 
 const M = () => BALANCE.storeManager;
@@ -118,7 +118,7 @@ export function managerExpressCheck(s: GameState, dt: number, ctx: SimCtx): void
   let budget = managerOrderBudget(s);
   for (const itemId of Object.keys(s.autoOrder)) {
     const def = INGREDIENTS[itemId];
-    if (!def || !def.purchasable || def.packQty <= 0 || (s.autoOrder[itemId] ?? 0) <= 0) continue;
+    if (!def || !def.purchasable || def.packQty <= 0 || (s.autoOrder[itemId] ?? 0) <= 0 || !autoOrderEnabled(s, itemId)) continue;
     if (def.unlock && !s.career.unlocked.includes(def.unlock)) continue;
     const short = shortageBeforeClose(s, itemId);
     if (short <= 0) continue;
@@ -130,10 +130,10 @@ export function managerExpressCheck(s: GameState, dt: number, ctx: SimCtx): void
       continue;
     }
     // 冷蔵庫に入る数まで減らす
-    let r = placeOrder(s, ctx, itemId, packs, true);
+    let r = placeOrder(s, ctx, itemId, packs, true, 'manager');
     while (!r.ok && packs > 1 && r.reason?.includes('冷蔵庫')) {
       packs -= 1;
-      r = placeOrder(s, ctx, itemId, packs, true);
+      r = placeOrder(s, ctx, itemId, packs, true, 'manager');
     }
     if (!r.ok) {
       notify(s, ctx, `mgrExpress:${itemId}`, 'warn', `店長: ${def.name}の当日便を頼めません（${r.reason}）`);

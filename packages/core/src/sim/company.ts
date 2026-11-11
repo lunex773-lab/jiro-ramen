@@ -36,6 +36,8 @@ const STORE_KEY_SET: Record<StoreKey, true> = {
   history: true,
   closedForConstruction: true,
   prepTargets: true,
+  autoOrderOff: true,
+  purchaseLog: true,
 };
 export const STORE_KEYS = Object.keys(STORE_KEY_SET) as StoreKey[];
 
