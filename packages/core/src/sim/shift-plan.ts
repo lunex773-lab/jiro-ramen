@@ -8,7 +8,7 @@ import { BALANCE } from '../data/balance';
 import type { Employee, GameState, ShiftDay, StoreEntry, StoreHours } from '../types';
 import { activeStore } from './company';
 import { calendarDemand } from './calendar';
-import { clockMinuteAt, clockMinuteAtEnd, DEFAULT_HOURS, hourDemand, hoursDemandWeight, openMinutesOf, SEC_PER_MIN, storeHours, todayHours } from './hours';
+import { clockMinuteAt, clockMinuteAtEnd, DEFAULT_HOURS, hourDemand, hoursDemandWeight, openMinutesOf, SEC_PER_MIN, storeHours, todayHours, shiftSpansBreak } from './hours';
 import { notify, type SimCtx } from './notices';
 import { fatigueOf, isFullShift, isPartTime, shiftProblem, shiftsOf, WEEKDAY_LABEL, weekdayOf } from './staff';
 
@@ -36,6 +36,13 @@ const snap = (m: number) => Math.round(m / STEP()) * STEP();
  * 「仕込みから最後まで」のシフトは新しい営業時間でも最後まで。新しい営業時間に重ならないときは、1日の中の同じ割合の位置へ
  */
 export function remapShift(sh: ShiftDay, from: StoreHours, to: StoreHours): ShiftDay {
+  const r = remapShiftBody(sh, from, to);
+  // 「中休みは休む」は、新しい営業時間でも枠をまたぐときだけ残す
+  if (sh.midRest && shiftSpansBreak(to, r.start, r.end)) r.midRest = true;
+  return r;
+}
+
+function remapShiftBody(sh: ShiftDay, from: StoreHours, to: StoreHours): ShiftDay {
   const oldOpen = openMinutesOf(from);
   const newOpen = openMinutesOf(to);
   // 最後まで（社員と同じ「仕込みから閉店まで」・今日の営業の終わりまで）

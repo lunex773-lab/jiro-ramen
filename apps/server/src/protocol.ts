@@ -58,9 +58,13 @@ const isRole = (v: unknown): boolean => v === 'cook' || v === 'server' || v === 
 /** シフト（null はその曜日を休みにする）。中身の範囲は core の shiftProblem でも確かめる */
 function isShift(v: unknown): boolean {
   if (v === null) return true;
-  if (!isObj(v) || Object.keys(v).length !== 5) return false;
-  const m = isIntIn(0, 240);
-  return m(v.start) && m(v.end) && m(v.breakAt) && isIntIn(0, 60)(v.breakLen) && isBool(v.fromPrep);
+  // 中休みは休む（midRest）は任意（営業の枠が2つ以上の店。オーナーの指示 2026-11-11）
+  if (!isObj(v)) return false;
+  const keys = Object.keys(v);
+  if (keys.length < 5 || keys.length > 6 || (keys.length === 6 && !('midRest' in v))) return false;
+  // 開店からの分（営業時間が長い店・枠が2つ以上の店でも入るように。営業時間の上限は core の hoursProblem）
+  const m = isIntIn(0, 3000);
+  return m(v.start) && m(v.end) && m(v.breakAt) && isIntIn(0, 60)(v.breakLen) && isBool(v.fromPrep) && (v.midRest === undefined || isBool(v.midRest));
 }
 /** カレンダーで選んだ日にち（営業日の番号。28日分まで） */
 function isDayList(v: unknown): boolean {

@@ -98,6 +98,7 @@ import {
   shiftTable,
   openMinutesOf,
   sessionSpans,
+  shiftSpansBreak,
   SEC_PER_MIN,
   fullTimePayFor,
   clockText as clockLabel,
@@ -1722,6 +1723,8 @@ export class ManageMenu {
     ];
     const spans = sessionSpans(hrs);
     if (spans.length > 1) {
+      // 枠ぜんぶ・中休みは休む（オーナーの指示 2026-11-11）
+      list.push(['開店〜閉店（中休みは休み）', { ...at(0, openMin), midRest: true }]);
       for (const sp of spans) list.push([`${clockLabel(sp.open)}〜${clockLabel(sp.close)}の営業`, at(Math.round(sp.startT / SEC_PER_MIN), Math.round(sp.endT / SEC_PER_MIN))]);
     } else {
       const half = Math.max(step, Math.floor(openMin / 2 / step) * step);
@@ -1734,7 +1737,18 @@ export class ManageMenu {
     if (!sh) return '休み';
     const hrs = storeHours(this.host.state);
     const b = sh.breakLen > 0 ? `（休憩${sh.breakLen}分）` : '';
-    return `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start, hrs)}〜${shiftTimeText(Math.min(sh.end, openMinutesOf(hrs)), hrs, true)}${b}`;
+    const end = Math.min(sh.end, openMinutesOf(hrs));
+    // 中休みは休む: 枠ごとの時間を並べる（「11:00〜14:00・17:00〜21:00（中休みは休み）」）
+    if (sh.midRest && shiftSpansBreak(hrs, sh.start, end)) {
+      const parts: string[] = [];
+      for (const sp of sessionSpans(hrs)) {
+        const a = Math.max(sh.start, sp.startT / SEC_PER_MIN);
+        const z = Math.min(end, sp.endT / SEC_PER_MIN);
+        if (z > a) parts.push(`${a === sh.start && sh.fromPrep ? '仕込み' : shiftTimeText(a, hrs)}〜${shiftTimeText(z, hrs, true)}`);
+      }
+      return `${parts.join('・')}（中休みは休み）${b}`;
+    }
+    return `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start, hrs)}〜${shiftTimeText(end, hrs, true)}${b}`;
   }
 
   /**
@@ -1882,6 +1896,20 @@ export class ManageMenu {
             h('label', null, '退勤', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, end: Number((ev.target as HTMLSelectElement).value) })) }, ends)),
             h('label', null, '休憩', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, breakLen: Number((ev.target as HTMLSelectElement).value) })) }, breaks)),
             draft.breakLen > 0 && breakAts.length > 0 ? h('label', null, '休憩の開始', h('select', { class: 'select', onchange: (ev: Event) => setDraft(fixBreak({ ...draft, breakAt: Number((ev.target as HTMLSelectElement).value) })) }, breakAts)) : null,
+            // 営業の枠をまたぐ勤務: 枠の間の中休みに休ませるか（オーナーの指示 2026-11-11）
+            shiftSpansBreak(hrs, draft.start, Math.min(draft.end, close))
+              ? h(
+                  'label',
+                  null,
+                  '中休み',
+                  h(
+                    'select',
+                    { class: 'select', 'data-mid-rest': '', onchange: (ev: Event) => setDraft({ ...draft, midRest: (ev.target as HTMLSelectElement).value === '1' || undefined }) },
+                    h('option', { value: '1', selected: !!draft.midRest }, '休む（店を出て、次の枠の開店で戻る）'),
+                    h('option', { value: '0', selected: !draft.midRest }, '店にいる（仕込み・片付け）'),
+                  ),
+                )
+              : null,
           ),
         );
         problem = shiftProblem(draft, close);

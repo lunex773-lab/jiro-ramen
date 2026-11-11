@@ -8,6 +8,9 @@ import {
   INGREDIENTS,
   nextDay,
   pendingOf,
+  remapShift,
+  shiftSpansBreak,
+  step,
   prepPerBowl,
   runAutoOrder,
   shelfLifeCap,
@@ -19,7 +22,7 @@ import {
   type GameState,
   type Task,
 } from '../src';
-import { addSoloBot, newGame, runDay } from './helpers';
+import { addSoloBot, newGame, run, runDay } from './helpers';
 
 function hirePart(s: GameState, ctx: Parameters<typeof applyAction>[3]): Employee {
   const c = s.candidates[0]!;
@@ -138,5 +141,46 @@ describe('自動仕入れの制約（食材ごとの有効/無効・保存期間
     expect(s.purchaseLog!.at(-1)).toMatchObject({ itemId: 'garlic_raw', packs: 1, by: 'manual' });
     expect(nextDay(s, ctx).ok).toBe(true);
     void BALANCE;
+  });
+});
+
+describe('中休みにアルバイトを休ませる（営業の枠が2つのとき。オーナーの指示 2026-11-11）', () => {
+  it('「中休みは休む」の人は、1つ目の枠のあと店を出て、2つ目の枠の開店で戻る。そうでない人は店に残る', () => {
+    const { s, ctx } = newGame(310);
+    addSoloBot(s);
+    expect(applyAction(s, 'p1', { type: 'setStoreHours', storeId: s.company.activeStoreId, hours: { sessions: [{ open: 660, close: 840 }, { open: 1020, close: 1260 }], closedDays: [] } }, ctx).ok).toBe(true);
+    const rest = hirePart(s, ctx);
+    const stay = hirePart(s, ctx);
+    const full = { start: 0, end: 420, breakAt: 0, breakLen: 0, fromPrep: false };
+    // 休まない・遅れない人にする（勤怠は隠しパラメータ）
+    for (const e of [rest, stay]) e.profile.diligence = 1;
+    rest.shifts = Array.from({ length: 7 }, () => ({ ...full, midRest: true }));
+    stay.shifts = Array.from({ length: 7 }, () => ({ ...full }));
+    // 営業時間は次の営業日から。1日目を終えて2日目へ（朝の出勤の確認で今日の予定ができる）
+    expect(applyAction(s, 'p1', { type: 'openShop' }, ctx).ok).toBe(true);
+    runDay(s, ctx);
+    expect(nextDay(s, ctx).ok).toBe(true);
+    expect(applyAction(s, 'p1', { type: 'openShop' }, ctx).ok).toBe(true);
+    let guard = 0;
+    while (!(s.phase === 'prep' && (s.sessionIdx ?? 0) === 1) && guard++ < 40_000) step(s, 0.25, ctx);
+    expect(s.sessionIdx).toBe(1);
+    run(s, ctx, 3);
+    expect(rest.att!.absent).toBe(false);
+    expect(rest.att!.status).toBe('break');
+    expect(stay.att!.status).not.toBe('break');
+    expect(applyAction(s, 'p1', { type: 'openShop' }, ctx).ok).toBe(true);
+    run(s, ctx, 3);
+    expect(rest.att!.status).toBe('working');
+  });
+
+  it('営業時間を変えても、枠をまたぐなら「中休みは休む」は残る', () => {
+    const two = { sessions: [{ open: 660, close: 840 }, { open: 1020, close: 1260 }], closedDays: [] };
+    const other = { sessions: [{ open: 690, close: 870 }, { open: 1050, close: 1290 }], closedDays: [] };
+    const one = { sessions: [{ open: 660, close: 1080 }], closedDays: [] };
+    const sh = { start: 0, end: 420, breakAt: 0, breakLen: 0, fromPrep: false, midRest: true };
+    expect(remapShift(sh, two, other).midRest).toBe(true);
+    expect(remapShift(sh, two, one).midRest).toBeUndefined();
+    expect(shiftSpansBreak(two, 60, 300)).toBe(true);
+    expect(shiftSpansBreak(two, 0, 180)).toBe(false);
   });
 });

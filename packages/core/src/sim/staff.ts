@@ -8,7 +8,7 @@
 //
 // 注意: 読むだけの関数（*Of / staffSummary / promotionInfo / attendanceText など）は状態を変えない。client の共同経営の複製からも呼べる。
 
-import { clockMinuteAt, clockMinuteAtEnd, clockText, DEFAULT_HOURS, SEC_PER_MIN, isClosedDay, lateNightShare, openDurationOf, openMinutesOf, paidHoursWithPremium, storeHours, todayHours } from './hours';
+import { clockMinuteAt, clockMinuteAtEnd, clockText, DEFAULT_HOURS, SEC_PER_MIN, isClosedDay, lateNightShare, openDurationOf, openMinutesOf, paidHoursWithPremium, sessionIndex, storeHours, todayHours } from './hours';
 import { BALANCE } from '../data/balance';
 import { stageOf } from '../geometry';
 import type { StoreHours, Attendance, AttendanceRecord, Employee, EmployeeSkills, Employment, GameState, ShiftDay, StaffLogEntry, StaffLogKind, StaffRecord } from '../types';
@@ -158,6 +158,7 @@ export function shiftProblem(sh: ShiftDay, openMin = MIN_PER_DAY): string | null
   if (sh.fromPrep && sh.start !== 0) return '仕込みから出勤するときは、開店から働きます';
   if (sh.breakLen < 0 || sh.breakLen > 60) return '休憩は60分までです';
   if (sh.breakLen > 0 && (sh.breakAt <= sh.start || sh.breakAt + sh.breakLen >= sh.end)) return '休憩は勤務の途中に入れてください';
+  if (sh.midRest !== undefined && typeof sh.midRest !== 'boolean') return 'シフトの形が正しくありません';
   return null;
 }
 
@@ -668,6 +669,13 @@ export function updateAttendance(s: GameState, dt: number, ctx: SimCtx): void {
   for (const e of s.employees) {
     const a = ensureAttendance(s, e);
     if (a.status === 'off' || a.status === 'absent' || a.status === 'closed') continue;
+    // 中休み（2つ目以降の枠の前の仕込みの時間）: 「中休みは休む」の人は、次の枠の開店まで店を出る（オーナーの指示 2026-11-11）。
+    // 開店すると、下の休憩の終わりと同じように戻ってくる
+    if (s.phase === 'prep' && sessionIndex(s) > 0 && a.shift?.midRest && a.arrived && a.status === 'working' && a.leaveAt > t) {
+      if (e.conduct?.kind) e.conduct.kind = null;
+      if (leaveFloor(s, e, ctx, 'break')) a.status = 'break';
+      continue;
+    }
     if (s.phase === 'prep') continue;
     if (s.phase === 'open') {
       if (!a.arrived) {
@@ -970,7 +978,7 @@ export function setShift(s: GameState, ctx: SimCtx, employeeId: string, weekday:
   if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return { ok: false, reason: '曜日が正しくありません' };
   let sh: ShiftDay | null = null;
   if (shift) {
-    sh = { start: shift.start, end: shift.end, breakAt: shift.breakLen > 0 ? shift.breakAt : 0, breakLen: shift.breakLen, fromPrep: shift.fromPrep };
+    sh = { start: shift.start, end: shift.end, breakAt: shift.breakLen > 0 ? shift.breakAt : 0, breakLen: shift.breakLen, fromPrep: shift.fromPrep, ...(shift.midRest ? { midRest: true } : {}) };
     const bad = shiftProblem(sh, openMinutesOf(storeHours(s)));
     if (bad) return { ok: false, reason: bad };
   }
@@ -1006,7 +1014,7 @@ export function setDateShift(s: GameState, ctx: SimCtx, employeeId: string, days
   if (e.availableFrom !== undefined && nums.some((d) => d < e.availableFrom!)) return { ok: false, reason: `${e.availableFrom}日目から出勤できます（採用の手続き中）` };
   let sh: ShiftDay | null = null;
   if (mode !== 'reset' && shift) {
-    sh = { start: shift.start, end: shift.end, breakAt: shift.breakLen > 0 ? shift.breakAt : 0, breakLen: shift.breakLen, fromPrep: shift.fromPrep };
+    sh = { start: shift.start, end: shift.end, breakAt: shift.breakLen > 0 ? shift.breakAt : 0, breakLen: shift.breakLen, fromPrep: shift.fromPrep, ...(shift.midRest ? { midRest: true } : {}) };
     const bad = shiftProblem(sh, openMinutesOf(storeHours(s)));
     if (bad) return { ok: false, reason: bad };
   }

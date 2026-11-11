@@ -167,6 +167,11 @@ export interface ShiftDay {
   breakAt: number;
   breakLen: number;
   fromPrep: boolean;
+  /**
+   * 営業の枠が2つ以上の店で、枠をまたぐ勤務のとき、枠の間の中休みは休む（店を出て、次の枠の開店で戻る。オーナーの指示 2026-11-11）。
+   * ない・false なら中休みも店にいて仕込み・片付けをする（前と同じ）
+   */
+  midRest?: boolean;
 }
 
 /** 勤務の出来事（実際に起きたことだけを記録する） */

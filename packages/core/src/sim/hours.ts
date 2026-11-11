@@ -46,6 +46,16 @@ export function sessionSpans(h: StoreHours): { startT: number; endT: number; ope
   });
 }
 
+/** シフトが営業の枠の間（中休み）をまたぐか（開店からの分） */
+export function shiftSpansBreak(h: StoreHours, start: number, end: number): boolean {
+  const spans = sessionSpans(h);
+  for (let i = 0; i < spans.length - 1; i++) {
+    const b = spans[i]!.endT / SEC_PER_MIN;
+    if (start < b && end > b) return true;
+  }
+  return false;
+}
+
 /** 今の枠（0〜） */
 export function sessionIndex(s: GameState): number {
   return Math.max(0, Math.min(todayHours(s).sessions.length - 1, s.sessionIdx ?? 0));
