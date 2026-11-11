@@ -665,9 +665,11 @@ function canTake(s: GameState, e: Employee, t: Task): boolean {
   return override !== undefined && override > 0;
 }
 
-function taskScore(e: Employee, t: Task): number {
+function taskScore(e: Employee, t: Task, isManager = false): number {
   const override = e.priorities[t.kind] ?? 0;
-  return t.priority + override - dist(e.pos, t.at) * 2;
+  // 店長は、仕込み品が切れそうなとき（急ぎの仕込み）にほかの仕事より先に仕込む（オーナーの指示 2026-11-11）
+  const mgr = isManager && t.kind === 'prepUrgent' ? BALANCE.storeManager.urgentPrepBonus : 0;
+  return t.priority + override + mgr - dist(e.pos, t.at) * 2;
 }
 
 // ───────────────────────── 実行 ─────────────────────────
@@ -862,6 +864,7 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
     e.ai.cooldown -= dt;
     if (e.ai.cooldown > 0) continue;
     tasks = tasks ?? buildTasks(s);
+    const isManager = !!s.company && activeStore(s).managerId === e.id;
     let best: Task | null = null;
     let bestScore = -Infinity;
     for (const t of tasks) {
@@ -874,7 +877,7 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
       // 最近失敗した仕事はしばらく選ばない
       const until = failedUntil(e, t.key);
       if (until !== undefined && until > s.t) continue;
-      const sc = taskScore(e, t);
+      const sc = taskScore(e, t, isManager);
       if (sc <= bestScore) continue;
       // 実際に実行できるか（行為と同じ判定）を確認してから選ぶ
       if (verbBlocked(s, e.id, t.steps[0]!.targetId, firstVerb, t.steps[0]!.args) !== null) continue;

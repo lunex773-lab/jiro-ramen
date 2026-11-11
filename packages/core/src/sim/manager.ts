@@ -9,7 +9,7 @@ import { INGREDIENTS } from '../data/ingredients';
 import { MENU } from '../data/menu';
 import { STAGES } from '../data/stages';
 import type { DayReport, Employee, GameState, StoreEntry, StoreHours } from '../types';
-import { DEFAULT_HOURS, isClosedDay, openMinutesOf, utilitiesBaseOf } from './hours';
+import { DEFAULT_HOURS, hoursDemandWeight, isClosedDay, openMinutesOf, utilitiesBaseOf } from './hours';
 import { clamp } from '../util';
 import { companyPolicyOf, withStore } from './company';
 import { storeRentMult } from './location';
@@ -297,6 +297,7 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
     avgSatisfaction: 0,
     avgWait: 0,
     managed: plan.open ? 'manager' : 'closed',
+    demandWeight: Math.round(hoursDemandWeight(hours) * 1000) / 1000,
   };
   s.history.push(report);
   if (s.history.length > 60) s.history.splice(0, s.history.length - 60);

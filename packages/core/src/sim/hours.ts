@@ -153,6 +153,16 @@ export function hourDemand(min: number): number {
 }
 
 /**
+ * 営業時間の「来客の多さ」の合計（時間帯ごとの客の多さ × 営業の時間。単位は「ふつうの1時間」）。
+ * 11〜15時の4時間の店と、11〜15時・18〜22時の店で、来る客の数の比を見積もるのに使う（店長の翌日の予測）
+ */
+export function hoursDemandWeight(h: StoreHours): number {
+  let w = 0;
+  for (const x of h.sessions) for (let m = x.open; m < x.close; m += 5) w += hourDemand(m + 2.5) * (Math.min(5, x.close - m) / 60);
+  return w;
+}
+
+/**
  * 給料を払う時間（割り増しを足した時間）。hours = 働いた時間、lateHours = そのうち深夜（22:00〜翌5:00）の時間。
  * 6時間を超えると休憩45分・8時間を超えると60分（給与なし）、休憩を引いて8時間を超えた分は25%増し、深夜は25%増し（労働基準法の考え方）
  */

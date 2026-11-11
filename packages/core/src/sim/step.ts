@@ -15,6 +15,7 @@ import { afterHoursService, sendStaffHome, updateAttendance } from './staff';
 import { defOf, effectSum, updateRepairs } from './equipment';
 import { assignBowls, completeProcess, progressWork, roleOf } from './interact';
 import { receiveDeliveries, stockOf } from './inventory';
+import { managerExpressCheck } from './store-manager';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { updateTutorial } from './tutorial';
 import { accidentHalted } from './events';
@@ -58,6 +59,8 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
   // 出勤・退勤・休憩・サボり（シフトと勤怠）
   updateAttendance(s, dt, ctx);
   updateEmployees(s, dt, ctx);
+  // 店長: 閉店までに足りなくなりそうな材料を当日便で先に仕入れる（オーナーの指示 2026-11-11）
+  managerExpressCheck(s, dt, ctx);
 
   // 火事の間は新しいお客さんは来ない（店の中の人は騒ぐが残る）
   if (s.phase === 'open' && !s.events?.accident) {

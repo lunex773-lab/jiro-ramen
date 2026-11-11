@@ -733,15 +733,32 @@ export interface DayStats {
   usedItems?: Record<string, number>;
   /** 閉店の時刻のあと、並んだ客に提供していた時間（営業の sim 秒。人件費・光熱費に入る。じろ1 5.3） */
   afterHoursSec?: number;
-  /** 店長が閉店後に発注した翌朝便（じろ1 5.8。店長に任せた店だけ） */
-  managerOrder?: { spent: number; packs: number; skipped: number };
+  /**
+   * 店長が閉店後に発注した翌朝便（じろ1 5.8。店長に任せた店だけ）。forecast = 店長の翌日の予測
+   * （その日の営業の数字・曜日・翌日の営業時間と定休日から。オーナーの指示 2026-11-11）
+   */
+  managerOrder?: { spent: number; packs: number; skipped: number; forecast?: ManagerForecast };
+  /** 店長が営業中に当日便で仕入れた分（閉店までに足りなくなりそうな材料。オーナーの指示 2026-11-11） */
+  managerExpress?: { spent: number; packs: number; items: Record<string, number> };
   /** 店内外のトラブル（食べ方・居座り・喫煙・店員の口論など）と、そのうち対応したもの（第2版 10。古いセーブにはない） */
   troubles?: number;
   troublesHandled?: number;
 }
 
+/** 店長の翌日の予測（来客 = 店に来る人数。杯数 = 出せる見込みの杯数） */
+export interface ManagerForecast {
+  day: number;
+  closed: boolean;
+  customers: number;
+  bowls: number;
+  /** 予測に使った営業日の数 */
+  basis: number;
+}
+
 export interface DayReport extends DayStats {
   day: number;
+  /** その日の営業時間の「来客の多さ」の合計（時間帯ごとの客の多さ × 営業の時間。店長の予測に使う。古い日報にはない） */
+  demandWeight?: number;
   /** 営業利益（利息を含めない。この版より前の日報は利息を引いた値） */
   operatingProfit: number;
   /** 純売上（売上 − 返金）。古い日報にはない */

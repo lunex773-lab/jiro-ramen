@@ -4,6 +4,7 @@ import {
   BALANCE,
   callToSpoken,
   fixedCosts,
+  forecastText,
   MENU,
   STAGES,
   type DayReport,
@@ -178,6 +179,10 @@ export function resultScreen(s: GameState, r: DayReport, isHost: boolean, cb: Re
         row('評判', `${stars(r.reputation)} ${r.reputation.toFixed(2)}（${repDelta >= 0 ? '+' : ''}${repDelta.toFixed(2)}）`, repDelta < 0 ? 'bad' : 'good'),
         row('ミス / クレーム / 品切れ', `${r.mistakes} / ${r.complaints} / ${r.stockouts}`),
         row('翌日の固定費（予測）', yenStr(fc.total), s.money < fc.total ? 'bad' : ''),
+        // 店長の仕入れ（オーナーの指示 2026-11-11: 営業中の当日便・閉店後の予測で翌朝便）
+        r.managerExpress ? row('店長の当日便', `${r.managerExpress.packs}パック ${yenStr(r.managerExpress.spent)}`, 'warn') : null,
+        r.managerOrder ? row('店長の翌朝便', `${r.managerOrder.packs}パック ${yenStr(r.managerOrder.spent)}`) : null,
+        r.managerOrder?.forecast ? h('div', { class: 'kv', 'data-manager-forecast': '1' }, h('span', null, '店長のあすの予測'), h('b', null, forecastText(r.managerOrder.forecast))) : null,
       ),
       reviews.length > 0
         ? h('section', { class: 'card wide' }, h('h4', null, '今日の口コミ'), reviews.map((x) => h('div', { class: 'review' }, h('b', null, '★'.repeat(Math.max(1, Math.round(x.stars)))), ` ${x.text}`)))

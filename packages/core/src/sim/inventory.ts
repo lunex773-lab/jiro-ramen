@@ -5,11 +5,12 @@ import { BALANCE } from '../data/balance';
 import { EQUIPMENT } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
 import { PREP_RECIPES } from '../data/prep';
-import type { GameState, Lot } from '../types';
+import type { DayReport, DayStats, GameState, Lot, ManagerForecast } from '../types';
 import { clamp01, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { activeStore } from './company';
 import { calendarDemand } from './calendar';
+import { hoursDemandWeight, isClosedDay, storeHours, todayHours } from './hours';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { purchaseMultOf } from './location';
 
@@ -169,26 +170,69 @@ export function managerOrders(s: GameState): boolean {
   return s.employees.some((e) => e.id === st.managerId);
 }
 
-/**
- * 店長の発注の目安: 売れ行き（最近の使用量）に、明日の曜日・季節の需要と最近の日の需要の比を掛ける（土日の前は多め、平日の前は少なめ）。
- * 発注をしない設定（目安0）の食材は発注しない
- */
-export function managerOrderTarget(s: GameState, itemId: string): number {
-  const keep = s.autoOrderMode;
-  s.autoOrderMode = 'sales';
-  const base = autoOrderTarget(s, itemId);
-  s.autoOrderMode = keep;
-  if (base <= 0 || s.tutorial) return base;
-  let recent = 0;
-  let n = 0;
-  for (let i = s.history.length - 1; i >= 0 && n < BALANCE.autoOrderSales.days; i--) {
+/** 予測に使う、最近の営業した日（1杯以上出した日。新しい順に最大 recentDays 日） */
+function recentOpenDays(s: GameState): DayReport[] {
+  const out: DayReport[] = [];
+  for (let i = s.history.length - 1; i >= 0 && out.length < BALANCE.storeManager.recentDays; i--) {
     const r = s.history[i]!;
-    if (r.served <= 0) continue;
-    recent += calendarDemand(r.day);
-    n += 1;
+    if (r.served > 0) out.push(r);
   }
-  const ratio = n > 0 ? calendarDemand(s.day + 1) / (recent / n) : 1;
-  return Math.round(base * Math.max(0.8, Math.min(1.3, ratio)));
+  return out;
+}
+
+/**
+ * 店長の翌日の予測（オーナーの指示 2026-11-11: その日の営業の数字や曜日などを考えて、翌日の来客を予測する）。
+ * 最近の営業日の来客・杯数を、その日の曜日・季節（calendarDemand）と営業時間の「来客の多さ」（hoursDemandWeight）で割って
+ * ならし、翌日の曜日・季節と翌日の営業時間を掛ける。今日の数字は2倍の重みで見る（直近の評判・値段・天気の変化を早く入れる）。
+ * 翌日が定休日なら closed（発注しない。定休日の夜に、次の営業日の分を発注する）。営業した日がまだなければ null
+ */
+export function forecastNextDay(s: GameState): ManagerForecast | null {
+  const day = s.day + 1;
+  const hours = storeHours(s);
+  if (isClosedDay(hours, day)) return { day, closed: true, customers: 0, bowls: 0, basis: 0 };
+  const rows = recentOpenDays(s);
+  if (rows.length === 0) return null;
+  const fallbackW = hoursDemandWeight(todayHours(s));
+  let w = 0;
+  let cust = 0;
+  let bowls = 0;
+  for (const r of rows) {
+    const weight = r.day === s.day ? BALANCE.storeManager.todayWeight : 1;
+    const norm = Math.max(0.05, calendarDemand(r.day) * (r.demandWeight ?? fallbackW));
+    cust += (weight * (r.customers + r.balked)) / norm;
+    bowls += (weight * r.served) / norm;
+    w += weight;
+  }
+  const k = calendarDemand(day) * hoursDemandWeight(hours);
+  return { day, closed: false, customers: Math.round((cust / w) * k), bowls: Math.round((bowls / w) * k), basis: rows.length };
+}
+
+/**
+ * 店長の発注の目安: 翌日の予測の杯数 × 1杯あたりの使用量（最近の営業日の使用量 ÷ 杯数）× 余裕（品切れした食材はさらに多め）。
+ * 仕込み1回に使う量の batchFloor 回分は持つ。翌日が定休日なら 0（発注しない）。予測ができない（営業した日がない）ときは、
+ * 売れ行きに合わせる自動発注の目安。発注をしない設定（目安0）の食材は発注しない
+ */
+export function managerOrderTarget(s: GameState, itemId: string, forecast: ManagerForecast | null = forecastNextDay(s)): number {
+  const manual = s.autoOrder[itemId] ?? 0;
+  if (manual <= 0) return 0;
+  if (forecast?.closed) return 0;
+  if (!forecast || s.tutorial) {
+    const keep = s.autoOrderMode;
+    s.autoOrderMode = 'sales';
+    const base = autoOrderTarget(s, itemId);
+    s.autoOrderMode = keep;
+    return base;
+  }
+  const A = BALANCE.autoOrderSales;
+  const rows = recentOpenDays(s);
+  const used = rows.reduce((a, r) => a + (r.usedItems?.[itemId] ?? 0), 0);
+  const served = rows.reduce((a, r) => a + r.served, 0);
+  const perBowl = served > 0 ? used / served : 0;
+  let short = false;
+  for (const [k, n] of Object.entries(rows[0]?.stockoutItems ?? {})) if (n >= 2 && STOCKOUT_SOURCE[k]?.raw.includes(itemId)) short = true;
+  const want = perBowl * forecast.bowls * A.safety * (short ? A.stockoutBoost : 1);
+  const batch = (PREP_BATCH[itemId] ?? 0) * A.batchFloor;
+  return Math.round(Math.max(batch, want));
 }
 
 /** 店長が発注に使ってよい額: 手元の資金から、翌日の固定費（家賃・維持費・光熱費の基本）の2日分を残した額 */
@@ -258,7 +302,7 @@ export function expireLots(s: GameState, ctx: SimCtx): void {
 export function purchaseUnitCost(itemId: string, express: boolean, s?: GameState): number {
   const def = INGREDIENTS[itemId];
   if (!def || def.packQty <= 0) return 0;
-  return (def.packPrice / def.packQty) * (express ? 1.3 : 1) * (s ? purchaseMultOf(s) : 1);
+  return (def.packPrice / def.packQty) * (express ? 1.3 : 1) * (s ? purchaseMultOf(s) : (BALANCE.purchaseCostMult ?? 1));
 }
 
 /** 1パックの仕入れ値（店の場所の物価を入れる。円） */
@@ -340,8 +384,9 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
   type Need = { itemId: string; packs: number; full: number; kgPerPack: number; coverage: number; fridge: boolean };
   const needs: Need[] = [];
   const mgr = managerOrders(s);
+  const forecast = mgr ? forecastNextDay(s) : null;
   for (const itemId of Object.keys(s.autoOrder)) {
-    const target = mgr ? managerOrderTarget(s, itemId) : autoOrderTarget(s, itemId);
+    const target = mgr ? managerOrderTarget(s, itemId, forecast) : autoOrderTarget(s, itemId);
     const def = INGREDIENTS[itemId];
     if (!def || !def.purchasable || target <= 0) continue;
     if (def.unlock && !s.career.unlocked.includes(def.unlock)) continue;
@@ -392,7 +437,7 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
   needs.sort((a, b) => a.coverage - b.coverage);
   // 店長の発注は、手元の資金から翌日の固定費の分を残した額まで（資金が足りないときに無制限に仕入れない。じろ1 5.8）
   let budget = mgr ? managerOrderBudget(s) : Number.POSITIVE_INFINITY;
-  const summary = { spent: 0, packs: 0, skipped: 0 };
+  const summary: NonNullable<DayStats['managerOrder']> = { spent: 0, packs: 0, skipped: 0, ...(forecast ? { forecast } : {}) };
   for (const n of needs) {
     if (n.packs <= 0) continue;
     const def = INGREDIENTS[n.itemId]!;
@@ -416,7 +461,9 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
     // 店長の発注の実績（日報に入れる。閉店後の精算で日報はもう作られているので、最後の日報にも書く）
     s.today.managerOrder = summary;
     const last = s.history.at(-1);
-    if (last && last.day === s.day) last.managerOrder = { ...summary };
+    if (last && last.day === s.day) last.managerOrder = { ...summary, ...(forecast ? { forecast: { ...forecast } } : {}) };
+    if (forecast?.closed) notify(s, ctx, 'mgrForecast', 'info', `店長: あす（${forecast.day}日目）は定休日なので、翌朝便は頼みません（定休日の夜に次の営業日の分を頼みます）`);
+    else clearNotice(s, 'mgrForecast');
     if (summary.skipped > 0) notify(s, ctx, 'autoorder:budget', 'warn', `店長: 資金が少ないため、翌朝便を${summary.skipped}パック減らしました（手元に翌日の固定費の2日分を残す）`);
     else clearNotice(s, 'autoorder:budget');
   }

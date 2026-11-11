@@ -21,6 +21,7 @@ export * from './data/properties';
 export * from './sim/notices';
 export * from './sim/economy';
 export * from './sim/inventory';
+export * from './sim/store-manager';
 export * from './sim/equipment';
 export * from './sim/cooking';
 export * from './sim/interact';

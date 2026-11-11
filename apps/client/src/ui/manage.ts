@@ -15,6 +15,7 @@ import {
   expansionAdvice,
   expansionInfo,
   fixedCosts,
+  forecastText,
   fridgeCapacity,
   fridgeUsage,
   GOALS,
@@ -635,6 +636,10 @@ export class ManageMenu {
     if (d.stockouts > 0) alerts.push(alertBox('warn', `品切れ ${d.stockouts}回`, goTab('stock', '在庫を見る')));
     if (d.breakdowns > 0) alerts.push(alertBox('warn', `設備故障 ${d.breakdowns}回（定期メンテで減らせます）`, goTab('equip', '設備を見る')));
     if (loan > 0) alerts.push(alertBox('info', `融資の残り ${yenStr(loan)}`));
+    // 店長のあすの予測（閉店後。オーナーの指示 2026-11-11）
+    const fcst = s.phase === 'closed' ? s.history.at(-1)?.managerOrder?.forecast : undefined;
+    if (fcst) alerts.push(alertBox('info', `店長のあすの予測 — ${forecastText(fcst)}`));
+    if (d.managerExpress) alerts.push(alertBox('warn', `店長が当日便で仕入れた: ${d.managerExpress.packs}パック ${yenStr(d.managerExpress.spent)}（前の晩の発注が足りなかった分）`));
     if (buzzBoostFactor(s) > 1) alerts.push(alertBox('good', `🎥 SNSの話題になりやすさ ×${buzzBoostFactor(s).toFixed(1)}（${Math.max(...(s.events?.buzzBoosts ?? []).map((b) => b.untilDay))}日目まで）`));
     for (const e of (s.events?.effects ?? []).filter((x) => x.source === 'tv' && (x.fromDay ?? 0) >= s.day)) alerts.push(alertBox('good', `📺 テレビ放送の反響（${e.fromDay}日目） 来客 ×${e.mult.toFixed(1)}`));
     if (loanAvailable(s))
@@ -848,9 +853,11 @@ export class ManageMenu {
         'p',
         { class: 'note' },
         byMgr
-          ? `店長の${mgr.profile.name}さんが、売れ行きと明日の曜日・季節から閉店後に発注します（下の「自動」の目安が0の食材は発注しません。手元に翌日の固定費の2日分を残します）。${last ? `前回: ${yenStr(last.spent)}・${last.packs}パック${last.skipped > 0 ? `（資金が少なく${last.skipped}パック減らした）` : ''}` : ''}`
-          : '下の自動発注の設定のとおりに発注します。',
+          ? `店長の${mgr.profile.name}さんが、営業中は閉店までに足りなくなりそうな材料を当日便で先に仕入れ、閉店後はその日の売れ行き・あすの曜日と営業時間・定休日から来客を予測して翌朝便を発注します。仕込み品が切れそうなときは先に仕込みます（下の「自動」の目安が0の食材は発注しません。手元に翌日の固定費の2日分を残します）。${last ? `前回: ${yenStr(last.spent)}・${last.packs}パック${last.skipped > 0 ? `（資金が少なく${last.skipped}パック減らした）` : ''}` : ''}`
+          : '下の自動発注の設定のとおりに発注します（当日便も自分で頼みます）。',
       ),
+      byMgr && last?.forecast ? h('p', { class: 'note', 'data-manager-forecast': '1' }, `店長のあすの予測: ${forecastText(last.forecast)}`) : null,
+      byMgr && s.today.managerExpress ? h('p', { class: 'note warn' }, `今日の当日便: ${s.today.managerExpress.packs}パック ${yenStr(s.today.managerExpress.spent)}`) : null,
     );
   }
 

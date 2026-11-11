@@ -22,7 +22,7 @@ import { expireLots, receiveDeliveries, runAutoOrder, STOCKOUT_SOURCE } from './
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { drawAccident, takePrepSnapshot } from './accident';
 import { applyWageFloor } from './wages';
-import { clockMinuteAt, clockText, isClosedDay, SEC_PER_MIN, sessionIndex, sessionSpans, storeHours, todayHours, utilitiesBaseOf } from './hours';
+import { clockMinuteAt, clockText, hoursDemandWeight, isClosedDay, SEC_PER_MIN, sessionIndex, sessionSpans, storeHours, todayHours, utilitiesBaseOf } from './hours';
 import { onDayEndEvents, onDayStartEvents, onOpenShopEvents } from './visitors';
 
 /** 開店 */
@@ -233,6 +233,7 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
     reviews: reviews.length,
     avgSatisfaction: s.today.satisfactionCount > 0 ? s.today.satisfactionSum / s.today.satisfactionCount : 0,
     avgWait: s.today.served > 0 ? s.today.totalSeatWait / s.today.served : 0,
+    demandWeight: Math.round(hoursDemandWeight(todayHours(s)) * 1000) / 1000,
   };
   s.history.push(report);
   if (s.history.length > 60) s.history.splice(0, s.history.length - 60);
