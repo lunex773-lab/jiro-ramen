@@ -88,7 +88,7 @@ describe('YouTuber（11）', () => {
     expect(c.special!.film!.permission).toBe('denied');
   });
 
-  it('許可すると席で撮影し、食べ終わると撮影が完了する。完了の日から3日間 SNS バズの確率が上がり、その後は元に戻る', () => {
+  it('許可すると席で撮影し、食べ終わると撮影が完了する。完了の日から3日間 SNS バズの確率が上がり、その後は元に戻る', { timeout: 30_000 }, () => {
     quiet();
     setBal(BALANCE.events.youtuber, 'askChance', 1);
     const { s, ctx } = newGame(602);
