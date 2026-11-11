@@ -3,7 +3,7 @@
 // マウス・タッチで拡大縮小・ドラッグ・ピンチ。選んだ区域を強調し、候補地に印を出す。戻る・パンくず。スマホ（横向き・回した表示）と PC。
 // 地図データは都道府県を選んだときに、その都道府県の分だけ読む。
 
-import { candidateSites, locationInfo, populationIndex, PROPERTIES, type LocationInfo } from '@jiro/core';
+import { candidateSites, locationInfo, minWageOf, populationIndex, PROPERTIES, type LocationInfo } from '@jiro/core';
 import { isRotated, toView } from '../game/orientation';
 import { h, replace } from './dom';
 
@@ -76,10 +76,14 @@ export interface StoreMapOptions {
   mode: 'site' | 'city';
   /** その街の中だけ（共通市場の出店。市場は1つの街） */
   onlyCity?: string;
+  /** 最初に開く市区町村（その都道府県を開いて選んだ状態で始める。ほかの地域へも移れる） */
+  startAt?: string;
   /** 候補地の詳しい数字と、出店できない理由 */
   siteInfo?: (code: string, propertyId: string) => { lines: string[]; problem: string | null };
   /** 街の詳しい数字と、選べない理由 */
   cityInfo?: (code: string) => { lines: string[]; problem: string | null };
+  /** その都道府県（2桁）に出せない理由（出店の範囲。じろ1 5.6）。出せない地域は薄く表示する */
+  rangeProblem?: (prefCode: string) => string | null;
   /** 決めるボタンの文字（「ここに出店する」「この街にする」） */
   confirmLabel: string;
   /** 候補地の下に足す部品（店長を選ぶ欄など） */
@@ -202,7 +206,8 @@ export function openStoreMap(root: HTMLElement, o: StoreMapOptions): { el: HTMLE
       const inRegion = (p: PrefShape) => !state.region || p.region === state.region;
       for (const p of j.prefectures) {
         if (o.onlyCity && p.code !== o.onlyCity.slice(0, 2)) continue;
-        const path = svgEl('path', { d: p.d, class: `map-shape region-${regionIndex(j, p.region)}${state.region && !inRegion(p) ? ' dim' : ''}`, 'data-pref': p.code });
+        const out = !!o.rangeProblem?.(p.code);
+        const path = svgEl('path', { d: p.d, class: `map-shape region-${regionIndex(j, p.region)}${state.region && !inRegion(p) ? ' dim' : ''}${out ? ' out' : ''}`, 'data-pref': p.code });
         path.addEventListener('click', () => (state.level === 'national' ? openRegion(p.region) : inRegion(p) ? void openPref(p.code) : openRegion(p.region)));
         layer.appendChild(path);
       }
@@ -269,12 +274,25 @@ export function openStoreMap(root: HTMLElement, o: StoreMapOptions): { el: HTMLE
       replace(side, status.cloneNode(true) as HTMLElement);
       return;
     }
+    // 出店の範囲の外（薄い地域）の理由。地方は、その中のどの都道府県にも出せないときだけ
+    const prefOut = (code: string) => o.rangeProblem?.(code) ?? null;
+    const regionOut = (name: string) => {
+      const ps = j.prefectures.filter((x) => x.region === name);
+      return ps.length > 0 && ps.every((p) => prefOut(p.code)) ? prefOut(ps[0]!.code) : null;
+    };
+    const rangeNote = o.rangeProblem ? j.prefectures.map((p) => prefOut(p.code)).find((x) => x) ?? null : null;
     if (state.level === 'national') {
-      info = h('p', { class: 'note' }, '地図か一覧から地方を選んでください。');
-      for (const r of j.regions) list.push(h('button', { class: 'btn map-item', 'data-map-region': r.name, onclick: () => openRegion(r.name) }, r.name));
+      info = h('div', null, h('p', { class: 'note' }, '地図か一覧から地方を選んでください。'), rangeNote ? h('p', { class: 'note warn', 'data-map-range': '' }, `薄い地域には出せません: ${rangeNote}`) : null);
+      for (const r of j.regions) {
+        const out = regionOut(r.name);
+        list.push(h('button', { class: `btn map-item${out ? ' out' : ''}`, 'data-map-region': r.name, onclick: () => openRegion(r.name) }, r.name, out ? h('small', null, '範囲の外') : null));
+      }
     } else if (state.level === 'region') {
       info = h('p', { class: 'note' }, `${state.region}: 都道府県を選んでください。`);
-      for (const p of j.prefectures.filter((x) => x.region === state.region)) list.push(h('button', { class: 'btn map-item', 'data-map-pref': p.code, onclick: () => void openPref(p.code) }, p.name));
+      for (const p of j.prefectures.filter((x) => x.region === state.region)) {
+        const out = prefOut(p.code);
+        list.push(h('button', { class: `btn map-item${out ? ' out' : ''}`, 'data-map-pref': p.code, onclick: () => void openPref(p.code) }, p.name, out ? h('small', null, '範囲の外') : null));
+      }
     } else {
       const filtered = state.munis
         .filter((m) => !o.onlyCity || m.code === o.onlyCity)
@@ -319,10 +337,20 @@ export function openStoreMap(root: HTMLElement, o: StoreMapOptions): { el: HTMLE
   const muniInfo = (): HTMLElement => {
     const l = locationInfo(state.muni);
     if (!l) return h('p', { class: 'note bad' }, 'この市区町村の情報がありません');
+    // 地域の経済（じろ1 5.5）: 人口密度・来客・家賃・仕入れ値・値段の感じ方
+    const feel =
+      l.tolerance > 1.005
+        ? `高めでも来る（+${Math.round((l.tolerance - 1) * 100)}%まで）`
+        : l.priceSensitivity > 1.005
+          ? '高いと離れやすい・量の多い品が人気'
+          : 'ふつう';
     const rows = [
-      h('div', { class: 'kv' }, h('span', null, '人口'), h('b', null, people(l.population))),
+      h('div', { class: 'kv' }, h('span', null, '人口'), h('b', null, `${people(l.population)}（${Math.round(l.density).toLocaleString('ja-JP')}人/km²）`)),
       h('div', { class: 'kv' }, h('span', null, '来客'), h('b', null, pctOf(l.demand))),
       h('div', { class: 'kv' }, h('span', null, '家賃'), h('b', null, pctOf(l.rent))),
+      h('div', { class: 'kv' }, h('span', null, '仕入れ値'), h('b', null, pctOf(l.purchase))),
+      h('div', { class: 'kv' }, h('span', null, '値段の感じ方'), h('b', { 'data-map-feel': '' }, feel)),
+      h('div', { class: 'kv' }, h('span', null, '最低賃金'), h('b', null, `${minWageOf(l.code).toLocaleString('ja-JP')}円/時`)),
     ];
     if (o.mode === 'city') {
       const ci = o.cityInfo?.(l.code) ?? { lines: [], problem: null };
@@ -531,12 +559,13 @@ export function openStoreMap(root: HTMLElement, o: StoreMapOptions): { el: HTMLE
     .then(async (j) => {
       state.japan = j;
       status.hidden = true;
-      if (o.onlyCity) {
-        const l = locationInfo(o.onlyCity);
+      const first = o.onlyCity ?? o.startAt;
+      if (first) {
+        const l = locationInfo(first);
         if (l) {
           state.region = j.prefectures.find((p) => p.code === l.prefCode)?.region ?? null;
           await openPref(l.prefCode);
-          openMuni(o.onlyCity);
+          openMuni(first);
           return;
         }
       }

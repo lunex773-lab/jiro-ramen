@@ -11,6 +11,7 @@ import { cash, recordPL } from './economy';
 import { activeStore } from './company';
 import { calendarDemand } from './calendar';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
+import { purchaseMultOf } from './location';
 
 export function stockOf(s: GameState, itemId: string): number {
   let q = 0;
@@ -251,10 +252,20 @@ export function expireLots(s: GameState, ctx: SimCtx): void {
   s.inventory = keep;
 }
 
-export function purchaseUnitCost(itemId: string, express: boolean): number {
+/**
+ * 仕入れの単価（1単位）。s を渡すと、店の場所の食料の物価（都道府県の消費者物価地域差指数）を掛ける（じろ1 5.5。場所のない店は ×1）
+ */
+export function purchaseUnitCost(itemId: string, express: boolean, s?: GameState): number {
   const def = INGREDIENTS[itemId];
   if (!def || def.packQty <= 0) return 0;
-  return (def.packPrice / def.packQty) * (express ? 1.3 : 1);
+  return (def.packPrice / def.packQty) * (express ? 1.3 : 1) * (s ? purchaseMultOf(s) : 1);
+}
+
+/** 1パックの仕入れ値（店の場所の物価を入れる。円） */
+export function packPriceOf(s: GameState, itemId: string): number {
+  const def = INGREDIENTS[itemId];
+  if (!def) return 0;
+  return Math.round(def.packPrice * purchaseMultOf(s));
 }
 
 export interface OrderResult {
@@ -280,7 +291,7 @@ export function placeOrder(s: GameState, ctx: SimCtx, itemId: string, packs: num
       return { ok: false, reason: `冷蔵庫の容量が足りません（${cap}kg）` };
     }
   }
-  const unit = purchaseUnitCost(itemId, express);
+  const unit = purchaseUnitCost(itemId, express, s);
   const cost = Math.round(unit * qty);
   if (!cash(s, 'purchase', -cost, `${def.name} ×${packs}${express ? '（当日便）' : ''}`)) {
     return { ok: false, reason: '資金が足りません' };
@@ -386,14 +397,14 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
     if (n.packs <= 0) continue;
     const def = INGREDIENTS[n.itemId]!;
     if (mgr) {
-      const afford = Math.floor(budget / def.packPrice);
+      const afford = Math.floor(budget / packPriceOf(s, n.itemId));
       if (afford < n.packs) summary.skipped += n.packs - Math.max(0, afford);
       n.packs = Math.max(0, Math.min(n.packs, afford));
       if (n.packs <= 0) continue;
     }
     const r = placeOrder(s, ctx, n.itemId, Math.min(50, n.packs), false);
     if (r.ok && mgr) {
-      const cost = Math.min(50, n.packs) * def.packPrice;
+      const cost = Math.round(Math.min(50, n.packs) * def.packQty * purchaseUnitCost(n.itemId, false, s));
       budget -= cost;
       summary.spent += cost;
       summary.packs += Math.min(50, n.packs);

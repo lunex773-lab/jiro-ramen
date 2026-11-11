@@ -35,7 +35,7 @@ import { COMPLAINT_TEXT, UNREASONABLE_TEXT } from '../data/events';
 import { drawGroupSize, findGroupSeats, groupMembers, holdAfterMeal, leaveAfterMeal, meanGroupSize, messyLeaveDirt, rollMessy } from './manners';
 import { maybeYoutuber, onMealFinished } from './media';
 import { activeStore } from './company';
-import { storeDemandMult } from './location';
+import { priceFeelOf, storeDemandMult, type PriceFeel } from './location';
 
 // ───────────────────────── 生成 ─────────────────────────
 
@@ -120,9 +120,21 @@ const MENU_POPULARITY: Record<string, number> = {
   small: 0.34, small_buta: 0.24, small_buta_w: 0.06, large: 0.14, large_buta: 0.12, large_buta_w: 0.04, small_egg: 0.06,
 };
 
+/**
+ * 値段と量によるメニューの選ばれやすさ（地域の値段の感じ方。じろ1 5.5）。
+ * 都会・高所得（許容度 > 1）は高い品も選ばれやすく、田舎・低所得は量の多い品（大・豚の多い品）が選ばれやすい
+ */
+export function menuPriceWeight(feel: PriceFeel, ref: number, price: number, sensitivity: number, m: { size: string; buta: number }): number {
+  let w = Math.pow((ref * feel.tolerance) / price, (1 + 2 * sensitivity) * (1 - feel.premiumLove));
+  const portion = (m.size === 'large' ? 0.5 : 0) + (m.buta >= 5 ? 0.5 : 0);
+  if (portion > 0 && feel.portionLove > 0) w *= 1 + feel.portionLove * portion;
+  return w;
+}
+
 /** メニューを選ぶ。第一希望が品切れなら stockout を立てて次点を選ぶ */
 export function chooseMenu(s: GameState, c: Customer): { menuId: string | null; stockout: boolean } {
   const ref = BALANCE.customers.referencePrice;
+  const feel = priceFeelOf(s);
   const weights = MENU_IDS.map((id) => {
     const m = MENU[id]!;
     if (m.unlock && !s.career.unlocked.includes(m.unlock)) return { id, w: 0 };
@@ -130,7 +142,7 @@ export function chooseMenu(s: GameState, c: Customer): { menuId: string | null; 
     if (m.size === 'large') w *= 0.4 + 1.4 * c.traits.appetite;
     if (m.buta >= 5) w *= 0.6 + 0.8 * c.traits.appetite;
     const price = s.prices[id] ?? m.defaultPrice;
-    w *= Math.pow(ref / price, 1 + 2 * c.traits.priceSensitivity);
+    w *= menuPriceWeight(feel, ref, price, c.traits.priceSensitivity, m);
     return { id, w };
   }).filter((x) => x.w > 0);
   if (c.regularId) {
@@ -225,12 +237,16 @@ export function priceRatio(s: GameState): number {
   return ids.reduce((a, id) => a + (s.prices[id] ?? MENU[id]!.defaultPrice) / MENU[id]!.defaultPrice, 0) / ids.length;
 }
 
-/** 価格による来客の倍率 */
+/**
+ * 価格による来客の倍率。基準（定価 × 地域の許容度）に対する割合で決まる。
+ * 高いときは地域の敏感さ（田舎・低所得ほど大きい）を掛けた指数で下がる。下限 priceFloor は定価の約1.5倍より高い値段だけで効く（じろ1 5.5）
+ */
 export function priceDemandFactor(s: GameState): number {
   const c = BALANCE.customers;
+  const feel = priceFeelOf(s);
   // 基準に対する価格の割合（1より大きいと高い）
-  const r = c.priceAnchor === 'menu' ? priceRatio(s) : averagePrice(s) / c.referencePrice;
-  return clamp(Math.pow(1 / r, r > 1 ? c.priceExponentHigh : c.priceExponentLow), c.priceFloor, 1.7);
+  const r = (c.priceAnchor === 'menu' ? priceRatio(s) : averagePrice(s) / c.referencePrice) / feel.tolerance;
+  return clamp(Math.pow(1 / r, r > 1 ? c.priceExponentHigh * feel.sensitivity : c.priceExponentLow), c.priceFloor, 1.7);
 }
 
 /**
@@ -284,14 +300,14 @@ export function expectedDailyArrivals(s: GameState, opts: { events?: boolean } =
 /** 客単価の見込み（メニューの人気と今の値段から。トッピングのコールは無料なので入れない） */
 export function expectedTicket(s: GameState): number {
   const ref = BALANCE.customers.referencePrice;
-  const sens = 1 + 2 * 0.45;
+  const feel = priceFeelOf(s);
   let w = 0;
   let sum = 0;
   for (const id of MENU_IDS) {
     const m = MENU[id]!;
     if (m.unlock && !s.career.unlocked.includes(m.unlock)) continue;
     const price = s.prices[id] ?? m.defaultPrice;
-    const k = (MENU_POPULARITY[id] ?? 0.05) * Math.pow(ref / price, sens);
+    const k = (MENU_POPULARITY[id] ?? 0.05) * menuPriceWeight(feel, ref, price, 0.45, m);
     w += k;
     sum += k * price;
   }
@@ -990,9 +1006,12 @@ export function onServed(s: GameState, ctx: SimCtx, o: Order, q: QualityResult):
   // 値段に見合うか
   const price = o.price;
   const V = BALANCE.customers.value;
-  const anchor = V.anchor === 'menu' ? (MENU[o.menuId]?.defaultPrice ?? BALANCE.customers.referencePrice) : BALANCE.customers.referencePrice;
-  const valueBase = (q.quality * V.qualityWeight + V.base) * Math.pow(anchor / price, V.priceExponent);
-  c.sat.value = clamp01(valueBase - V.sensitivityPenalty * c.traits.priceSensitivity * Math.max(0, price / anchor - 1));
+  // 比べる値段は定価 × 地域の許容度（都会・高所得ほど高くても見合うと感じる）。田舎・低所得は高すぎると大きく下がり、量の多い品は見合うと感じやすい（じろ1 5.5）
+  const feel = priceFeelOf(s);
+  const anchor = (V.anchor === 'menu' ? (MENU[o.menuId]?.defaultPrice ?? BALANCE.customers.referencePrice) : BALANCE.customers.referencePrice) * feel.tolerance;
+  const portion = (m.size === 'large' ? 0.5 : 0) + (m.buta >= 5 ? 0.5 : 0);
+  const valueBase = (q.quality * V.qualityWeight + V.base) * Math.pow(anchor / price, V.priceExponent) * (1 + V.portionBonus * feel.portionLove * portion);
+  c.sat.value = clamp01(valueBase - V.sensitivityPenalty * feel.sensitivity * c.traits.priceSensitivity * Math.max(0, price / anchor - 1));
   s.today.totalSeatWait += c.seatWait;
   s.today.totalQueueWait += c.queueWait;
 

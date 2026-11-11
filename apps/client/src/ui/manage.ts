@@ -93,6 +93,9 @@ import {
   todayHours,
   DEFAULT_HOURS,
   type StoreEntry,
+  prefRangeProblem,
+  scopeForNth,
+  SCOPE_LABEL,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 
@@ -245,17 +248,22 @@ export class ManageMenu {
     const fullStaff = s.employees.filter((e) => e.profile.employment === 'full');
     let managerId = fullStaff[0]?.id ?? '';
     const closed = s.phase === 'closed';
+    const n = s.company.stores.length + 1;
     const map = openStoreMap(this.root, {
-      title: '出店先を選ぶ（2店舗目以降）',
+      title: `出店先を選ぶ（${n}店目: ${SCOPE_LABEL[scopeForNth(n)]}）`,
       mode: 'site',
       confirmLabel: 'ここに出店する',
+      // 出店の範囲（じろ1 5.6）: 2〜5店目は本店と同じ都道府県、6〜10店目は同じ地方、11店目から全国。範囲の外は薄く出す
+      rangeProblem: (pref) => prefRangeProblem(s, pref),
+      // 本店の街を開いた状態で始める
+      startAt: activeStore(s).location ?? s.company.stores[0]?.location ?? undefined,
       siteInfo: (code, propertyId) => {
         const p = PROPERTIES[propertyId]!;
         const l = locationInfo(code);
         const rent = Math.round((STAGES[p.stage]?.rent ?? 0) * p.rentMult * (l?.rent ?? 1));
         return {
           lines: [`初期費用 ${yenStr(p.initialCost)}・家賃 ${yenStr(rent)}/日・来客 ×${(p.demand * (l?.demand ?? 1)).toFixed(2)}・準備 ${p.openingDays}日`],
-          problem: !closed ? '閉店後に出店できます' : managerId ? (openStoreProblem(s, propertyId, managerId) ?? locationProblem(code)) : '店長にする社員がいません',
+          problem: !closed ? '閉店後に出店できます' : managerId ? (locationProblem(code) ?? openStoreProblem(s, propertyId, managerId, code)) : '店長にする社員がいません',
         };
       },
       extra: () =>
@@ -887,7 +895,16 @@ export class ManageMenu {
         'section',
         { class: 'card wide' },
         h('h4', null, 'メニューと価格'),
-        h('p', { class: 'note' }, `価格は営業時間外に変更できます。平均価格が¥${BALANCE.customers.referencePrice.toLocaleString('ja-JP')}より高いと来客が減り、安いと増えます。`),
+        h(
+          'p',
+          { class: 'note', 'data-price-note': '' },
+          (() => {
+            // 地域の値段の感じ方（じろ1 5.5）: 都会・所得の高い地域は高めでも来て、田舎・所得の低い地域は高いと離れやすい
+            const l = locationInfo(activeStore(s).location);
+            const feel = !l ? '' : l.tolerance > 1.005 ? `この地域は定価の${Math.round((l.tolerance - 1) * 100)}%増しまでなら客が減りにくい。` : l.priceSensitivity > 1.005 ? 'この地域は定価より高いと客が離れやすく、量の多い品が好まれます。' : '';
+            return `価格は営業時間外に、¥${BALANCE.priceMin.toLocaleString('ja-JP')}〜¥${BALANCE.priceMax.toLocaleString('ja-JP')}で変更できます。定価より高いと来客が減り、安いと増えます。${feel}`;
+          })(),
+        ),
         Object.values(MENU).map((m) => {
           const unlocked = isUnlocked(s, m.unlock);
           const price = s.prices[m.id] ?? m.defaultPrice;

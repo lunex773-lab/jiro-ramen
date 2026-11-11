@@ -16,7 +16,7 @@ import { storeRentMult } from './location';
 import { expectedDailyArrivals, expectedTicket } from './customers';
 import { cash, emptyDayStats, finalProfit, netSales, operatingProfit } from './economy';
 import { upkeepTotal } from './equipment';
-import { addLot, consume, expireLots, fridgeCapacity, stockOf } from './inventory';
+import { addLot, consume, expireLots, fridgeCapacity, packPriceOf, stockOf } from './inventory';
 import { makeCtx, type SimCtx } from './notices';
 import { payAds, withPlannedAds } from './ads';
 import { attendanceChances, checkQuits, endOfDayWellbeing, expectedPay, fatigueSpeed, shiftFor } from './staff';
@@ -147,9 +147,10 @@ function restock(s: GameState, bowls: number, key: (k: string) => string, safety
     const have = stockOf(s, itemId);
     if (have >= want) continue;
     const packs = Math.ceil((want - have) / def.packQty);
-    const cost = packs * def.packPrice;
+    // 店の場所の物価で仕入れ値が変わる（じろ1 5.5）
+    const cost = packs * packPriceOf(s, itemId);
     if (cost <= 0 || !cash(s, 'purchase', -cost, `${def.name}の仕入れ`, key(`buy:${itemId}`))) continue;
-    addLot(s, itemId, packs * def.packQty, def.packPrice / def.packQty);
+    addLot(s, itemId, packs * def.packQty, cost / (packs * def.packQty));
     s.today.purchases += cost;
     paid += cost;
   }

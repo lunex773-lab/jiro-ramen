@@ -77,7 +77,7 @@ function storesOf(s: GameState): StoreView[] {
 const stockValue = (st: StoreView) => st.inventory.reduce((a, l) => a + l.qty * l.unitCost, 0) + st.deliveries.reduce((a, d) => a + d.qty * d.unitCost, 0);
 
 /** 1杯の最高の値段（設定できる上限） */
-const MAX_PRICE = 3000;
+const MAX_PRICE = BALANCE.priceMax;
 
 /**
  * 端末から届いた次の状態を確かめる。prev は書き換えない（読むだけ）

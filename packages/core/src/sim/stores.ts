@@ -13,10 +13,10 @@ import type { DayReport, DayStats, Employee, GameState, Id, StoreEntry, StorePol
 import { clamp, newId } from '../util';
 import { activeStore, DEFAULT_POLICY, ensureCompany, putStore, storeReport, takeStore } from './company';
 import { cash, emptyDayStats, foldIntoLastReport, recordPL } from './economy';
-import { addLot, consume, stockOf } from './inventory';
+import { addLot, consume, packPriceOf, stockOf } from './inventory';
 import { emit, notify, type SimCtx } from './notices';
 import { runManagerDay } from './manager';
-import { locationInfo, locationProblem } from './location';
+import { locationInfo, locationProblem, storeRangeProblem } from './location';
 
 /** 店の表示名（1店舗目は店名の変更に合わせる） */
 export function storeDisplayName(s: GameState, entry: StoreEntry): string {
@@ -96,15 +96,22 @@ export function storeStatus(s: GameState, entry: StoreEntry): { stage: number; r
 // ───────────────────────── 出店 ─────────────────────────
 
 /** 出店できない理由（できるなら null） */
-export function openStoreProblem(s: GameState, propertyId: string, managerId: Id): string | null {
+export function openStoreProblem(s: GameState, propertyId: string, managerId: Id, location?: string | null): string | null {
   const c = ensureCompany(s);
   const B = BALANCE.company;
   const prop = PROPERTIES[propertyId];
   if (s.tutorial) return 'チュートリアル中は出店できません';
   if (s.phase !== 'closed') return '閉店後にだけ出店できます';
   if (!prop || !PROPERTY_CANDIDATES.includes(propertyId)) return '物件が見つかりません';
-  if (c.stores.length >= B.maxStores) return `店は${B.maxStores}店までです`;
-  if (c.stores.some((x) => x.propertyId === propertyId)) return 'この物件にはもう出店しています';
+  // 店の数の上限はない（じろ1 Q3）。同じ市区町村の同じ種類の物件（駅前など）には1店まで。範囲は本店の場所から（2〜5店目は同じ都道府県…）
+  if (location !== undefined) {
+    const range = storeRangeProblem(s, location);
+    if (range) return range;
+    if (c.stores.some((x) => x.propertyId === propertyId && (x.location ?? null) === location)) return 'この場所のこの物件にはもう出店しています';
+  } else if (c.stores.some((x) => x.propertyId === propertyId && !x.location)) {
+    // 場所を指定しない出店（前の版の操作）は、今までどおり物件の種類ごとに1店
+    return 'この物件にはもう出店しています';
+  }
   const ready = c.stores.some((x) => {
     const st = storeStatus(s, x);
     return st.stage >= B.unlockStage && st.reputation >= B.unlockReputation;
@@ -137,11 +144,12 @@ function detach(e: Employee): void {
  * 新しい店は物件の工事の日数だけ休んでから、店長の営業（プレイヤーが入れば細かいシミュレーション）で開く
  */
 export function openStore(s: GameState, ctx: SimCtx, propertyId: string, managerId: Id, location?: string): { ok: boolean; reason?: string; storeId?: Id } {
-  const problem = openStoreProblem(s, propertyId, managerId) ?? locationProblem(location);
+  const problem = locationProblem(location) ?? openStoreProblem(s, propertyId, managerId, location);
   if (problem) return { ok: false, reason: problem };
   const c = s.company;
   const prop = PROPERTIES[propertyId]!;
-  if (!cash(s, 'store', -prop.initialCost, `出店（${prop.name}）`, `store:${propertyId}:${s.day}`)) return { ok: false, reason: '資金が足りません' };
+  // 記録のキーは店の数と場所も入れる（同じ日に同じ種類の物件を別の市区町村に出せる。じろ1 5.6）
+  if (!cash(s, 'store', -prop.initialCost, `出店（${prop.name}）`, `store:${propertyId}:${location ?? ''}:${s.day}:${c.stores.length}`)) return { ok: false, reason: '資金が足りません' };
   recordPL(s, 'capex', prop.initialCost);
   const cur = activeStore(s);
   const mgr = s.employees.find((e) => e.id === managerId)!;
@@ -213,9 +221,9 @@ function useRaw(s: GameState, itemId: string, qty: number, key: string): number 
   const have = stockOf(s, itemId);
   if (have < qty && def.purchasable && def.packQty > 0) {
     const packs = Math.ceil((qty - have) / def.packQty);
-    const cost = packs * def.packPrice;
+    const cost = packs * packPriceOf(s, itemId);
     if (cash(s, 'purchase', -cost, `${def.name}の仕入れ（仕込み）`, key)) {
-      addLot(s, itemId, packs * def.packQty, def.packPrice / def.packQty);
+      addLot(s, itemId, packs * def.packQty, cost / (packs * def.packQty));
       s.today.purchases += cost;
     }
   }

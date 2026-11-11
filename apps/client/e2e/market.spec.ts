@@ -204,11 +204,13 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   expect(mock.market!.settings.cityCode).toBe('27100');
   expect(mock.market!.companies.every((c) => c.state.company.stores[0]!.location === '27100')).toBe(true);
   await expect(screen.locator('.market-rules')).toContainText('大阪府 大阪市');
-  // 市場の画面: 街の地図で出店先を見る（その街だけ。駅前・住宅街・郊外の3か所）
+  // 市場の画面: 地図で出店先を見る（市場の街を開いた状態で始まる。駅前・住宅街・郊外の3か所。ほかの市区町村へも移れる。じろ1 Q11）
   await screen.locator('[data-market-open-map]').click();
   const siteMap = page.locator('[data-store-map]');
-  await expect(siteMap.locator('[data-muni]')).toHaveCount(1);
+  await expect(siteMap.locator('[data-muni="27100"]')).toHaveClass(/selected/);
+  await expect(siteMap.locator('[data-muni]').nth(1)).toBeAttached();
   await expect(siteMap.locator('[data-site]')).toHaveCount(3);
+  await expect(siteMap).toContainText('2店目: 本店と同じ都道府県');
   await siteMap.locator('[data-map-site="station"] button').click();
   await expect(siteMap.locator('[data-map-site="station"]')).toContainText('空き');
   await expect(siteMap.locator('[data-map-confirm]')).toBeDisabled();

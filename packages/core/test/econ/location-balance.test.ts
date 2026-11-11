@@ -164,13 +164,14 @@ describe('出店の場所の釣り合い（人口で少し変わる）', () => {
     }
   });
 
-  it('家賃と来客の倍率は人口指数に比例し、場所のない店は今までと同じ', () => {
+  it('家賃と来客の倍率は人口と人口密度の指数で決まり（じろ1 5.5）、場所のない店は今までと同じ', () => {
     const big = locationInfo(codeNear(2_000_000))!;
     const small = locationInfo(codeNear(3_000))!;
     expect(big.index).toBe(1);
     expect(small.index).toBe(-1);
-    expect(big.demand).toBeCloseTo(1 + BALANCE.location.demandSpan, 6);
-    expect(small.rent).toBeCloseTo(1 - BALANCE.location.rentSpan, 6);
+    const L = BALANCE.location;
+    expect(big.demand).toBeCloseTo(1 + L.demandSpan * big.index + L.densityDemandSpan * big.densityIndex, 6);
+    expect(small.rent).toBeCloseTo((1 + L.rentSpan * small.index + L.densityRentSpan * small.densityIndex) * (small.priceIndex / 100) ** L.rentPriceExp, 6);
     const { s } = newGame(1);
     const e = activeStore(s);
     expect(storeRentMult(e)).toBe(PROPERTIES.home!.rentMult);

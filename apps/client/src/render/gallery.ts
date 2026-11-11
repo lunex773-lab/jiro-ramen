@@ -408,7 +408,10 @@ function buildShop(): void {
   const st = STAGES[0]!;
   const s = fakeState();
   addLights({ sunPos: new THREE.Vector3(-4, 14, -10), target: new THREE.Vector3(4, 0, 3), extent: 12, hemi: 0.75, sun: 1.3 });
-  const shell = Models.createShopShell(st, s.shopName);
+  // ?surr=metro|station|town|residential|suburb|rural で店の周り（出店先の地域。じろ1 5.10）を変える
+  const surr = new URLSearchParams(location.search).get('surr');
+  const kinds = ['metro', 'station', 'town', 'residential', 'suburb', 'rural'] as const;
+  const shell = Models.createShopShell(st, s.shopName, kinds.find((k) => k === surr) ?? 'town');
   scene.add(shell.group);
   // 俯瞰で中が見えるように天井を隠す（?ceiling で表示）
   const ceil = shell.group.getObjectByName('ceiling');
@@ -515,6 +518,7 @@ function buildShop(): void {
   const seat2 = s.seats[2]!;
   const sp2 = seatPos(s, seat2);
   if (focus === 'street') lookFrom(new THREE.Vector3(st.w * CELL * 0.75, 3.2, -6.5), new THREE.Vector3((st.w * CELL) / 2, 1.6, 0));
+  else if (focus === 'across') lookFrom(new THREE.Vector3((st.w * CELL) / 2, 1.7, -1.2), new THREE.Vector3((st.w * CELL) / 2 + 1, 4.5, -20));
   else if (focus === 'seat') lookFrom(new THREE.Vector3(sp2.x, 1.27, sp2.z + 0.05), new THREE.Vector3(sp2.x + 0.05, 1.02, sp2.z + 0.75));
   else if (focus === 'kitchen') lookFrom(new THREE.Vector3(3.2, 1.58, 3.05), new THREE.Vector3(3.6, 1.15, 4.0));
   else lookFrom(new THREE.Vector3((st.w * CELL) / 2 + 1.0, 7.2, st.d * CELL + 2.6), new THREE.Vector3((st.w * CELL) / 2, 0.6, 2.6));

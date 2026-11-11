@@ -2,10 +2,11 @@
 // StageDef（CELL=0.5m）から作る。店内 x∈[0,w*CELL], z∈[0,d*CELL]、z=0 が正面の壁（通り側）、z<0 が歩道。
 
 import * as THREE from 'three';
-import { CELL, MENU, MENU_IDS, type StageDef } from '@jiro/core';
+import { CELL, MENU, MENU_IDS, type StageDef, type Surroundings } from '@jiro/core';
 import { cached, GeoBuilder, makeRng, rr, type Disposable } from './common';
 import { MAT, plastic, glow } from './materials';
 import { canvasTexture, JP_FONT } from './textures';
+import { buildSurroundings, neighborHeight } from './surroundings';
 
 export interface ShopShell extends Disposable {
   group: THREE.Group;
@@ -58,7 +59,6 @@ const SM = {
       }),
     ),
   building: (i: number) => std('bld' + i, { color: ['#8a8076', '#6e6a66', '#9a8e7e', '#5e6064'][i % 4]!, roughness: 0.9 }),
-  window: () => std('bldwin', { color: '#2a3440', roughness: 0.2, metalness: 0.3 }),
 };
 
 // ───────────────────────── 看板・のれん・ポスター ─────────────────────────
@@ -277,7 +277,7 @@ export function createStool(): THREE.Object3D {
 
 // ───────────────────────── 外殻 ─────────────────────────
 
-export function createShopShell(stage: StageDef, shopName: string): ShopShell {
+export function createShopShell(stage: StageDef, shopName: string, surroundings: Surroundings = 'town'): ShopShell {
   const W = stage.w * CELL;
   const D = stage.d * CELL;
   const H = CEILING_Y;
@@ -428,20 +428,14 @@ export function createShopShell(stage: StageDef, shopName: string): ShopShell {
   b.box(SM.curb(), sx1 - sx0, 0.18, 0.18, { x: (sx0 + sx1) / 2, y: -0.06, z: -4.5 });
   b.box(MAT.asphalt(), sx1 - sx0 + 30, 0.05, 9, { x: (sx0 + sx1) / 2, y: -0.175, z: -4.5 - 4.5, uv: 2.0 });
   for (let x = sx0 - 14; x < sx1 + 14; x += 3) b.box(SM.roadLine(), 1.5, 0.01, 0.12, { x, y: -0.145, z: -9 });
-  // 隣の店（シャッター）
-  const nbH = 3.8;
+  // 隣の店（シャッター）。高さは地域で変わる（都会は高いビル、郊外・田舎は低い）
+  const nbH = neighborHeight(surroundings);
   b.box(SM.shutter(), -WALL_T - sx0, 2.4, 0.06, { x: (sx0 - WALL_T) / 2, y: 1.2, z: -WALL_T - 0.05, uv: 1.0 });
   b.box(SM.building(0), -WALL_T - sx0, nbH, 0.4, { x: (sx0 - WALL_T) / 2, y: nbH / 2, z: 0.2 });
   b.box(SM.shutter(), sx1 - W - WALL_T, 2.4, 0.06, { x: (W + WALL_T + sx1) / 2, y: 1.2, z: -WALL_T - 0.05, uv: 1.0 });
   b.box(SM.building(1), sx1 - W - WALL_T, nbH, 0.4, { x: (W + WALL_T + sx1) / 2, y: nbH / 2, z: 0.2 });
-  // 向かいの建物
-  for (let i = 0; i < 6; i++) {
-    const w = rr(r, 4, 7);
-    const h = rr(r, 6, 14);
-    const x = sx0 - 10 + i * 6.5;
-    b.box(SM.building(i + 2), w, h, 4, { x, y: h / 2 - 0.15, z: -16 });
-    for (let k = 0; k < Math.floor(h / 3); k++) b.box(SM.window(), w * 0.7, 1.0, 0.05, { x, y: 2 + k * 3, z: -13.97 });
-  }
+  // 向かいの建物（出店先の地域の特性。じろ1 5.10）
+  buildSurroundings(b, surroundings, r, sx0, sx1);
   // 電柱
   b.cyl(SM.curb(), 0.14, 0.17, 9, 10, { x: W + 2.5, y: 0, z: -4.1 });
   b.box(SM.curb(), 1.4, 0.1, 0.1, { x: W + 2.5, y: 8.2, z: -4.1 });

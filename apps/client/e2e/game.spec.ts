@@ -683,6 +683,26 @@ test('営業時間: 経営のタブから昼と夜の2つの枠と定休日を�
   await expect(page.locator('.clock').first()).toContainText(/1[89]:\d\d/);
 });
 
+test('値段と地域: 値段は5,000円まで決められ、都会の店では高めでも客が減りにくいと出る（じろ1 P4）', async ({ page }) => {
+  await startNewGame(page);
+  type S = { prices: Record<string, number>; company: { stores: { location?: string }[] } };
+  const res = await page.evaluate(async () => {
+    const app = (window as unknown as { __jiro: { host: { state: S; act(a: Record<string, unknown>): Promise<{ ok: boolean }> } } }).__jiro;
+    const id = Object.keys(app.host.state.prices)[0] ?? 'small';
+    const ok = (await app.host.act({ type: 'setPrice', menuId: id, price: 5000 })).ok;
+    const ng = (await app.host.act({ type: 'setPrice', menuId: id, price: 5010 })).ok;
+    app.host.state.company.stores[0]!.location = '13104';
+    return { ok, ng, price: app.host.state.prices[id] };
+  });
+  expect(res).toEqual({ ok: true, ng: false, price: 5000 });
+  await page.locator('.chip.menu').click();
+  await page.getByRole('button', { name: 'メニュー', exact: true }).click();
+  const note = page.locator('.manage-body [data-price-note]');
+  await expect(note).toContainText('¥500〜¥5,000');
+  await expect(note).toContainText('増しまでなら客が減りにくい');
+  await expect(page.locator('.manage-body')).toContainText('¥5,000');
+});
+
 test('従業員: アルバイトとして採用し、カレンダーで日にちごと・毎週のシフトを決め、記録を見て社員にできる（勤怠・辛抱の数値は出ない）', async ({ page }) => {
   await startNewGame(page);
   // 採用を解放し、候補者を1人入れる（隠しパラメータの値は画面に出てはいけない）
@@ -1363,6 +1383,8 @@ test('会社: 12席・評判★4.0以上の店になると「会社」の画面�
     s.money = 3_000_000;
     s.reputation = 4.3;
     s.phase = 'closed';
+    // 本店は大阪市（2〜5店目は本店と同じ都道府県に出せる。じろ1 5.6）
+    s.company.stores[0].location = '27203';
     s.version += 1;
     return { ok: r.ok, id: e.id };
   });
@@ -1375,11 +1397,16 @@ test('会社: 12席・評判★4.0以上の店になると「会社」の画面�
   await expect(body).toContainText('会社の財務');
   await expect(body).toContainText('いまここ');
   await expect(body).toContainText('出店（2店舗目以降）');
-  // 地図で出店先を選ぶ: 全国 → 近畿 → 大阪府 → 大阪市 → 住宅街。佐藤さんを店長にして出店する
+  // 地図で出店先を選ぶ（本店の街を開いた状態で始まる）: 全国（大阪府の外は薄い）→ 近畿 → 大阪府 → 大阪市 → 住宅街。佐藤さんを店長にして出店する
   await body.locator('[data-open-map]').click();
   const map = page.locator('[data-store-map]');
+  await expect(map.locator('[data-muni="27203"]')).toHaveClass(/selected/);
+  await map.locator('[data-crumb="0"]').click();
   await expect(map.locator('[data-map-region="近畿"]')).toBeVisible();
   await expect(map.locator('[data-pref]')).toHaveCount(47);
+  await expect(map.locator('[data-pref="13"]')).toHaveClass(/out/);
+  await expect(map.locator('[data-pref="27"]')).not.toHaveClass(/out/);
+  await expect(map.locator('[data-map-range]')).toContainText('大阪府');
   await map.locator('[data-map-region="近畿"]').click();
   await expect(map.locator('[data-map-crumbs]')).toContainText('全国 / 近畿');
   await map.locator('[data-map-pref="27"]').click();

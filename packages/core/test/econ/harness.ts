@@ -22,6 +22,8 @@ import { addSoloBot, autoRepair, newGame } from '../helpers';
 export interface CasePolicy {
   id: string;
   name: string;
+  /** 店主のボットを置く前（店の広さ・場所を決める。じろ1 §8 の検証） */
+  init?: (s: GameState, ctx: SimCtx) => void;
   /** 1日目の朝に1回 */
   setup?: (s: GameState, ctx: SimCtx) => void;
   /** 毎朝（仕込みの前） */
@@ -117,10 +119,13 @@ function rowOf(s: GameState, r: DayReport): DayRow {
   };
 }
 
-/** 1つのケースを days 日まで回す */
-export function runCase(policy: CasePolicy, days: number, seed = 777): { rows: DayRow[]; s: GameState } {
+/**
+ * 1つのケースを days 日まで回す。opts.skill = 店主（全部の仕事をするボット）の能力、opts.owner = false なら店主は働かない（従業員だけの店）
+ */
+export function runCase(policy: CasePolicy, days: number, seed = 777, opts: { skill?: number; owner?: boolean } = {}): { rows: DayRow[]; s: GameState } {
   const { s, ctx } = newGame(seed);
-  addSoloBot(s, Number(process.env.ECON_BOT_SKILL ?? 0.65));
+  policy.init?.(s, ctx);
+  if (opts.owner !== false) addSoloBot(s, opts.skill ?? Number(process.env.ECON_BOT_SKILL ?? 0.65));
   policy.setup?.(s, ctx);
   const rows: DayRow[] = [];
   for (let d = 1; d <= days; d++) {
@@ -183,7 +188,7 @@ function hirePrep(s: GameState, ctx: SimCtx): boolean {
   return true;
 }
 
-function setAllPrices(s: GameState, ctx: SimCtx, mult: number): void {
+export function setAllPrices(s: GameState, ctx: SimCtx, mult: number): void {
   for (const m of Object.values(MENU)) applyAction(s, 'p1', { type: 'setPrice', menuId: m.id, price: Math.round((m.defaultPrice * mult) / 10) * 10 }, ctx);
 }
 
@@ -220,7 +225,7 @@ function bookMaintenance(s: GameState, ctx: SimCtx): void {
   for (const e of s.equipment) if (!e.maintenanceBooked && (EQUIPMENT[e.type]?.repairCost ?? 0) > 0) applyAction(s, 'p1', { type: 'maintenance', equipmentId: e.id, on: true }, ctx);
 }
 
-function buyPlaced(s: GameState, ctx: SimCtx, type: string, keep: number, upTo = 1): boolean {
+export function buyPlaced(s: GameState, ctx: SimCtx, type: string, keep: number, upTo = 1): boolean {
   const def = EQUIPMENT[type];
   if (!def || s.money < def.price + keep) return false;
   if (s.equipment.filter((e) => e.type === type).length >= upTo) return false;

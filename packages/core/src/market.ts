@@ -31,7 +31,7 @@ import { expansionInfo } from './sim/layout';
 import { planManagerDay, runManagerDay, standaloneArrivals } from './sim/manager';
 import { makeCtx } from './sim/notices';
 import { cleanStoreName, openStoreProblem, runAbsentStores, storeStatus } from './sim/stores';
-import { locationProblem } from './sim/location';
+import { locationLabel, locationProblem } from './sim/location';
 
 export const MARKET_SCHEMA = 2;
 
@@ -491,12 +491,25 @@ export function areaName(id: string): string {
   return MARKET_HOME_AREAS.find((a) => a.id === id)?.name ?? MARKET_BRANCH_AREA_NAMES[id] ?? id;
 }
 
-/** その出店先の地域の、空いている物件の数 */
-export function freeSlots(m: MarketState, propertyId: string): number {
+/** 市場の店の市区町村（場所のない店は市場の街） */
+export function storeLocationIn(m: MarketState, entry: StoreEntry): string {
+  return entry.location ?? m.settings.cityCode ?? '';
+}
+
+/**
+ * その出店先の、空いている物件の数。物件は市区町村ごと（じろ1 Q11: 市場の店も街の外に出せる）。location を省くと市場の街
+ */
+export function freeSlots(m: MarketState, propertyId: string, location?: string | null): number {
   const total = B().branchSlots[propertyId] ?? 0;
+  const at = location ?? m.settings.cityCode ?? '';
   let used = 0;
-  for (const c of activeCompanies(m)) used += c.state.company.stores.filter((x) => x.propertyId === propertyId).length;
+  for (const c of activeCompanies(m)) used += c.state.company.stores.filter((x) => x.propertyId === propertyId && storeLocationIn(m, x) === at).length;
   return Math.max(0, total - used);
+}
+
+/** 客を取り合う単位: 同じ市区町村の同じ地域（本店は企業の本店の商店街、ほかは物件の種類） */
+function competeKey(m: MarketState, c: MarketCompany, entry: StoreEntry): string {
+  return `${storeLocationIn(m, entry)}|${storeArea(c, entry)}`;
 }
 
 /**
@@ -534,7 +547,7 @@ export function demandFor(m: MarketState, c: MarketCompany, day: number): Record
   const k = B().competition;
   const row = m.ledger[String(day)] ?? {};
   const own = new Map<string, { area: string; d: number }>();
-  for (const entry of c.state.company.stores) own.set(entry.id, { area: storeArea(c, entry), d: row[lkey(c, entry)] ?? storeAttractiveness(c.state, entry, false, day) });
+  for (const entry of c.state.company.stores) own.set(entry.id, { area: competeKey(m, c, entry), d: row[lkey(c, entry)] ?? storeAttractiveness(c.state, entry, false, day) });
   const others = new Map<string, number>();
   for (const o of activeCompanies(m)) {
     if (o.id === c.id) continue;
@@ -542,7 +555,7 @@ export function demandFor(m: MarketState, c: MarketCompany, day: number): Record
     for (const entry of o.state.company.stores) {
       const recorded = row[lkey(o, entry)];
       const d = recorded !== undefined ? recorded : passed ? 0 : storeAttractiveness(o.state, entry, false, day);
-      const area = storeArea(o, entry);
+      const area = competeKey(m, o, entry);
       others.set(area, (others.get(area) ?? 0) + d);
     }
   }
@@ -1271,9 +1284,14 @@ export function marketAction(m: MarketState, ownerId: string, a: Action, now = 0
   if (syncPending(m, now)) return { ok: false, reason: '0時の計算中です。終わるまでお待ちください' };
   if (!a || typeof a !== 'object' || !MARKET_ACTIONS.has(a.type)) return { ok: false, reason: '市場では使えない操作です' };
   if (a.type === 'buyEquipment' && a.autoPlace !== true) return { ok: false, reason: '市場では設備は自動で置きます' };
-  if (a.type === 'openStore' && freeSlots(m, a.propertyId) <= 0) return { ok: false, reason: `${areaName(a.propertyId)}の物件は空いていません（ほかの企業が出店しています）` };
-  // 市場は1つの街: 出店は市場の街に（どこを指定しても街の物件になる）
-  if (a.type === 'openStore') a = { ...a, location: m.settings.cityCode ?? undefined };
+  if (a.type === 'openStore') {
+    // 市場の店も、ひとりの経営と同じ範囲（本店 = 市場の街から）に出せる（じろ1 Q11）。場所を指定しなければ市場の街
+    const location = a.location ?? m.settings.cityCode ?? undefined;
+    const bad = locationProblem(location);
+    if (bad) return { ok: false, reason: bad };
+    if (freeSlots(m, a.propertyId, location) <= 0) return { ok: false, reason: `${areaName(a.propertyId)}の物件は空いていません（ほかの企業が出店しています）` };
+    a = { ...a, location };
+  }
   const phase = c.state.phase;
   c.state.phase = 'closed';
   const r = applyAction(c.state, 'p1', a, ctxOf());
@@ -1373,7 +1391,8 @@ export function aiDecide(m: MarketState, c: MarketCompany, day: number): void {
   autoExpand(m, c, '資金がたまったので');
   // 4) 出店
   const order: Record<AiStrategy, string[]> = { budget: ['residential', 'roadside', 'station'], standard: ['roadside', 'residential', 'station'], premium: ['station', 'roadside', 'residential'] };
-  if (s.company.stores.length < BALANCE.company.maxStores) {
+  // AI 企業は市場の街の中だけに、決まった数まで出す
+  if (s.company.stores.length < BALANCE.company.aiMaxStores) {
     for (const pid of order[strategy]) {
       const prop = PROPERTIES[pid];
       if (!prop || !PROPERTY_CANDIDATES.includes(pid) || freeSlots(m, pid) <= 0) continue;
@@ -1383,7 +1402,7 @@ export function aiDecide(m: MarketState, c: MarketCompany, day: number): void {
       const cook = s.employees.filter((e) => e.profile.role === 'cook').sort((a, b) => b.profile.skills.cooking - a.profile.skills.cooking)[0];
       if (!cook) break;
       if (cook.profile.employment !== 'full') act(c, { type: 'promote', employeeId: cook.id });
-      if (openStoreProblem(s, pid, cook.id)) break;
+      if (openStoreProblem(s, pid, cook.id, m.settings.cityCode ?? null)) break;
       if (act(c, { type: 'openStore', propertyId: pid, managerId: cook.id }, m.settings.cityCode)) {
         const st = s.company.stores[s.company.stores.length - 1]!;
         st.openedDay = day;
@@ -1476,8 +1495,10 @@ export interface MarketView {
   history: MarketDayReport[];
   /** 自分の企業（参加していなければ null） */
   mine: { companyId: Id; state: GameState; progress: CompanyProgress; openDay: OpenDay | null; lastCommit: CommitResult | null; days: CompanyDayRecord[] } | null;
-  /** 出店先の地域ごとの空いている物件の数 */
+  /** 出店先の地域ごとの空いている物件の数（市場の街） */
   freeSlots: Record<string, number>;
+  /** 全社の店の場所と物件（市区町村ごとの空きを数える。じろ1 Q11） */
+  sites: { location: string; propertyId: string }[];
   /** 見ている人のこの市場での会社の状態（移った・引退した会社も。参加していなければ null） */
   myStatus: CompanyStatus | null;
   /** 競争期間が終わった（0時の同期とランキングはない。営業は続けられる） */
@@ -1505,7 +1526,9 @@ export function marketView(m: MarketState, ownerId: string | null, now?: number)
         homeArea: areaName(c.homeArea),
         stores: c.state.company.stores.map((entry) => {
           const st = storeStatus(c.state, entry);
-          return { name: entry.name, area: areaName(storeArea(c, entry)), seats: STAGES[st.stage]?.seats.length ?? 8, reputation: Math.round(st.reputation * 100) / 100 };
+          const loc = storeLocationIn(m, entry);
+          const where = loc && loc !== m.settings.cityCode ? `${locationLabel(loc)} ` : '';
+          return { name: entry.name, area: `${where}${areaName(storeArea(c, entry))}`, seats: STAGES[st.stage]?.seats.length ?? 8, reputation: Math.round(st.reputation * 100) / 100 };
         }),
         share: marketShare(m, c.id),
         netSales: line?.netSales ?? 0,
@@ -1537,6 +1560,7 @@ export function marketView(m: MarketState, ownerId: string | null, now?: number)
       ? { companyId: me.id, state: me.state, progress: me.progress, openDay: me.openDay, lastCommit: me.lastCommit ? (({ token: _t, ...r }) => r)(me.lastCommit) : null, days: me.days.slice(-30) }
       : null,
     freeSlots: free,
+    sites: live.flatMap((c) => c.state.company.stores.filter((x) => x.propertyId !== 'home').map((x) => ({ location: storeLocationIn(m, x), propertyId: x.propertyId }))),
     myStatus: me?.status ?? (ownerId ? ([...m.companies].reverse().find((c) => c.kind === 'player' && c.ownerId === ownerId)?.status ?? null) : null),
     ended: now !== undefined ? isEnded(m, now) : undefined,
     sync: m.sync && m.sync.status !== 'done' ? m.sync : null,

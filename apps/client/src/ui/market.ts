@@ -33,6 +33,10 @@ import {
   type MarketView,
   type StoreEntry,
   DEFAULT_HOURS,
+  locationInfo,
+  prefRangeProblem,
+  scopeForNth,
+  SCOPE_LABEL,
 } from '@jiro/core';
 import type { App } from '../game/app';
 import { Api, ApiError, defaultServerUrl, type Auth, type MyMarket } from '../net/api';
@@ -658,24 +662,39 @@ export class MarketScreen {
     return h('div', { class: 'market-mine-col' }, finance, rules, this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
   }
 
-  /** 市場の街の地図で出店先を選ぶ（市場は1つの街。駅前・住宅街・郊外の物件を全社で取り合う） */
+  /**
+   * 地図で出店先を選ぶ。市場の店も、ひとりの経営と同じ範囲（本店 = 市場の街から。2〜5店目は同じ都道府県…）に出せる（じろ1 Q11）。
+   * 物件は市区町村ごとに全社で取り合い、客の取り合いも同じ市区町村の店どうし
+   */
   private openCityMap(s: GameState, v: MarketScreenView): void {
     const city = v.settings.cityCode;
     if (!city) return;
     const homeFull = s.employees.filter((e) => e.profile.employment === 'full');
     let managerId = homeFull[0]?.id ?? '';
+    const n = s.company.stores.length + 1;
+    const used = (code: string, pid: string) => (v.sites ?? []).filter((x) => x.location === code && x.propertyId === pid).length;
     const map = openStoreMap(this.root, {
-      title: `出店先を選ぶ（${locationLabel(city)}）`,
+      title: `出店先を選ぶ（${n}店目: ${SCOPE_LABEL[scopeForNth(n)]}）`,
       mode: 'site',
-      onlyCity: city,
+      // 市場の街を開いた状態で始める（ほかの市区町村へも移れる）
+      startAt: city,
       confirmLabel: 'ここに出店する',
-      siteInfo: (_code, pid) => {
+      rangeProblem: (pref) => prefRangeProblem(s, pref),
+      siteInfo: (code, pid) => {
         const p = PROPERTIES[pid]!;
-        const free = v.freeSlots[pid] ?? 0;
-        const has = s.company.stores.some((x) => x.propertyId === pid);
+        const free = Math.max(0, (BALANCE.market.branchSlots[pid] ?? 0) - used(code, pid));
+        const has = s.company.stores.some((x) => x.propertyId === pid && (x.location ?? city) === code);
+        const l = locationInfo(code);
+        const rent = Math.round((STAGES[p.stage]?.rent ?? 0) * p.rentMult * (l?.rent ?? 1));
         return {
-          lines: [`空き ${free}件・初期費用 ${yenStr(p.initialCost)}・準備 ${p.openingDays}日`],
-          problem: has ? 'この物件の種類にはもう出店しています' : free <= 0 ? '物件が空いていません（ほかの企業が出店しています）' : !managerId ? '店長にする社員がいません' : openStoreProblem(s, pid, managerId),
+          lines: [`空き ${free}件・初期費用 ${yenStr(p.initialCost)}・家賃 ${yenStr(rent)}/日・準備 ${p.openingDays}日${code === city ? '' : '（市場の街の外: この市区町村の店どうしで客を取り合う）'}`],
+          problem: has
+            ? 'この場所のこの物件にはもう出店しています'
+            : free <= 0
+              ? '物件が空いていません（ほかの企業が出店しています）'
+              : !managerId
+                ? '店長にする社員がいません'
+                : (locationProblem(code) ?? openStoreProblem(s, pid, managerId, code)),
         };
       },
       extra: () =>
@@ -687,12 +706,12 @@ export class MarketScreen {
               h('select', { 'data-open-mgr': '', onchange: (ev: Event) => (managerId = (ev.target as HTMLSelectElement).value) }, homeFull.map((e) => h('option', { value: e.id, selected: e.id === managerId }, `${e.profile.name}（${ROLE_LABEL[e.profile.role]}）`))),
             )
           : null,
-      onPick: async ({ propertyId }) => {
+      onPick: async ({ code, propertyId }) => {
         if (!propertyId) return;
         const p = PROPERTIES[propertyId]!;
-        if (!(await confirmDialog(this.root, '出店', `${locationLabel(city)}の${p.area}（${p.name}）に出店します。初期費用 ${yenStr(p.initialCost)}。`, '出店する'))) return;
+        if (!(await confirmDialog(this.root, '出店', `${locationLabel(code)}の${p.area}（${p.name}）に出店します。初期費用 ${yenStr(p.initialCost)}。`, '出店する'))) return;
         map.close();
-        await this.act({ type: 'openStore', propertyId, managerId, location: city }, '出店しました');
+        await this.act({ type: 'openStore', propertyId, managerId, location: code }, '出店しました');
       },
       // 閉じただけなら何も変わっていないので読み直さない（出店したときは出店の操作のあとで読み直す）
       onClose: () => undefined,

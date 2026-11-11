@@ -1087,6 +1087,9 @@ input, select { font: inherit; }
 .map-shape.region-0 { fill: #34506a; } .map-shape.region-1 { fill: #2f5a57; } .map-shape.region-2 { fill: #4a4f6e; } .map-shape.region-3 { fill: #3c5a3e; }
 .map-shape.region-4 { fill: #5a4a3a; } .map-shape.region-5 { fill: #3a4f5f; } .map-shape.region-6 { fill: #574460; } .map-shape.region-7 { fill: #4f5a36; }
 .map-shape.dim { fill: #222c38; opacity: 0.7; }
+/* 出店の範囲の外（じろ1 5.6: 2〜5店目は本店と同じ都道府県、6〜10店目は同じ地方） */
+.map-shape.out { fill: #1b222b; opacity: 0.45; }
+.btn.map-item.out { opacity: 0.55; }
 .map-shape.muni.pop-1 { fill: #2a3a48; } .map-shape.muni.pop-2 { fill: #2f4a5a; } .map-shape.muni.pop-3 { fill: #36606a; } .map-shape.muni.pop-4 { fill: #3f7a78; } .map-shape.muni.pop-5 { fill: #4b9488; }
 .map-shape.muni.closed { fill: #1d232b; cursor: not-allowed; }
 .map-shape.selected, .map-shape.muni.selected { fill: #b58b49; stroke: #ffe0a0; stroke-width: 1.6; }

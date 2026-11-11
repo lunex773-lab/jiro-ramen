@@ -80,8 +80,10 @@ export const BALANCE = {
    * 物件ごとの家賃・来客・初期費用は data/properties.ts
    */
   company: {
-    /** 持てる店の数の上限 */
-    maxStores: 4,
+    /** 出店の範囲（じろ1 5.6・Q3: 店の数の上限はなし）。この店目までは本店と同じ都道府県、その次からこの店目までは同じ地方、そのあとは全国 */
+    range: { prefectureUpTo: 5, regionUpTo: 10 },
+    /** 共通市場の AI 企業が持つ店の数の上限（AI は市場の街の中だけに出す） */
+    aiMaxStores: 4,
     /** 出店の条件: この段階（1 = 12席）以上で、評判がこれ以上の店があること */
     unlockStage: 1,
     unlockReputation: 4.0,
@@ -160,14 +162,30 @@ export const BALANCE = {
   ads: { max: 0.2, k: 5873, choices: [0, 1000, 2000, 3000, 5000, 8000] as readonly number[] },
 
   /**
-   * 出店の場所（市区町村の人口。docs/STORE_MAP_PLAN.md 4章。オーナーの判断「人口で少し変わる」）。
-   * 人口指数 z = log10(人口 ÷ 標準の人口) を −1〜1 に収め、来客 ×(1 + demandSpan·z)・家賃 ×(1 + rentSpan·z)。
-   * 家賃の幅は、どこでも1日の利益の見込みが同じくらいになるよう測って決める（test/econ/location-balance.test.ts）
+   * 出店の場所と地域の経済（docs/STORE_MAP_PLAN.md 4章・docs/JIRO1_PLAN.md 5.5。オーナーの判断「少し差がある」）。
+   * 人口指数 P = log10(人口 ÷ 標準の人口)、密度の指数 D = log10(人口密度 ÷ refDensity) ÷ densityLogSpan（どちらも −1〜1）。
+   * 来客 ×(1 + demandSpan·P + densityDemandSpan·D)・家賃 ×(1 + rentSpan·P + densityRentSpan·D) × 物価^rentPriceExp・仕入れ値 × 食料の物価。
+   * 購買力 = 所得の比^powerIncomeExp × 物価^powerPriceExp × (1 + powerDensity·D)。1 より高い地域は値段の許容度（〜toleranceMax）、
+   * 低い地域は高いときの敏感さ（1 + lowPowerSensitivity × 低さ）と量の多い品の好み（lowPowerPortion × 低さ。低さは lowPowerMax まで）
    */
   location: {
     refPopulation: 100_000,
-    demandSpan: 0.1,
-    rentSpan: 0.25,
+    demandSpan: 0.05,
+    rentSpan: 0.1,
+    refDensity: 1_000,
+    densityLogSpan: 1.3,
+    densityDemandSpan: 0.05,
+    densityRentSpan: 0.3,
+    rentPriceExp: 2,
+    powerIncomeExp: 0.2,
+    powerPriceExp: 0.5,
+    powerDensity: 0.04,
+    toleranceMax: 1.15,
+    lowPowerSensitivity: 1.5,
+    lowPowerPortion: 2,
+    lowPowerMax: 0.12,
+    /** 購買力が高い地域の、高い品の選ばれやすさ = highPowerPremium × (購買力 − 1)（toleranceMax − 1 まで） */
+    highPowerPremium: 3,
   },
   market: {
     /** コミュニティの企業の数の上限（プレイヤー＋AI）の既定と、作る人が選べる範囲（オーナーの判断: 2〜6社） */
@@ -252,6 +270,9 @@ export const BALANCE = {
 
   /** 設備売却時の買取率 */
   resaleRate: 0.4,
+  /** 1杯の値段の範囲（じろ1 5.5: 上限 3,000円 → 5,000円） */
+  priceMin: 500,
+  priceMax: 5_000,
   /** 解雇時の費用（日給の倍率） */
   severanceDays: 1,
 
@@ -269,8 +290,11 @@ export const BALANCE = {
      */
     priceExponentLow: 1.8,
     priceExponentHigh: 2.6,
-    /** 価格による来客の倍率の下限 */
-    priceFloor: 0.35,
+    /**
+     * 価格による来客の倍率の下限。0.35 → 0.03（じろ1 5.5: 値段の上限を5,000円にしたので、とても高い値段では客がほとんど来ない。
+     * 0.35 は定価の約1.5倍より高い値段でだけ効いていたので、それまでの範囲の来客は変わらない）
+     */
+    priceFloor: 0.03,
     /**
      * 来客の価格の比べ方。'reference' = メニューの平均価格 ÷ 基準（referencePrice）、
      * 'menu' = 定価に対する割合の平均（メニューが解放されて平均価格が上がっても、定価のままなら倍率は1）
@@ -287,6 +311,8 @@ export const BALANCE = {
       base: 0.15,
       priceExponent: 2.5,
       sensitivityPenalty: 0.5,
+      /** 量の多い品（大・豚の多い品）を「見合う」と感じる増え方 = portionBonus × 地域の量の好み（所得の低い地域。じろ1 5.5） */
+      portionBonus: 0.5,
       anchor: 'menu' as 'reference' | 'menu',
     },
     maxCustomers: 60,

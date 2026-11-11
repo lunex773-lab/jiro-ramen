@@ -22,6 +22,7 @@ import {
   stageOf,
   STAGES,
   storeDisplayName,
+  surroundingsOf,
   type AccidentState,
   type Bowl,
   type Customer,
@@ -83,6 +84,8 @@ export class World {
   readonly camera: THREE.PerspectiveCamera;
   private shell: ShopShell | null = null;
   private shellStage = -1;
+  /** 店の周りの見た目（出店先の地域。じろ1 5.10） */
+  private shellSurr = '';
   /** 壁に飾った芸能人のサイン */
   private autographs: { group: THREE.Group; dispose(): void } | null = null;
   private autographKey = '';
@@ -321,7 +324,8 @@ export class World {
     const st = s.career.stage;
     // 看板は今いる店の名前（1店舗目は店名、支店は「〇〇 駅前店」など）
     const name = s.company ? storeDisplayName(s, activeStore(s)) : s.shopName;
-    if (this.shell && this.shellStage === st) {
+    const surr = s.company ? surroundingsOf(activeStore(s)) : 'town';
+    if (this.shell && this.shellStage === st && this.shellSurr === surr) {
       if (this.shellName !== name) {
         this.shell.setShopName(name);
         this.shellName = name;
@@ -336,8 +340,9 @@ export class World {
     for (const l of this.lights) this.scene.remove(l);
     this.lights = [];
     const stage = STAGES[st]!;
-    this.shell = createShopShell(stage, name);
+    this.shell = createShopShell(stage, name, surr);
     this.shellStage = st;
+    this.shellSurr = surr;
     this.shellName = name;
     this.shell.setOpen(s.phase === 'open');
     this.scene.add(this.shell.group);

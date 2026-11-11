@@ -326,7 +326,7 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       if (!m || !isNum(a.price)) return fail('不正な価格');
       if (!isUnlocked(s, m.unlock)) return fail('まだ解放されていません');
       const price = Math.round(a.price / 10) * 10;
-      if (price < 500 || price > 3000) return fail('価格は¥500〜¥3,000の範囲で設定してください');
+      if (price < BALANCE.priceMin || price > BALANCE.priceMax) return fail(`価格は¥${BALANCE.priceMin.toLocaleString('ja-JP')}〜¥${BALANCE.priceMax.toLocaleString('ja-JP')}の範囲で設定してください`);
       if (s.phase === 'open' || s.phase === 'closing') return fail('営業中は価格を変えられません');
       s.prices[a.menuId] = price;
       return { ok: true };

@@ -21,6 +21,7 @@ import {
   STAGES,
   storeDemandMult,
   storeRent,
+  priceDemandFactor,
   storeRentMult,
   validateState,
   type GameState,
@@ -38,8 +39,10 @@ function playDay(s: GameState, ctx: SimCtx): void {
   runDay(s, ctx);
 }
 
+/** 12席・評判★4.2・資金300万円の会社（本店は大阪市。2〜5店目は大阪府の中に出せる） */
 function readyCompany(seed: number) {
   const { s, ctx } = newGame(seed);
+  activeStore(s).location = OSAKA;
   addSoloBot(s);
   const cook = addBot(s, 'cook', 0.7, 6000);
   playDay(s, ctx);
@@ -65,14 +68,18 @@ describe('市区町村の表', () => {
     expect(candidateSites(OSAKA).map((c) => c.propertyId)).toEqual(['station', 'residential', 'roadside']);
   });
 
-  it('人口の多い街は来客も家賃も多く、少ない町は少ない（倍率は小さめ）', () => {
+  it('人口と人口密度の多い街は来客も家賃も多く、少ない町は少ない（倍率は小さめ。じろ1 5.5）', () => {
+    const L = BALANCE.location;
     const big = locationInfo(OSAKA)!;
     expect(big.index).toBe(1);
-    expect(big.demand).toBeCloseTo(1 + BALANCE.location.demandSpan, 6);
-    expect(big.rent).toBeCloseTo(1 + BALANCE.location.rentSpan, 6);
+    expect(big.demand).toBeCloseTo(1 + L.demandSpan * big.index + L.densityDemandSpan * big.densityIndex, 6);
+    expect(big.rent).toBeCloseTo((1 + L.rentSpan * big.index + L.densityRentSpan * big.densityIndex) * (big.priceIndex / 100) ** L.rentPriceExp, 6);
     const small = Object.keys(MUNICIPALITIES).map(locationInfo).find((l) => l && l.population > 0 && l.population < 5000)!;
     expect(small.index).toBe(-1);
-    expect(small.demand).toBeCloseTo(1 - BALANCE.location.demandSpan, 6);
+    expect(small.demand).toBeLessThan(1);
+    expect(small.rent).toBeLessThan(1);
+    expect(big.demand).toBeGreaterThan(1);
+    expect(big.rent).toBeGreaterThan(1);
   });
 });
 
@@ -91,8 +98,8 @@ describe('場所つきの出店', () => {
     // 屋号を変えると、自動の名前の支店も合わせる（場所は名前に残る）
     expect(applyAction(s, 'p1', { type: 'rename', name: '豚の星' }, ctx).ok).toBe(true);
     expect(branch.name).toBe('豚の星 大阪市駅前店');
-    expect(storeDemandMult(branch)).toBeCloseTo(1.3 * (1 + BALANCE.location.demandSpan), 6);
-    expect(storeRentMult(branch)).toBeCloseTo(1.6 * (1 + BALANCE.location.rentSpan), 6);
+    expect(storeDemandMult(branch)).toBeCloseTo(1.3 * locationInfo(OSAKA)!.demand, 6);
+    expect(storeRentMult(branch)).toBeCloseTo(1.6 * locationInfo(OSAKA)!.rent, 6);
     expect(validateState(s)).toEqual([]);
   });
 
@@ -104,8 +111,9 @@ describe('場所つきの出店', () => {
     expect(storeRent(s)).toBe(STAGES[0]!.rent);
     expect(applyAction(s, 'p1', { type: 'setStoreLocation', storeId: home.id, location: OSAKA }, ctx).ok).toBe(true);
     expect(home.location).toBe(OSAKA);
-    expect(arrivalRate(s)).toBeCloseTo(before * (1 + BALANCE.location.demandSpan), 6);
-    expect(storeRent(s)).toBe(Math.round(STAGES[0]!.rent * (1 + BALANCE.location.rentSpan)));
+    // 来客は場所の倍率と、地域の値段の許容度（大阪市は少し高くても来る）の分だけ変わる
+    expect(arrivalRate(s)).toBeCloseTo(before * locationInfo(OSAKA)!.demand * priceDemandFactor(s), 6);
+    expect(storeRent(s)).toBe(Math.round(STAGES[0]!.rent * locationInfo(OSAKA)!.rent));
     const again = applyAction(s, 'p1', { type: 'setStoreLocation', storeId: home.id, location: TOKYO_SHINJUKU }, ctx);
     expect(again.ok).toBe(false);
     expect(home.location).toBe(OSAKA);
@@ -120,7 +128,7 @@ describe('場所つきの出店', () => {
     expect(applyAction(s, 'p1', { type: 'enterStore', storeId: branch.id }, ctx).ok).toBe(true);
     playDay(s, ctx);
     const rent = s.history[s.history.length - 1]!.rent;
-    expect(rent).toBe(Math.round(STAGES[s.career.stage]!.rent * 1.6 * (1 + BALANCE.location.rentSpan)));
+    expect(rent).toBe(Math.round(STAGES[s.career.stage]!.rent * 1.6 * locationInfo(OSAKA)!.rent));
   });
 
   it('場所つきの店はセーブして読み込んでも同じ', () => {
@@ -134,7 +142,7 @@ describe('場所つきの出店', () => {
 
 describe('共通市場の街（市場は1つの街）', () => {
   const T0 = jstMidnight('2026-11-04') + 10 * 3_600_000;
-  it('作る人が選んだ街に全社の店がある。出店も街の物件になる。街のない市場・不正な街は ×1', () => {
+  it('作る人が選んだ街に全社の店がある。出店は街の中か、ひとりの経営と同じ範囲（じろ1 Q11）。街のない市場・不正な街は ×1', () => {
     const m = createMarket({ id: 'loc', name: 'loc', seed: 9, now: T0, settings: { cityCode: OSAKA }, creator: { ownerId: 'u1', companyName: '一号店' } });
     expect(m.settings.cityCode).toBe(OSAKA);
     for (const c of m.companies) expect(c.state.company.stores.every((st) => st.location === OSAKA)).toBe(true);
@@ -146,9 +154,20 @@ describe('共通市場の街（市場は1つの街）', () => {
     cook.profile.employment = 'full';
     // 12席の店（市場では拡張は営業の画面から。ここでは段階を直接上げる）
     s.career.stage = 1;
-    const r = marketAction(m, 'u1', { type: 'openStore', propertyId: 'residential', managerId: cook.id, location: TOKYO_SHINJUKU }, T0);
+    // 2店目は市場の街（本店）と同じ都道府県まで: 東京には出せない
+    const far = marketAction(m, 'u1', { type: 'openStore', propertyId: 'residential', managerId: cook.id, location: TOKYO_SHINJUKU }, T0);
+    expect(far.ok).toBe(false);
+    expect(far.reason).toContain('大阪府');
+    // 場所を指定しなければ市場の街
+    const r = marketAction(m, 'u1', { type: 'openStore', propertyId: 'residential', managerId: cook.id }, T0);
     expect(r.ok, r.reason).toBe(true);
     expect(s.company.stores[1]!.location).toBe(OSAKA);
+    // 同じ大阪府の堺市にも出せる（物件の空きは市区町村ごと）
+    const cook2 = addBot(s, 'cook', 0.7, 6000);
+    cook2.profile.employment = 'full';
+    const r2 = marketAction(m, 'u1', { type: 'openStore', propertyId: 'residential', managerId: cook2.id, location: '27140' }, T0);
+    expect(r2.ok, r2.reason).toBe(true);
+    expect(s.company.stores[2]!.location).toBe('27140');
     expect(normalizeSettings({ cityCode: '99999' }, T0).cityCode).toBeNull();
     expect(normalizeSettings({ cityCode: FUTABA }, T0).cityCode).toBeNull();
     const old = createMarket({ id: 'old', name: 'old', seed: 9, now: T0, settings: {}, creator: { ownerId: 'u1', companyName: 'x' } });
