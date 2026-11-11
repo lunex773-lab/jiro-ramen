@@ -1,6 +1,6 @@
 // バックエンド（Cloudflare Workers）の HTTP API クライアント（設計書 18.1）。
 
-import type { Action, ActionResult, CommitResult, DayTicket, GameState, SaveFile } from '@jiro/core';
+import type { Action, ActionResult, CommitResult, CreditOp, DayTicket, GameState, SaveFile } from '@jiro/core';
 
 const URL_KEY = 'jiro.serverUrl';
 const AUTH_KEY = 'jiro.auth';
@@ -191,9 +191,14 @@ export class Api {
     return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/settings`, { method: 'POST', token, body: JSON.stringify(patch) });
   }
 
-  /** 会社を引退させる（終わった市場・破産した会社） */
+  /** 会社を引退させる（競争中でも抜けられる。記録は残る） */
   retireCompany(token: string, marketId: string): Promise<{ ok: boolean }> {
     return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/retire`, { method: 'POST', token, body: '{}' });
+  }
+
+  /** 企業間の貸し借り（申し込む・承認する・断る・取り消す・前倒しで返す。cid が同じなら二度実行しない） */
+  creditMarket(token: string, marketId: string, cid: string, op: CreditOp): Promise<{ ok: boolean; reason?: string; creditId?: string; status?: string; duplicate?: boolean }> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/credit`, { method: 'POST', token, body: JSON.stringify({ cid, op }) });
   }
 
   viewMarket<T>(token: string, marketId: string): Promise<T> {

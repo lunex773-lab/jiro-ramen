@@ -1,6 +1,6 @@
 // 共通市場の画面（docs/MARKET_RANKING_PLAN.md）。
 // オーナーの判断: 各社は端末で1日ずつ営業してサーバーへ送り、JST の0時に、いちばん進んだ企業の日付まで全社を自動営業でそろえる。
-// 市場用に新しく始める。招待コードで入る。AI で埋めるか・社数（2〜6）・期間・企業の扱いは作る人が決める。
+// 市場用に新しく始める。招待コードで入る。AI で埋めるか・社数（2〜25。じろ2）・期間・企業の扱いは作る人が決める。
 // この画面では、各社の進み具合・0時の同期の状態を見て、端末での営業を始める。営業していない間の経営（値段・人・出店）もここで決める。
 // 画面は数秒ごとにサーバーから市場の今を読み直す（市場の権威はサーバー。操作は cid つきで送る）。
 
@@ -37,6 +37,9 @@ import {
   prefRangeProblem,
   rangeTitle,
   MARKET_SCOPE_LABEL,
+  SETTINGS_LABEL,
+  settingsText,
+  type CreditOp,
 } from '@jiro/core';
 import type { App } from '../game/app';
 import { Api, ApiError, defaultServerUrl, type Auth, type MyMarket } from '../net/api';
@@ -46,6 +49,8 @@ import { hoursDialog, hoursSummary } from './hours-dialog';
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { codeBlock } from './room-code';
 import { cardHead, kpi, kpiRow, meterBar, yenSigned } from './kit';
+import { loanControl } from './loan';
+import { creditCard } from './market-credit';
 
 /** 市場の画面の上の数字のカード（値の要素に data 属性を付ける。E2E が読む） */
 function stat(label: string, attrs: Record<string, string>, value: string, tone = ''): HTMLElement {
@@ -106,7 +111,8 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
       const n = BALANCE.market.minCompanies + i;
       return [String(n), `${n}社まで`] as [string, string];
     }),
-    String(BALANCE.market.maxCompanies),
+    // 既定は6社（最大25社。じろ2）
+    String(BALANCE.market.defaultCompanies),
   );
   const period = sel('data-period', [['30', '30日'], ['90', '90日'], ['180', '180日'], ['365', '365日'], ['', '無期限']], '');
   const entry = sel('data-entry', [['grown', '育てた企業で参加できる'], ['fresh', '新規の企業だけ']], 'grown');
@@ -679,8 +685,9 @@ export class MarketScreen {
         }),
       ),
       bankrupt ? h('p', { class: 'note bad' }, '破産しました。市場から消えています') : null,
-      s.loans.length === 0 && !bankrupt ? h('button', { class: 'btn ghost', onclick: () => void this.act({ type: 'takeLoan' }, '融資を受けました') }, `融資を受ける（${yenStr(BALANCE.loan.amount)}）`) : null,
-      bankrupt || v.ended ? h('button', { class: 'btn ghost danger', 'data-retire': '', onclick: () => void this.retire(bankrupt) }, '会社を引退させる') : null,
+      !bankrupt ? loanControl(this.root, s, (amount) => this.act({ type: 'takeLoan', amount }, '融資を受けました')) : null,
+      // 競争中でも自分から抜けられる（じろ2: 引退として抜ける）
+      h('button', { class: 'btn ghost danger', 'data-retire': '', onclick: () => void this.retire(bankrupt, !!v.ended) }, bankrupt || v.ended ? '会社を引退させる' : '市場を抜ける（引退）'),
     );
     const stores = s.company.stores.map((entry) => this.storeCard(s, entry, v.mine!.progress.lastProcessedGameDate));
     const st = v.settings;
@@ -697,7 +704,43 @@ export class MarketScreen {
       row('終わったあと', 'この市場で営業を続けられる（同期・順位なし）／別のコミュニティへ移せる／上位3社に称号'),
       h('p', { class: 'note' }, '営業していない間の経営（値段・人・出店）は、この画面で決められます。拡張の工事は、営業の画面で閉店後に決めます。'),
     );
-    return h('div', { class: 'market-mine-col' }, finance, rules, this.rangeCard(v), this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
+    const credit = bankrupt ? null : creditCard(this.root, v, { op: (op, okMsg) => this.credit(op, okMsg) });
+    return h('div', { class: 'market-mine-col' }, finance, credit, rules, this.settingsLog(v), this.rangeCard(v), this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
+  }
+
+  /** 企業間の貸し借りの操作（同じ操作の ID は一度だけ） */
+  private async credit(op: CreditOp, okMsg: string): Promise<void> {
+    try {
+      const r = await this.api.creditMarket(this.auth.token, this.marketId, cid(), op);
+      if (!r.ok) toast(this.root, r.reason ?? 'できませんでした', 'warn');
+      else toast(this.root, okMsg, 'good', 1800);
+    } catch (e) {
+      toast(this.root, errText(e), 'warn');
+    }
+    await this.refresh();
+  }
+
+  /** 市場の設定の変更の記録（いつ・誰が・何を。新しい順） */
+  private settingsLog(v: MarketScreenView): HTMLElement | null {
+    const log = v.settingsLog ?? [];
+    if (log.length === 0) return null;
+    return h(
+      'details',
+      { class: 'card market-settings-log', 'data-settings-log': '' },
+      h('summary', null, `市場の設定の変更の記録（${log.length}件）`),
+      h(
+        'ul',
+        null,
+        log.slice(0, 20).map((e) =>
+          h(
+            'li',
+            null,
+            `${new Date(e.at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}・作った人（${e.by.slice(0, 8)}）・市場の${e.day}日目: `,
+            e.changes.map((c) => `${SETTINGS_LABEL[c.key] ?? c.key} ${c.from} → ${c.to}`).join('／'),
+          ),
+        ),
+      ),
+    );
   }
 
   /**
@@ -803,15 +846,27 @@ export class MarketScreen {
       h('label', null, '会社の数の上限', max),
       h('p', { class: 'note' }, `上限はプレイヤーの会社の数（今 ${humans}社）より少なくできません。上限を下げると、市場シェアの小さい AI 企業から撤退します。期間・街・参加の種類は途中では変えられません。`),
     );
-    if (!(await confirmNode(this.root, '市場の設定', body, '保存する'))) return;
+    if (!(await confirmNode(this.root, '市場の設定', body, '次へ'))) return;
+    const patch = {
+      name: name.value.trim(),
+      description: desc.value,
+      visibility: (vis.value === 'public' ? 'public' : 'invite') as 'public' | 'invite',
+      aiFill: ai.value === '1',
+      maxCompanies: Number(max.value),
+    };
+    // 変える内容を確かめてから送る（じろ2: 変更の確認）
+    const before = settingsText(v);
+    const after = settingsText({ name: patch.name, settings: { ...v.settings, description: patch.description.trim(), visibility: patch.visibility, aiFill: patch.aiFill, maxCompanies: patch.maxCompanies } });
+    const diff = Object.keys(after).filter((k) => after[k] !== before[k]);
+    if (diff.length === 0) {
+      toast(this.root, '変わった設定はありません', 'info', 1800);
+      return;
+    }
+    const lines = diff.map((k) => `・${SETTINGS_LABEL[k] ?? k}: ${before[k]} → ${after[k]}`).join('\n');
+    const warnAi = diff.includes('maxCompanies') && patch.maxCompanies < v.settings.maxCompanies ? '\n\n上限を下げると、市場シェアの小さい AI 企業から撤退します。' : '';
+    if (!(await confirmDialog(this.root, '設定の変更の確認', `次のように変えます。\n${lines}${warnAi}\n\n変更は記録に残り、参加している人にも見えます。`, '変更する'))) return;
     try {
-      await this.api.updateMarketSettings(this.auth.token, this.marketId, {
-        name: name.value.trim(),
-        description: desc.value,
-        visibility: vis.value === 'public' ? 'public' : 'invite',
-        aiFill: ai.value === '1',
-        maxCompanies: Number(max.value),
-      });
+      await this.api.updateMarketSettings(this.auth.token, this.marketId, patch);
       toast(this.root, '市場の設定を保存しました', 'good', 2000);
       void this.refresh();
     } catch (e) {
@@ -853,19 +908,30 @@ export class MarketScreen {
     return h('div', { class: 'kv rename-row' }, h('span', null, label), h('div', { class: 'row' }, input, h('button', { class: 'btn', [`${attr}-ok`]: id, onclick: go }, '変更')));
   }
 
-  /** 会社を引退させる（終わった市場・破産した会社。記録は残り、1人が持てる会社の数から外れる） */
-  private async retire(bankrupt: boolean): Promise<void> {
+  /**
+   * 会社を引退させる（記録は残り、1人が持てる会社の数から外れる）。じろ2（オーナーの判断「引退として抜ける」）: 競争中でも抜けられる。
+   * 店は市場から消え、同じ会社では戻れない（新しい会社なら入り直せる）。企業間の借金は現金から返せるだけ返し、残りは貸し手の損
+   */
+  private async retire(bankrupt: boolean, ended: boolean): Promise<void> {
+    const midway = !bankrupt && !ended;
     const ok = await confirmDialog(
       this.root,
-      '会社を引退させる',
-      `${bankrupt ? '破産した会社を' : 'この会社を'}引退させます。この市場では営業できなくなり、別のコミュニティへも持っていけなくなります（記録・称号は残ります）。\n1人が持てる会社（${BALANCE.market.maxCompaniesPerPlayer}社）の数から外れます。`,
-      '引退させる',
+      midway ? '市場を抜ける（引退）' : '会社を引退させる',
+      midway
+        ? `この会社は引退し、市場から抜けます。
+・店は市場から消え、この会社ではもう営業できません（戻れません）
+・この市場の記録と順位は残ります
+・企業間の借金は今の現金から返せるだけ返し、残りは貸し手の損になります。返事待ちの申し込みは取り消します
+・新しい会社なら、招待コードでこの市場に入り直せます
+・1人が持てる会社（${BALANCE.market.maxCompaniesPerPlayer}社）の数から外れます`
+        : `${bankrupt ? '破産した会社を' : 'この会社を'}引退させます。この市場では営業できなくなり、別のコミュニティへも持っていけなくなります（記録・称号は残ります）。\n1人が持てる会社（${BALANCE.market.maxCompaniesPerPlayer}社）の数から外れます。`,
+      midway ? '抜ける' : '引退させる',
       true,
     );
     if (!ok) return;
     try {
       await this.api.retireCompany(this.auth.token, this.marketId);
-      toast(this.root, '会社を引退させました', 'good', 1800);
+      toast(this.root, midway ? '市場を抜けました（会社は引退）' : '会社を引退させました', 'good', 1800);
     } catch (e) {
       toast(this.root, errText(e), 'warn');
     }

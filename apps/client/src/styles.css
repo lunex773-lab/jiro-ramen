@@ -1241,3 +1241,20 @@ details.help:not([open]) > .help-body { display: none; }
 .store-line .dot.good { background: var(--good); }
 .store-line .dot.bad { background: var(--bad); }
 .store-line-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+/* じろ2: 銀行の融資の額・企業間の貸し借り・設定の変更の記録 */
+.loan-control { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.loan-control .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.market-credit .credit-offer { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
+.credit-list { display: flex; flex-direction: column; gap: 6px; }
+.credit-row { border: 1px solid var(--line, rgba(255,255,255,0.12)); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
+.credit-row summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.credit-row summary small { width: 100%; opacity: 0.8; }
+.credit-row .chip { font-size: 11px; padding: 1px 6px; }
+.credit-row.warn { border-color: var(--warn); }
+.credit-row.bad { border-color: var(--bad); }
+.credit-row.good { opacity: 0.8; }
+.credit-row .row { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.credit-events { margin: 4px 0 0; padding-left: 16px; font-size: 12px; opacity: 0.85; }
+.market-settings-log summary { cursor: pointer; font-weight: 600; }
+.market-settings-log ul { margin: 6px 0 0; padding-left: 16px; font-size: 12px; }

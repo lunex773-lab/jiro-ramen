@@ -9,13 +9,17 @@ import {
   updateMarketSettings,
   finishSync,
   jstDateKey,
+  joinMarket,
   jstMidnight,
   marketAction,
+  marketCredit,
+  type CreditOp,
   marketView,
   nextJstMidnight,
   nextSyncAt,
   periodSummary,
   playerCompany,
+  retireCompany,
   runSync,
   startDay,
   syncPending,
@@ -103,7 +107,7 @@ function mockMarket(page: Page) {
           return send({ marketId: 'mk1', code: 'MKT234', name: market.name }, 201);
         }
         if (p === '/api/v1/market/mk1/settings') {
-          const r = updateMarketSettings(market!, JSON.parse(req.postData() ?? '{}'));
+          const r = updateMarketSettings(market!, JSON.parse(req.postData() ?? '{}'), { by: 'u1', now: now() });
           return r.ok ? send({ ok: true, name: market!.name, settings: market!.settings, changed: r.changed }) : send({ error: r.reason, code: 'settings_refused' }, 409);
         }
         if (p === '/api/v1/market/mk1/act') {
@@ -112,6 +116,17 @@ function mockMarket(page: Page) {
           cids.add(b.cid);
           acts.push(b.action);
           return send(marketAction(market!, 'u1', b.action, now()));
+        }
+        if (p === '/api/v1/market/mk1/retire') {
+          const r = retireCompany(market!, 'u1', now());
+          return r.ok ? send({ ok: true }) : send({ error: r.reason, code: 'retire_refused' }, 409);
+        }
+        if (p === '/api/v1/market/mk1/credit') {
+          const b = JSON.parse(req.postData() ?? '{}') as { cid: string; op: CreditOp };
+          if (cids.has(b.cid)) return send({ ok: true, duplicate: true });
+          cids.add(b.cid);
+          const r = marketCredit(market!, 'u1', b.op, now());
+          return send(r.ok ? { ok: true, creditId: r.credit.id, status: r.credit.status } : { ok: false, reason: r.reason });
         }
         if (p === '/api/v1/market/mk1/day/start') {
           const b = JSON.parse(req.postData() ?? '{}') as { token: string; baseVersion: number };
@@ -365,10 +380,68 @@ test('共通市場: 作った人は、あとから市場の名前・公開・会
   await dlg.locator('[data-edit-name]').fill('名前を変えた市場');
   await dlg.locator('[data-edit-visibility]').selectOption('public');
   await dlg.locator('[data-edit-max]').selectOption('4');
-  await expect(dlg.getByRole('button', { name: '保存する' })).toBeInViewport({ ratio: 1 });
-  await dlg.getByRole('button', { name: '保存する' }).click();
+  await expect(dlg.getByRole('button', { name: '次へ' })).toBeInViewport({ ratio: 1 });
+  await dlg.getByRole('button', { name: '次へ' }).click();
+  // 変える内容の確認（じろ2）
+  const confirm = page.locator('.modal');
+  await expect(confirm).toContainText('会社の数の上限: 6社 → 4社');
+  await expect(confirm).toContainText('公開: 招待コードだけ → 公開');
+  await confirm.getByRole('button', { name: '変更する' }).click();
   await expect(screen.locator('.market-head h2')).toHaveText('名前を変えた市場');
+  // 変更の記録（いつ・誰が・何を）
+  await expect(screen.locator('[data-settings-log]')).toContainText('市場の名前');
   expect(mock.market!.settings).toMatchObject({ visibility: 'public', maxCompanies: 4 });
   // AI で埋める市場なので、上限を4社にすると AI 企業が撤退して4社になる
   expect(mock.market!.companies.filter((c) => c.status === 'active').length).toBe(4);
+});
+
+test('共通市場: 銀行の融資は額を選べる。企業間の貸し借り: 申し込み → 相手の承認 → 前倒しで返す。競争中でも市場を抜けられる', async ({ page }) => {
+  test.setTimeout(90_000);
+  const mock = mockMarket(page);
+  await mock.install();
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  const ok = page.getByRole('button', { name: 'わかった' });
+  if (await ok.isVisible()) await ok.click();
+  await page.evaluate((u) => localStorage.setItem('jiro.serverUrl', u), SERVER);
+  await page.getByRole('button', { name: /オンライン市場/ }).click();
+  const lobby = page.locator('.market-lobby');
+  await lobby.locator('input[placeholder="会社（店）の名前"]').fill('貸し亭');
+  await lobby.locator('[data-create-market]').click();
+  const screen = page.locator('.screen.market');
+  await expect(screen.locator('[data-market-credit]')).toBeVisible();
+  // 銀行の融資: 5万円刻みで選ぶ（日報がないので返済能力は最低の20万円）
+  await expect(screen.locator('[data-loan-amount] option')).toHaveCount(4);
+  await screen.locator('[data-loan-amount]').selectOption('100000');
+  await screen.locator('[data-take-loan]').click();
+  await page.locator('.modal').getByRole('button', { name: '借りる' }).click();
+  await expect.poll(() => playerCompany(mock.market!, 'u1')!.state.loans.map((l) => l.principal)).toEqual([100_000]);
+  // ほかのプレイヤーが入る（サーバーの代わりに core で）
+  expect(joinMarket(mock.market!, 'u2', '借り軒').ok).toBe(true);
+  await screen.getByRole('button', { name: '← 市場から出る' }).click();
+  await page.locator('.market-lobby [data-open-market]').first().click();
+  const credit = page.locator('.screen.market [data-market-credit]');
+  await credit.locator('[data-credit-to]').selectOption({ label: '借り軒' });
+  await credit.locator('[data-credit-amount]').selectOption('50000');
+  await credit.locator('[data-credit-offer]').click();
+  await expect(page.locator('.modal')).toContainText('借り軒に ¥50,000 を貸す申し込み');
+  await page.locator('.modal').getByRole('button', { name: '申し込む' }).click();
+  await expect(credit.locator('[data-credit-status="offered"]')).toContainText('返事待ち');
+  // 相手が承認する（サーバーの代わりに core で）→ 画面にお金が動いた状態が出る
+  const id = mock.market!.credits![0]!.id;
+  expect(marketCredit(mock.market!, 'u2', { op: 'accept', creditId: id }, Date.now()).ok).toBe(true);
+  await screen.getByRole('button', { name: '← 市場から出る' }).click();
+  await page.locator('.market-lobby [data-open-market]').first().click();
+  await expect(page.locator('.screen.market [data-credit-status="active"]')).toContainText('返している最中');
+  await expect(page.locator('.screen.market [data-credit-book]')).toContainText('貸している ¥50,000');
+  await page.locator('.screen.market [data-market-credit]').scrollIntoViewIfNeeded();
+  await shot(page, '62-market-credit');
+  // 競争中でも市場を抜けられる（引退）
+  await page.locator('.screen.market [data-retire]').click();
+  await expect(page.locator('.modal')).toContainText('この市場の記録と順位は残ります');
+  await page.locator('.modal').getByRole('button', { name: '抜ける' }).click();
+  await expect(page.locator('.screen.market [data-my-status="retired"]')).toBeVisible();
+  // 借りていた会社ではないので、貸したお金はそのまま（借り手が抜けたときは返せるだけ返して終わり）
+  expect(mock.market!.credits![0]!.status).toBe('active');
 });

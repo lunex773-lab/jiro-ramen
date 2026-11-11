@@ -110,6 +110,7 @@ function companyTabVisible(s: GameState): boolean {
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { openStoreMap } from './store-map';
 import { hoursDialog, hoursSummary } from './hours-dialog';
+import { loanControl } from './loan';
 import { alertBox, cardHead, delta, flowBar, kpi, kpiRow, profitBars, yenSigned } from './kit';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
 import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
@@ -643,25 +644,7 @@ export class ManageMenu {
     if (d.managerExpress) alerts.push(alertBox('warn', `店長が当日便で仕入れた: ${d.managerExpress.packs}パック ${yenStr(d.managerExpress.spent)}（前の晩の発注が足りなかった分）`));
     if (buzzBoostFactor(s) > 1) alerts.push(alertBox('good', `🎥 SNSの話題になりやすさ ×${buzzBoostFactor(s).toFixed(1)}（${Math.max(...(s.events?.buzzBoosts ?? []).map((b) => b.untilDay))}日目まで）`));
     for (const e of (s.events?.effects ?? []).filter((x) => x.source === 'tv' && (x.fromDay ?? 0) >= s.day)) alerts.push(alertBox('good', `📺 テレビ放送の反響（${e.fromDay}日目） 来客 ×${e.mult.toFixed(1)}`));
-    if (loanAvailable(s))
-      alerts.push(
-        alertBox(
-          'info',
-          '資金が足りないときは緊急融資を受けられます',
-          h(
-            'button',
-            {
-              class: 'mini ghost',
-              onclick: async () => {
-                const L = BALANCE.loan;
-                const ok = await confirmDialog(this.root, '緊急融資', `¥${L.amount.toLocaleString('ja-JP')}を借ります。日利${(L.dailyRate * 100).toFixed(1)}%、${L.days}日で毎日返済します。融資は1件までです。`, '借りる');
-                if (ok) await this.act({ type: 'takeLoan' }, '融資を受けました');
-              },
-            },
-            '融資を受ける',
-          ),
-        ),
-      );
+    if (loanAvailable(s)) alerts.push(alertBox('info', '資金が足りないときは銀行の融資を受けられます（額を選べる）', loanControl(this.root, s, (amount) => this.act({ type: 'takeLoan', amount }, '融資を受けました'))));
     if (alerts.length === 0) alerts.push(alertBox('good', '特に気をつけることはありません'));
     // ── お金の流れ（純売上を100%として、費用と利益） ──
     const flow = flowBar(
