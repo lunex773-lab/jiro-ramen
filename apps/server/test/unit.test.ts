@@ -87,7 +87,10 @@ describe('メッセージ検証', () => {
     expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 2, shift: sh })).toEqual({ type: 'setShift', employeeId: 'e1', weekday: 2, shift: sh });
     expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 2, shift: null })).toEqual({ type: 'setShift', employeeId: 'e1', weekday: 2, shift: null });
     expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 7, shift: sh })).toBeNull();
-    expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, end: 999 } })).toBeNull();
+    // 営業時間が長い店・枠が2つの店のシフト（開店からの分は 3000 まで）と、中休みは休む
+    expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, end: 999, midRest: true } })).toEqual({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, end: 999, midRest: true } });
+    expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, end: 3001 } })).toBeNull();
+    expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, midRest: 1 } })).toBeNull();
     expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1, shift: { ...sh, extra: 1 } })).toBeNull();
     expect(parseAction({ type: 'setShift', employeeId: 'e1', weekday: 1 })).toBeNull();
     // カレンダー: 日にちの一覧（28日分まで）・その日だけ／毎週くりかえす／くりかえしに戻す
@@ -99,7 +102,7 @@ describe('メッセージ検証', () => {
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [1.5], shift: sh, mode: 'once' })).toBeNull();
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: ['3'], shift: sh, mode: 'once' })).toBeNull();
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: sh, mode: 'always' })).toBeNull();
-    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: { ...sh, end: 999 }, mode: 'once' })).toBeNull();
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: { ...sh, end: 3001 }, mode: 'once' })).toBeNull();
     expect(parseAction({ type: 'setAutoOrderMode', mode: 'sales' })).toEqual({ type: 'setAutoOrderMode', mode: 'sales' });
     expect(parseAction({ type: 'setAutoOrderMode', mode: 'auto' })).toBeNull();
     expect(parseAction({ type: 'promote', employeeId: 'e1' })).toEqual({ type: 'promote', employeeId: 'e1' });
