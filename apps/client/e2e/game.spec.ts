@@ -638,6 +638,50 @@ test('従業員: みんなの勤務のカレンダーで日を選んでシフト
   await expect(body.locator('.emp[data-emp]').first()).toContainText('シフトリーダー');
 });
 
+test('従業員: シフト表で曜日 × 時間の人数と必要な人数を見て、「シフトを自動で組む」でアルバイトのシフトを組める。店長がいれば「店長に任せる」を選べる', async ({ page }) => {
+  await startNewGame(page);
+  type E = { id: string; profile: { employment: string; wishDays?: boolean[] }; shifts?: unknown[] };
+  type S = { day: number; employees: E[]; history: { customers: number; balked: number; served: number }[]; company: { activeStoreId: string; stores: { id: string; managerId?: string | null; policy: { shiftBy?: string } }[] } };
+  const state = () => page.evaluate(() => (window as unknown as { __jiro: { host: { state: S } } }).__jiro.host.state);
+  await page.locator('.chip.menu').click();
+  await page.getByRole('button', { name: '従業員', exact: true }).click();
+  const body = page.locator('.manage-body');
+  await body.getByRole('button', { name: '採用する' }).first().click();
+  await expect.poll(async () => (await state()).employees.length).toBe(1);
+  const card = body.locator('[data-shift-table]');
+  await expect(card).toBeVisible();
+  await expect(card.locator('[data-shift-row]')).toHaveCount(7);
+  // 忙しい店の記録にして（来客110人）、自動で組む
+  await page.evaluate(() => {
+    const s = (window as unknown as { __jiro: { host: { state: S } } }).__jiro.host.state;
+    const e = s.employees[0]!;
+    e.profile.wishDays = [true, true, true, true, true, true, true];
+    const base = { customers: 110, balked: 0, served: 60 } as Record<string, unknown>;
+    for (let d = 1; d <= 3; d++) (s.history as unknown[]).push({ ...base, day: d, sales: 0, refunds: 0, cogs: 0, waste: 0, wages: 0, rent: 0, upkeep: 0, utilities: 0, repairs: 0, hiring: 0, interest: 0, purchases: 0, capex: 0, lost: 0, totalSeatWait: 0, totalQueueWait: 0, satisfactionSum: 0, satisfactionCount: 0, mistakes: 0, stockouts: 0, complaints: 0, breakdowns: 0, remakes: 0, wasteItems: {}, operatingProfit: 0, netSales: 0, finalProfit: 0, cashStart: 0, cashEnd: 0, reputation: 3, reviews: 0, avgSatisfaction: 0, avgWait: 0 });
+  });
+  await page.getByRole('button', { name: '経営', exact: true }).click();
+  await page.getByRole('button', { name: '従業員', exact: true }).click();
+  const before = JSON.stringify((await state()).employees[0]!.shifts ?? null);
+  await card.locator('[data-auto-shifts]').click();
+  await expect.poll(async () => JSON.stringify((await state()).employees[0]!.shifts ?? null)).not.toBe(before);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __jiro: { host: { state: { notices: { code: string; text: string }[] } } } }).__jiro.host.state.notices.find((n) => n.code === 'autoShifts')?.text ?? '')).toContain('シフトを組みました');
+  // 店長がいれば「店長に任せる / 自分で組む」
+  await page.evaluate(() => {
+    const s = (window as unknown as { __jiro: { host: { state: S } } }).__jiro.host.state;
+    const st = s.company.stores.find((x) => x.id === s.company.activeStoreId)!;
+    s.employees[0]!.profile.employment = 'full';
+    st.managerId = s.employees[0]!.id;
+  });
+  await page.getByRole('button', { name: '経営', exact: true }).click();
+  await page.getByRole('button', { name: '従業員', exact: true }).click();
+  await expect(card.locator('[data-shift-by="manager"]')).toBeVisible();
+  await card.getByRole('button', { name: '自分で組む' }).click();
+  await expect.poll(async () => {
+    const s = await state();
+    return s.company.stores.find((x) => x.id === s.company.activeStoreId)!.policy.shiftBy;
+  }).toBe('self');
+});
+
 test('営業時間: 経営のタブから昼と夜の2つの枠と定休日を決めると、次の日から使い、時計と開店のボタンが枠に合わせて変わる（じろ1）', async ({ page }) => {
   await startNewGame(page);
   type S = { day: number; phase: string; sessionIdx?: number; todayHours?: { sessions: { open: number; close: number }[]; closedDays: number[] }; company: { activeStoreId: string; stores: { id: string; hours?: { sessions: { open: number; close: number }[]; closedDays: number[] } }[] } };

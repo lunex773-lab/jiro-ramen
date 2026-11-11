@@ -87,6 +87,23 @@ export const BALANCE = {
     maxExpressPacks: 6,
   },
 
+  /** アルバイトのシフトを組む目安（sim/shift-plan.ts。オーナーの指示 2026-11-11） */
+  shiftPlan: {
+    /** 1人で回せる1時間あたりの来客（店主・社員・アルバイトを同じに数える。必要な人数の目安） */
+    customersPerStaffHour: 12,
+    /** 営業した日がまだないときの、11〜15時の店の1日の来客の見込み */
+    defaultDailyCustomers: 60,
+    /** 1回のシフトの長さ（分）。営業の枠がこれより短ければ枠の長さ */
+    minShiftMin: 120,
+    maxShiftMin: 360,
+    /** 足りない時間がこれ（分）より短ければ人を入れない */
+    minGainMin: 60,
+    /** アルバイトが週に入る回数の上限（疲れているときは少なく） */
+    maxDaysPerWeek: 5,
+    maxDaysTired: 3,
+    tiredFatigue: 0.6,
+  },
+
   prepPlan: {
     /** 最近の何日分の使用量を見るか（その中の最大） */
     days: 3,

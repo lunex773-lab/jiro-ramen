@@ -1218,3 +1218,13 @@ details.help:not([open]) > .help-body { display: none; }
 .mbar.tone-info .mbar-fill { background: var(--info); }
 .kv.compact { padding: 3px 0; font-size: 13px; }
 .dash-title { margin: 0 0 8px; font-weight: 800; color: var(--yellow); font-size: 15px; }
+
+/* シフト表（曜日 × 1時間。いる人数 / 必要な人数の目安。オーナーの指示 2026-11-11） */
+.shift-table-wrap { overflow-x: auto; max-width: 100%; margin: 6px 0; }
+.shift-table { border-collapse: separate; border-spacing: 2px; font-size: 12px; min-width: 100%; }
+.shift-table th { font-weight: 700; color: var(--muted); padding: 2px 4px; text-align: center; white-space: nowrap; }
+.shift-table td { text-align: center; padding: 3px 4px; border-radius: 4px; min-width: 30px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.shift-table td.ok { background: rgba(46, 204, 113, 0.18); }
+.shift-table td.short { background: rgba(231, 76, 60, 0.35); color: #fff; font-weight: 700; }
+.shift-table td.over { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
+.shift-table td.closed { background: rgba(255, 255, 255, 0.04); color: var(--muted); }

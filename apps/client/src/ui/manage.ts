@@ -86,6 +86,7 @@ import {
   prepTargetItems,
   promoteLeaderProblem,
   storeHours,
+  shiftTable,
   openMinutesOf,
   sessionSpans,
   SEC_PER_MIN,
@@ -1069,6 +1070,7 @@ export class ManageMenu {
         s.employees.length > 0 ? this.teamCalendar(s) : null,
         s.employees.map((e) => this.staffCard(s, e)),
       ),
+      s.employees.length > 0 ? this.shiftTableCard(s) : null,
       hiring
         ? h(
             'section',
@@ -1093,6 +1095,73 @@ export class ManageMenu {
           )
         : null,
       hiring ? this.tempCard(s) : null,
+    );
+  }
+
+  /**
+   * シフト表（オーナーの指示 2026-11-11）: 曜日 × 1時間ごとの、いる人数（店主を入れる）と必要な人数の目安。
+   * 「シフトを自動で組む」と、店長がいる店は「店長に任せる / 自分で組む」
+   */
+  private shiftTableCard(s: GameState): HTMLElement {
+    const hrs = storeHours(s);
+    const rows = shiftTable(s, hrs);
+    const st = s.company ? activeStore(s) : null;
+    const mgr = st?.managerId ? s.employees.find((e) => e.id === st.managerId) : null;
+    const byMgr = !!mgr && st!.policy.shiftBy !== 'self';
+    const parts = s.employees.filter(isPartTime);
+    const head = rows.find((r) => !r.closed)?.cells ?? [];
+    const nameOf = (id: string) => s.employees.find((e) => e.id === id)?.profile.name ?? '';
+    const shortCells = rows.reduce((a, r) => a + r.cells.filter((c) => c.staff < c.need).length, 0);
+    return h(
+      'section',
+      { class: 'card wide shift-table-card', 'data-shift-table': '1' },
+      cardHead(
+        'シフト表（曜日ごとのくりかえし）',
+        '数字は「いる人数 / 必要な人数の目安」（店主のあなたを1人と数えます）。必要な人数は、最近の来客と曜日・時間帯の客の多さから見積もります（1人で1時間に約12人）。赤は足りない時間、灰色は多すぎる時間です。日にちごとに入れた予定はここには出ません。営業時間を変えると、アルバイトのシフトは同じ時刻に働くように自動で直します。',
+      ),
+      mgr
+        ? h(
+            'div',
+            { class: 'row wrap', 'data-shift-by': byMgr ? 'manager' : 'self' },
+            h('span', null, 'シフトを組む人:'),
+            h('button', { class: `mini ${byMgr ? 'on' : 'ghost'}`, disabled: !this.host.isHost, onclick: () => this.act({ type: 'setStorePolicy', storeId: st!.id, policy: { shiftBy: 'manager' } }, `店長（${mgr.profile.name}さん）にシフトを任せました`) }, '🧑‍🍳 店長に任せる'),
+            h('button', { class: `mini ${!byMgr ? 'on' : 'ghost'}`, disabled: !this.host.isHost, onclick: () => this.act({ type: 'setStorePolicy', storeId: st!.id, policy: { shiftBy: 'self' } }, 'シフトを自分で組むことにしました') }, '自分で組む'),
+          )
+        : null,
+      mgr ? h('p', { class: 'note' }, byMgr ? `店長の${mgr.profile.name}さんが、毎週日曜の閉店後に翌週のアルバイトのシフトを組み直します。` : 'アルバイトのシフトは自分で組みます（店長は組み直しません）。') : null,
+      h(
+        'div',
+        { class: 'shift-table-wrap' },
+        h(
+          'table',
+          { class: 'shift-table' },
+          h('thead', null, h('tr', null, h('th', null, ''), head.map((c) => h('th', null, `${clockLabel(c.clock).replace(':00', '')}時`)))),
+          h(
+            'tbody',
+            null,
+            rows.map((r) =>
+              h(
+                'tr',
+                { 'data-shift-row': String(r.weekday) },
+                h('th', { title: r.partTimers.map((p) => `${nameOf(p.id)} ${this.shiftText(p.shift)}`).join('、') || 'アルバイトなし' }, WEEKDAY_LABEL[r.weekday]!),
+                r.closed
+                  ? h('td', { class: 'closed', colspan: String(Math.max(1, head.length)) }, '定休日')
+                  : r.cells.map((c) =>
+                      h('td', { class: c.staff < c.need ? 'short' : c.staff > c.need + 1 ? 'over' : 'ok', title: `来客の見込み 1時間に約${Math.round(c.customers)}人` }, `${c.staff}/${c.need}`),
+                    ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'row wrap' },
+        this.host.isHost && parts.length > 0
+          ? h('button', { class: 'mini', 'data-auto-shifts': '1', onclick: () => this.act({ type: 'autoShifts' }) }, '🗓 シフトを自動で組む')
+          : null,
+        h('span', { class: `note${shortCells > 0 ? ' warn' : ''}` }, parts.length === 0 ? 'アルバイトを雇うと、シフトを自動で組めます' : shortCells > 0 ? `人が足りない時間が週に${shortCells}時間あります` : '人数は足りています'),
+      ),
     );
   }
 

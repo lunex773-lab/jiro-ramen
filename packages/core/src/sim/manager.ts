@@ -19,7 +19,8 @@ import { upkeepTotal } from './equipment';
 import { addLot, consume, expireLots, fridgeCapacity, packPriceOf, stockOf } from './inventory';
 import { makeCtx, type SimCtx } from './notices';
 import { payAds, withPlannedAds } from './ads';
-import { attendanceChances, checkQuits, endOfDayWellbeing, expectedPay, fatigueSpeed, shiftFor } from './staff';
+import { attendanceChances, checkQuits, endOfDayWellbeing, expectedPay, fatigueSpeed, isPartTime, shiftFor, weekdayOf } from './staff';
+import { autoShifts } from './shift-plan';
 import { tempHourly } from './employees';
 
 const M = () => BALANCE.company.model;
@@ -301,6 +302,11 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
   };
   s.history.push(report);
   if (s.history.length > 60) s.history.splice(0, s.history.length - 60);
+  // 店長の毎週のシフト: 日曜の夜に、翌週のアルバイトのシフトを来客の見込みに合わせて組み直す（方針で「自分で組む」の店は組まない。
+  // オーナーの指示 2026-11-11）。店主はこの店にいないので数えない
+  if (weekdayOf(day) === 6 && entry.policy.shiftBy !== 'self' && entry.managerId && s.employees.some((e) => e.id === entry.managerId) && s.employees.some(isPartTime)) {
+    autoShifts(s, ctx, 'manager', { owner: false, hours, silent: true, day });
+  }
   // キャリア（会社のもの）: 累計の杯数・1日の最高（目標の解放に使う）
   s.career.totalServed += served;
   s.career.bestDayServed = Math.max(s.career.bestDayServed, served);

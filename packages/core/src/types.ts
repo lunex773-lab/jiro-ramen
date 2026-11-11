@@ -1220,6 +1220,8 @@ export interface StorePolicy {
   safetyStock?: number;
   /** 翌朝便の発注をだれがするか（じろ1 5.8）: 'manager' = 店長がいれば店長が需要の見込みから発注する（ない → manager）、'self' = 自分の発注の設定 */
   orderBy?: 'manager' | 'self';
+  /** アルバイトのシフトをだれが組むか（オーナーの指示 2026-11-11）: 'manager' = 店長がいれば毎週組み直す（ない → manager）、'self' = 自分で組む */
+  shiftBy?: 'manager' | 'self';
 }
 
 /** 営業時間（じろ1 5.1）。時刻は0:00からの分（24時を超えると翌日。日をまたぐ営業） */

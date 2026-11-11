@@ -21,6 +21,7 @@ import { accidentHalted, EVENT_KINDS } from './events';
 import { accidentFainted, resetAccident } from './accident';
 import { forceEvent } from './visitors';
 import { promote, promoteLeader, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
+import { autoShifts } from './shift-plan';
 import { answerRequest } from './media';
 import { setCompanyPolicy } from './company';
 import { assignManager, enterStore, openStore, renameShop, renameStore, setStoreHours, setStoreLocation, setStorePolicy, transferEmployee } from './stores';
@@ -92,7 +93,9 @@ export type Action =
   /** 店の方針（店長の営業の価格・発注・修理費の上限・定期メンテ） */
   | { type: 'setStorePolicy'; storeId: Id; policy: Partial<StorePolicy> }
   /** 店の営業時間（開店・閉店の枠と定休日。次の営業日から。じろ1 5.1） */
-  | { type: 'setStoreHours'; storeId: Id; hours: StoreHours };
+  | { type: 'setStoreHours'; storeId: Id; hours: StoreHours }
+  // アルバイトのシフトを来客の見込みに合わせて組む（プレイヤーがいる店。オーナーの指示 2026-11-11）
+  | { type: 'autoShifts' };
 
 export type ActionType = Action['type'];
 
@@ -320,7 +323,11 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return setStorePolicy(s, a.storeId, a.policy);
     case 'setStoreHours':
       if (typeof a.storeId !== 'string' || typeof a.hours !== 'object' || a.hours === null) return fail('不正な指定');
-      return setStoreHours(s, a.storeId, a.hours);
+      return setStoreHours(s, a.storeId, a.hours, ctx);
+    case 'autoShifts': {
+      const r = autoShifts(s, ctx, 'player');
+      return r.ok ? { ok: true } : fail(r.reason ?? '組めません');
+    }
     case 'setPrice': {
       const m = Object.hasOwn(MENU, a.menuId) ? MENU[a.menuId] : undefined;
       if (!m || !isNum(a.price)) return fail('不正な価格');

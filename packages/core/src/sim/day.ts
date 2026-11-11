@@ -19,6 +19,7 @@ import { dropHand } from './interact';
 import { ensureStartingUnlocks, morningRollCall, refreshCandidates, releaseTemps, wagesDue } from './employees';
 import { closeStaffDay, expectedWages } from './staff';
 import { expireLots, receiveDeliveries, runAutoOrder, STOCKOUT_SOURCE } from './inventory';
+import { managerWeeklyShifts } from './shift-plan';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
 import { drawAccident, takePrepSnapshot } from './accident';
 import { applyWageFloor } from './wages';
@@ -253,6 +254,8 @@ export function settleDay(s: GameState, ctx: SimCtx): DayReport {
   explainStockouts(s, ctx);
   // 翌朝便の自動発注
   runAutoOrder(s, ctx);
+  // 店長の毎週のシフト（日曜の閉店後に翌週の分。オーナーの指示 2026-11-11）
+  managerWeeklyShifts(s, ctx);
   emit(ctx, { type: 'dayEnd', value: op });
   return report;
 }

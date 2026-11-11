@@ -14,7 +14,7 @@ export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
   'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'promote', 'promoteLeader', 'setPrepTarget', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
-  'accidentReset', 'openStore', 'setStoreLocation', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setStoreHours', 'setCompanyPolicy',
+  'accidentReset', 'openStore', 'setStoreLocation', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setStoreHours', 'autoShifts', 'setCompanyPolicy',
 ] as const satisfies readonly ActionType[];
 
 /**
@@ -70,7 +70,7 @@ function isArgs(v: unknown): boolean {
   if (v === undefined || v === null) return true;
   if (!isObj(v)) return false;
   const entries = Object.entries(v);
-  if (entries.length > 8) return false;
+  if (entries.length > 12) return false;
   return entries.every(([k, x]) => isId(k) && k.length <= 32 && (isNum(x) || typeof x === 'boolean' || (typeof x === 'string' && x.length <= 64)));
 }
 
@@ -174,6 +174,7 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   transferEmployee: { employeeId: isId, toStoreId: isId, asManager: optBool },
   setStorePolicy: { storeId: isId, policy: isPolicy },
   setStoreHours: { storeId: isId, hours: isHours },
+  autoShifts: {},
   setCompanyPolicy: { policy: isCompanyPolicy },
 };
 

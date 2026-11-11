@@ -2,7 +2,8 @@
 // プレイヤーがいる店の中身は GameState の店の部分にあり、ほかの店は stores[].snapshot にある。
 // 店を切り替えるときは、閉店後（精算のあと・次の日の前）に中身を入れ替える。会社のお金・借入・キャリアは変わらない。
 
-import { hoursProblem } from './hours';
+import { DEFAULT_HOURS, hoursProblem } from './hours';
+import { remapShiftsForHours, storeEmployees } from './shift-plan';
 import type { StoreHours } from '../types';
 import { BALANCE } from '../data/balance';
 import { INGREDIENTS } from '../data/ingredients';
@@ -367,12 +368,16 @@ export function transferEmployee(s: GameState, ctx: SimCtx, employeeId: Id, toSt
 /**
  * 店の営業時間を決める（じろ1 5.1）。次の営業日から使う（その日の営業時間は朝に決まる。営業中に変えても今日は変わらない）
  */
-export function setStoreHours(s: GameState, storeId: Id, hours: StoreHours): { ok: boolean; reason?: string } {
+export function setStoreHours(s: GameState, storeId: Id, hours: StoreHours, ctx?: SimCtx): { ok: boolean; reason?: string } {
   const entry = s.company.stores.find((x) => x.id === storeId);
   if (!entry) return { ok: false, reason: '店が見つかりません' };
   const bad = hoursProblem(hours);
   if (bad) return { ok: false, reason: bad };
+  const before = entry.hours ?? DEFAULT_HOURS;
   entry.hours = { sessions: hours.sessions.map((x) => ({ open: x.open, close: x.close })), closedDays: [...hours.closedDays].sort((a, b) => a - b) };
+  // アルバイトのシフトを新しい営業時間に合わせる（同じ時刻に働く。オーナーの指示 2026-11-11）
+  const changed = remapShiftsForHours(storeEmployees(s, entry), before, entry.hours, s.day);
+  if (changed.length > 0 && ctx) notify(s, ctx, `hoursShifts:${entry.id}`, 'info', `新しい営業時間に合わせて、アルバイトのシフトを直しました（${changed.map((n) => `${n}さん`).join('・')}。あすから）`);
   return { ok: true };
 }
 
@@ -388,6 +393,7 @@ export function setStorePolicy(s: GameState, storeId: Id, p: Partial<StorePolicy
   if (next.tempWhenShort !== undefined && typeof next.tempWhenShort !== 'boolean') return { ok: false, reason: '短期バイトの方針が不正です' };
   if (next.safetyStock !== undefined && !(Number.isFinite(next.safetyStock) && next.safetyStock >= 0.8 && next.safetyStock <= 2)) return { ok: false, reason: '在庫の安全基準は0.8〜2倍です' };
   if (next.orderBy !== undefined && next.orderBy !== 'manager' && next.orderBy !== 'self') return { ok: false, reason: '発注する人の指定が不正です' };
+  if (next.shiftBy !== undefined && next.shiftBy !== 'manager' && next.shiftBy !== 'self') return { ok: false, reason: 'シフトを組む人の指定が不正です' };
   entry.policy = next;
   return { ok: true };
 }
