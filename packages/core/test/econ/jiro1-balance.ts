@@ -2,7 +2,7 @@
 // 細かいシミュレーション（0.1 秒刻み）で 90 日まで回し、1・7・30・90 日の収支を項目に分けて記録する。
 // 店主は「全部の仕事をこなすボット」。慣れていない人に近い遅さ（能力 0.4）と、上手な人（0.65）で比べる。ゲームの規則には手を入れない。
 
-import { activeStore, applyAction, BALANCE, EQUIPMENT, fillNewStore, marketHourly, minWageOf, type GameState, type SimCtx, type StoreHours } from '../../src';
+import { activeStore, applyAction, BALANCE, EQUIPMENT, fillNewStore, marketHourly, minWageOf, refreshCandidates, type GameState, type SimCtx, type StoreHours } from '../../src';
 import { addBot } from '../helpers';
 import { buyPlaced, coverWithTemp, hireCheapest, runCase, salesMode, setAllPrices, type CasePolicy, type DayRow } from './harness';
 
@@ -24,6 +24,13 @@ const big = (code?: string) => (s: GameState) => {
 
 function secondFridge(s: GameState, ctx: SimCtx): void {
   if (s.equipment.filter((e) => EQUIPMENT[e.type]?.role === 'fridge').length < 2) applyAction(s, 'p1', { type: 'buyEquipment', equipType: 'fridge', autoPlace: true }, ctx);
+}
+
+/** 黒字になる前でもすぐ雇う（採用は1日目からできる）。いちばん安い候補 */
+function hireNow(s: GameState, ctx: SimCtx, role: 'cook' | 'server'): void {
+  if (s.candidates.length === 0) refreshCandidates(s);
+  const c = [...s.candidates].filter((x) => x.profile.role === role).sort((a, b) => a.profile.wage - b.profile.wage)[0] ?? s.candidates[0];
+  if (c) applyAction(s, 'p1', { type: 'hire', candidateId: c.id }, ctx);
 }
 
 /** 初めて黒字になったら調理担当を1人雇う（ふつうのプレイヤー） */
@@ -71,6 +78,23 @@ export const PATTERNS: Pattern[] = [
     name: '2. 都市部の大型店舗（新宿区・12席・店主＋黒字のあと調理と接客）',
     skill: 0.4,
     policy: { id: 'p2', name: '', init: big(CITY), setup: (s, ctx) => (salesMode(s, ctx), secondFridge(s, ctx)), morning: hireTwoAfterProfit },
+  },
+  {
+    id: 'p2h_city_large_hire',
+    name: '2h. 都市部の大型店舗で、最初から調理と接客を雇う（新宿区・12席・1日目に採用。2の比べ）',
+    skill: 0.4,
+    policy: {
+      id: 'p2h',
+      name: '',
+      init: big(CITY),
+      setup: (s, ctx) => (salesMode(s, ctx), secondFridge(s, ctx)),
+      morning: (s, ctx) => {
+        // 採用は1日目からできる（オーナーの判断 2026-11-05）。店主のボットも s.employees にいるので、2人目が調理・3人目が接客
+        if (s.employees.length < 2) hireNow(s, ctx, 'cook');
+        else if (s.employees.length < 3) hireNow(s, ctx, 'server');
+        coverWithTemp(s, ctx);
+      },
+    },
   },
   {
     id: 'p3_rural_small',
