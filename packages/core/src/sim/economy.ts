@@ -120,5 +120,5 @@ export function spend(s: GameState, type: TxnType, field: PLField, amount: numbe
 }
 
 export function totalDebt(s: GameState): number {
-  return s.arrears.reduce((a, b) => a + b.amount, 0) + s.loans.reduce((a, b) => a + b.remaining, 0);
+  return s.arrears.reduce((a, b) => a + b.amount, 0) + s.loans.reduce((a, b) => a + b.remaining, 0) + (s.companyCredit?.owed ?? 0);
 }

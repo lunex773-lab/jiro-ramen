@@ -314,23 +314,75 @@ export function updateFinanceWarnings(s: GameState, ctx: SimCtx): void {
 /** 救済手段で用意できる最大額（設備売却＋融資） */
 export function rescueCapacity(s: GameState): number {
   const sell = s.equipment.reduce((a, e) => a + resaleValue(e), 0);
-  const loan = loanAvailable(s) ? BALANCE.loan.amount : 0;
+  const loan = loanLimit(s).max;
   return sell + loan;
 }
 
-export function loanAvailable(s: GameState): boolean {
-  return s.loans.length === 0 && s.reputation >= BALANCE.loan.minReputation && !s.bankruptcy;
+/** 返済能力（直近の営業利益の平均 × 30日分。最低20万円。会社の日報、なければ店の日報） */
+export function repaymentCapacity(s: GameState): number {
+  const L = BALANCE.loan;
+  const hist = s.company?.history?.length ? s.company.history : s.history;
+  const recent = hist.slice(-L.capacityRecentDays);
+  const avg = recent.length > 0 ? recent.reduce((a, r) => a + r.operatingProfit, 0) / recent.length : 0;
+  return Math.max(L.minCapacity, Math.round(avg * L.capacityDays));
 }
 
-export function takeLoan(s: GameState, ctx: SimCtx): { ok: boolean; reason?: string } {
-  if (!loanAvailable(s)) return { ok: false, reason: s.loans.length > 0 ? '返済中の融資があります' : '評判が低く融資を受けられません' };
+export interface LoanLimit {
+  /** 今借りられる最大の額（5万円刻み。借りられなければ 0） */
+  max: number;
+  /** 借入の残りの合計 */
+  outstanding: number;
+  /** 返済能力 */
+  capacity: number;
+  /** 借入の残りの合計の上限（50万円と返済能力の小さいほう） */
+  cap: number;
+  /** 借りられない理由（借りられるなら null） */
+  reason: string | null;
+}
+
+/** 銀行の融資の上限（じろ2: 改修設計書04。オーナーの判断「額を選べる・返済能力で上限」） */
+export function loanLimit(s: GameState): LoanLimit {
   const L = BALANCE.loan;
-  const loan = { id: newId(s, 'loan'), principal: L.amount, remaining: L.amount, dailyRate: L.dailyRate, dailyPayment: Math.ceil(L.amount / L.days), takenDay: s.day };
+  const outstanding = s.loans.reduce((a, l) => a + l.remaining, 0);
+  const capacity = repaymentCapacity(s);
+  const cap = Math.min(L.maxTotal, capacity);
+  const room = Math.max(0, cap - outstanding);
+  let max = Math.floor(room / L.step) * L.step;
+  let reason: string | null = null;
+  if (s.bankruptcy) reason = '破産しています';
+  else if (s.creditBlocked) reason = s.creditBlocked;
+  else if (s.reputation < L.minReputation) reason = '評判が低く融資を受けられません';
+  else if (max < L.step) reason = `借入の上限です（残り ¥${outstanding.toLocaleString('ja-JP')}／上限 ¥${cap.toLocaleString('ja-JP')}）`;
+  if (reason) max = 0;
+  return { max, outstanding, capacity, cap, reason };
+}
+
+export function loanAvailable(s: GameState): boolean {
+  return loanLimit(s).reason === null;
+}
+
+/** 融資を受ける。amount を省くと 20万円（借りられる額が少なければその額） */
+export function takeLoan(s: GameState, ctx: SimCtx, amount?: number): { ok: boolean; reason?: string } {
+  const lim = loanLimit(s);
+  if (lim.reason) return { ok: false, reason: lim.reason };
+  const L = BALANCE.loan;
+  const amt = amount ?? Math.min(L.amount, lim.max);
+  if (!Number.isInteger(amt) || amt < L.step || amt % L.step !== 0) return { ok: false, reason: `融資は ¥${L.step.toLocaleString('ja-JP')} 刻みで選んでください` };
+  if (amt > lim.max) return { ok: false, reason: `今借りられるのは ¥${lim.max.toLocaleString('ja-JP')} までです（借入の残りの合計は ¥${lim.cap.toLocaleString('ja-JP')} まで）` };
+  const loan = { id: newId(s, 'loan'), principal: amt, remaining: amt, dailyRate: L.dailyRate, dailyPayment: Math.ceil(amt / L.days), takenDay: s.day };
   s.loans.push(loan);
-  cash(s, 'loan', L.amount, `緊急融資（日利${(L.dailyRate * 100).toFixed(1)}%・${L.days}日返済）`, `loan:${loan.id}`);
-  notify(s, ctx, 'loan', 'warn', `¥${L.amount.toLocaleString('ja-JP')}の融資を受けました。毎日¥${loan.dailyPayment.toLocaleString('ja-JP')}＋利息を返済します`);
+  cash(s, 'loan', amt, `融資（日利${(L.dailyRate * 100).toFixed(1)}%・${L.days}日返済）`, `loan:${loan.id}`);
+  notify(s, ctx, 'loan', 'warn', `¥${amt.toLocaleString('ja-JP')}の融資を受けました。毎日¥${loan.dailyPayment.toLocaleString('ja-JP')}＋利息を返済します`);
   updateFinanceWarnings(s, ctx);
   return { ok: true };
+}
+
+/** 期限を過ぎた未払金を払うための融資の額（5万円刻みで足りる額。上限まで） */
+export function rescueLoanAmount(s: GameState, overdue: number): number {
+  const L = BALANCE.loan;
+  const lim = loanLimit(s);
+  const need = Math.max(L.step, Math.ceil(Math.max(0, overdue - Math.max(0, s.money)) / L.step) * L.step);
+  return Math.min(lim.max, need);
 }
 
 /**

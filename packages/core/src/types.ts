@@ -703,7 +703,12 @@ export type TxnType =
   /** 出店（物件の初期費用） */
   | 'store'
   /** 広告費（共通市場の仕様書 4.3。オーナーの判断 14） */
-  | 'advertising';
+  | 'advertising'
+  /** 企業間の貸し借り（共通市場。サーバーだけが動かす。じろ2: 改修設計書04）: 借りた・貸した・返した・返してもらった */
+  | 'companyLoan'
+  | 'companyLend'
+  | 'companyRepay'
+  | 'companyCollect';
 
 export interface Txn {
   id: Id;
@@ -1187,6 +1192,13 @@ export interface GameState {
    * ひとりプレイ・共同経営では null（倍率なし）
    */
   marketDemand?: Record<string, number> | null;
+  /**
+   * 新しく借りられない理由（共通市場で企業間の借金を返さず債務不履行になった会社。サーバーが決める。じろ2: 改修設計書04）。
+   * ひとりプレイ・共同経営ではない
+   */
+  creditBlocked?: string | null;
+  /** 共通市場の企業間の貸し借りの残り（借りている額・貸している額。元本＋利息。サーバーが書く。企業価値と負債に入れる） */
+  companyCredit?: { owed: number; lent: number };
 }
 
 // ───────────────────────── 会社と店舗（Phase 2） ─────────────────────────

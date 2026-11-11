@@ -94,7 +94,7 @@ describe('共通市場のサーバー: 作る・参加する', () => {
     expect(v.body.companies.map((c) => c.kind)).toEqual(['player']);
     expect(v.body.settings).toMatchObject({ maxCompanies: 3, aiFill: false, entry: 'fresh' });
     expect(v.body.settings.endsAt).toBe(jstMidnight(addDays(jstDateKey(v.body.clock.serverNow), 30)));
-    for (const bad of [{ maxCompanies: 7 }, { maxCompanies: 1 }, { periodDays: 45 }, { entry: 'x' }, { aiFill: 'yes' }]) {
+    for (const bad of [{ maxCompanies: 26 }, { maxCompanies: 1 }, { periodDays: 45 }, { entry: 'x' }, { aiFill: 'yes' }]) {
       const r = await callJson('/api/v1/market/create', { token: a.token, body: { name: 'x', companyName: 'y', settings: bad } });
       expect(r.status, JSON.stringify(bad)).toBe(400);
     }

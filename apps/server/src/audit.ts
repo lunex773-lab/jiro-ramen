@@ -27,6 +27,7 @@ export type AuditKind =
   | 'market_join'
   /** 会社の引退（終わった市場・破産した会社） */
   | 'market_retire'
+  | 'market_credit'
   /** 市場を消した（作った人。ほかの人の会社も消える） */
   | 'market_delete'
   | 'market_settings'

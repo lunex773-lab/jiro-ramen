@@ -70,7 +70,7 @@ export type Action =
   | { type: 'expand' }
   | { type: 'setPrice'; menuId: string; price: number }
   | { type: 'pauseMenu'; menuId: string; paused: boolean }
-  | { type: 'takeLoan' }
+  | { type: 'takeLoan'; amount?: number }
   | { type: 'payArrears' }
   | { type: 'rename'; name: string }
   | { type: 'renameStore'; storeId: Id; name: string }
@@ -345,7 +345,7 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return { ok: true };
     }
     case 'takeLoan':
-      return takeLoan(s, ctx);
+      return takeLoan(s, ctx, a.amount);
     case 'payArrears': {
       const paid = payArrears(s, ctx);
       updateFinanceWarnings(s, ctx);

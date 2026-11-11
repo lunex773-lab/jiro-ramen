@@ -241,9 +241,12 @@ export const BALANCE = {
     highPowerPremium: 3,
   },
   market: {
-    /** コミュニティの企業の数の上限（プレイヤー＋AI）の既定と、作る人が選べる範囲（オーナーの判断: 2〜6社） */
-    maxCompanies: 6,
+    /**
+     * コミュニティの企業の数（プレイヤー＋AI）の、作る人が選べる範囲（改修設計書04: 最大25社。26社目は断る）と既定（前の上限の6社）
+     */
+    maxCompanies: 25,
     minCompanies: 2,
+    defaultCompanies: 6,
     /** 1人が持てる市場の企業の数（オーナーの判断: 5社まで。サーバーが数える） */
     maxCompaniesPerPlayer: 5,
     /** 0時に営業中の日を待つ長さ（オーナーの判断: 終わるまで待ち前の期間に数える。最大30分） */
@@ -254,6 +257,31 @@ export const BALANCE = {
     autoSimVersion: 1,
     /** 企業ごとに残す確定した日の記録（集計が済んだ分） */
     keepDayRecords: 60,
+    /**
+     * 企業間の貸し借り（じろ2: 改修設計書04。オーナーの判断「自動で返す形」2026-11-11）。
+     * 貸し手が借り手・金額・返す日数・利率（0 = 無利子）を決めて申し込み、借り手が承認するとサーバーでお金を動かす。
+     * 日数は市場の日付（全社がそろった日付）で数える。期限の日に借り手の現金から自動で返し、足りなければ延滞（利息に overdueRate を上乗せし、
+     * 毎日自動で回収）。期限から defaultAfterDays 日で債務不履行（新しく借りられない・評判が defaultReputation 下がる）
+     */
+    credit: {
+      minAmount: 10_000,
+      step: 10_000,
+      maxAmount: 5_000_000,
+      /** 日利の上限と刻み（0.1%刻み・1%まで） */
+      maxDailyRate: 0.01,
+      rateStep: 0.001,
+      minDays: 1,
+      maxDays: 60,
+      overdueRate: 0.002,
+      defaultAfterDays: 14,
+      defaultReputation: 0.3,
+      /** 申し込みの有効期間（返事がなければ取り消し） */
+      offerTtlMs: 72 * 3_600_000,
+      /** 1社が出しておける返事待ちの申し込みの数 */
+      maxOpenOffers: 5,
+      /** 残す契約の記録の数（終わった契約の古い順に捨てる） */
+      keep: 200,
+    },
     /**
      * 客の取り合いの強さ: 来客の倍率 = 自分の見込み ÷ (自分の見込み + strength × 同じ地域のほかの店の見込みの合計)。
      * 同じくらいの店が2つなら、それぞれ 1 ÷ 1.4 ≒ 0.71 倍（地域の客は全体では増える。ラーメンの激戦区）
@@ -319,9 +347,18 @@ export const BALANCE = {
   /** 資金注意の閾値（固定費の何日分） */
   cautionDaysOfFixedCost: 3,
 
-  /** 緊急融資 */
+  /**
+   * 銀行の融資（じろ2: 改修設計書04。オーナーの判断「額を選べる・返済能力で上限」2026-11-11）。
+   * 5万円刻みで額を選ぶ。借入の残りの合計は maxTotal まで、かつ返済能力（直近 capacityRecentDays 日の営業利益の平均 × capacityDays 日分。
+   * 最低 minCapacity）まで。利率・返済日数は前と同じ。amount は額を選ばないときの額（前の版の固定の額）
+   */
   loan: {
     amount: 200_000,
+    step: 50_000,
+    maxTotal: 500_000,
+    minCapacity: 200_000,
+    capacityDays: 30,
+    capacityRecentDays: 7,
     dailyRate: 0.004,
     days: 30,
     minReputation: 1.5,

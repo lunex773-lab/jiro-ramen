@@ -81,8 +81,8 @@ describe('共通市場: 作る・参加する', () => {
     expect(human.settings.maxCompanies).toBe(3);
   });
 
-  it('設定は範囲に収める（2〜6社・期間の終わりは JST の0時）', () => {
-    expect(mk(1, true, { maxCompanies: 99 }).settings.maxCompanies).toBe(6);
+  it('設定は範囲に収める（2〜25社・期間の終わりは JST の0時）', () => {
+    expect(mk(1, true, { maxCompanies: 99 }).settings.maxCompanies).toBe(25);
     expect(mk(1, true, { maxCompanies: 1 }).settings.maxCompanies).toBe(2);
     const s = mk(1, true, { periodDays: 30 }).settings;
     expect(s.endsAt).toBe(jstMidnight(addDays(P0, 30)));

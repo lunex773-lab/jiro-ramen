@@ -22,7 +22,7 @@ import { applyAction, type Action, type ActionResult } from './sim/actions';
 import { activeStore, companyPolicyOf, recordCompanyDay, storeReport, withStore } from './sim/company';
 import { withPlannedAds } from './sim/ads';
 import { expectedDailyArrivals, priceRatio } from './sim/customers';
-import { bankruptcyCheck, checkGoals, declareBankruptcy, loanAvailable, payArrears, startNextDay, takeLoan } from './sim/day';
+import { bankruptcyCheck, checkGoals, declareBankruptcy, loanAvailable, payArrears, rescueLoanAmount, startNextDay, takeLoan } from './sim/day';
 import { cash, finalProfit, totalDebt } from './sim/economy';
 import { refreshCandidates } from './sim/employees';
 import { employeeSatisfaction, enterpriseValue, storeQuality } from './sim/metrics';
@@ -32,6 +32,7 @@ import { planManagerDay, runManagerDay, standaloneArrivals } from './sim/manager
 import { makeCtx } from './sim/notices';
 import { cleanStoreName, openStoreProblem, runAbsentStores, storeStatus } from './sim/stores';
 import { locationLabel, locationProblem, MARKET_SCOPE_LABEL, MARKET_SCOPES } from './sim/location';
+import { creditOp, creditsFor, exitCredits, flushCredits, settleCredits, type CompanyCredit, type CreditOp, type CreditResult, type PendingCredit } from './credit';
 
 export const MARKET_SCHEMA = 2;
 
@@ -181,6 +182,8 @@ export interface SyncRun {
   autoDays: number;
   /** 待ちきれずに無効にした日の数 */
   expiredDays: number;
+  /** 今自動営業している日付の、企業ごとの客の取り合いの倍率（同じ日付を何回かに分けて計算するときに同じ値を使う） */
+  dayDemand?: { day: number; demand: Record<string, Record<string, number>> };
 }
 
 export interface MarketState {
@@ -202,6 +205,23 @@ export interface MarketState {
   decisions: MarketDecision[];
   /** 全社がそろった日付ごとの企業の行（同期のときに足す） */
   history: MarketDayReport[];
+  /** 企業間の貸し借りの契約（じろ2: 改修設計書04。古い市場にはない） */
+  credits?: CompanyCredit[];
+  creditSeq?: number;
+  /** 端末で営業中の会社に、営業が終わったら入れるお金 */
+  pendingCredits?: PendingCredit[];
+  /** 設定の変更の記録（新しいものが後ろ。最大50件。古い市場にはない） */
+  settingsLog?: SettingsChange[];
+}
+
+/** 市場の設定の変更の記録（いつ・誰が・何を） */
+export interface SettingsChange {
+  at: number;
+  /** 変えた人（作った人のプレイヤー id） */
+  by: string;
+  /** 変えたときの市場の日付 */
+  day: number;
+  changes: { key: string; from: string; to: string }[];
 }
 
 const B = () => BALANCE.market;
@@ -276,7 +296,7 @@ function addCompany(m: MarketState, kind: 'player' | 'ai', name: string, ownerId
 export const DEFAULT_SETTINGS = (now: number): CommunitySettings => ({
   description: '',
   visibility: 'invite',
-  maxCompanies: B().maxCompanies,
+  maxCompanies: B().defaultCompanies,
   periodDays: null,
   startsAt: now,
   endsAt: null,
@@ -412,9 +432,10 @@ export interface MarketSettingsPatch {
  * 上限を下げて会社が多すぎるときは、市場シェアがいちばん小さい AI 企業から撤退する。AI で埋める設定で空きがあれば、AI 企業が参加する
  * （次の営業日から）。AI で埋めるのをやめても、今いる AI 企業はそのまま
  */
-export function updateMarketSettings(m: MarketState, patch: MarketSettingsPatch): { ok: boolean; reason?: string; changed: string[] } {
+export function updateMarketSettings(m: MarketState, patch: MarketSettingsPatch, meta?: { by: string; now: number }): { ok: boolean; reason?: string; changed: string[] } {
   const changed: string[] = [];
   const st = m.settings;
+  const before = settingsText(m);
   if (patch.name !== undefined) {
     const name = String(patch.name).replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 24);
     if (name.length === 0) return { ok: false, reason: '市場の名前を入れてください', changed };
@@ -473,7 +494,35 @@ export function updateMarketSettings(m: MarketState, patch: MarketSettingsPatch)
       log(m, c.id, `${c.name}が市場に参加しました（${c.joinedDay}日目から）`);
     }
   }
+  // 変更の記録（いつ・誰が・何を。じろ2: 改修設計書04）
+  if (changed.length > 0 && meta) {
+    const after = settingsText(m);
+    const changes = changed.map((key) => ({ key, from: before[key] ?? '', to: after[key] ?? '' }));
+    (m.settingsLog ??= []).push({ at: meta.now, by: meta.by, day: m.commonMarketDate, changes });
+    if (m.settingsLog.length > 50) m.settingsLog.splice(0, m.settingsLog.length - 50);
+  }
   return { ok: true, changed };
+}
+
+/** 設定の項目の名前（変更の確認・記録に出す） */
+export const SETTINGS_LABEL: Record<string, string> = {
+  name: '市場の名前',
+  description: '説明',
+  visibility: '公開',
+  aiFill: '空いた枠を AI 企業で埋める',
+  maxCompanies: '会社の数の上限',
+};
+
+/** 設定の今の値（記録用の文字） */
+export function settingsText(m: Pick<MarketState, 'name' | 'settings'>): Record<string, string> {
+  const st = m.settings;
+  return {
+    name: m.name,
+    description: st.description || '（なし）',
+    visibility: st.visibility === 'public' ? '公開' : '招待コードだけ',
+    aiFill: st.aiFill ? '埋める' : '埋めない',
+    maxCompanies: `${st.maxCompanies}社`,
+  };
 }
 
 function log(m: MarketState, companyId: Id, text: string, day?: number): void {
@@ -786,6 +835,8 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
   if (!o || o.token !== token) return { ok: false, code: 'no_open_day', reason: '始めていない日です。もう一度日を始めてください' };
   const done = (r: CommitResult): CommitResult => {
     c.lastCommit = { ...r, token };
+    // 営業が終わった: 営業中に待っていたお金（企業間の返済など）を入れる
+    if (!c.openDay) flushCredits(m, c, now);
     return r;
   };
   if (now > closeDeadline(o.periodId)) {
@@ -803,9 +854,16 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
   const valueStart = enterpriseValue(c.state);
   // 出店の範囲は市場のサーバーが決める（端末から届いた値は使わない）
   const range = c.state.company.marketRange;
+  // サーバーが決める値（企業間の貸し借りの残り・債務不履行）は端末から届いた値を使わない
+  const blocked = c.state.creditBlocked;
+  const book = c.state.companyCredit;
   c.state = sanitize(next, o.demand);
   if (range) c.state.company.marketRange = range;
   else delete c.state.company.marketRange;
+  if (blocked) c.state.creditBlocked = blocked;
+  else delete c.state.creditBlocked;
+  if (book) c.state.companyCredit = book;
+  else delete c.state.companyCredit;
   // 端末の経営メニューで屋号を変えていれば、市場の会社の名前も合わせる
   c.name = cleanStoreName(c.state.shopName) || c.name;
   c.state.shopName = c.name;
@@ -816,6 +874,7 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
     c.status = 'bankrupt';
     c.bankruptDay = o.gameDate;
     log(m, c.id, `${c.name}は資金が尽きて破産し、市場から消えました`, o.gameDate);
+    exitCredits(m, c, now, '破産した');
     return done({ ok: true, gameDate: o.gameDate, stateVersion: c.progress.stateVersion, bankrupt: true, flags: v.flags });
   }
   c.progress.lastProcessedGameDate = o.gameDate;
@@ -899,7 +958,7 @@ export function autoPlayDay(s: GameState, day: number, demand: Record<string, nu
   let bc = bankruptcyCheck(s);
   let loan = false;
   if (bc.overdue > 0 && opts.allowLoan && loanAvailable(s)) {
-    takeLoan(s, ctx);
+    takeLoan(s, ctx, rescueLoanAmount(s, bc.overdue));
     payArrears(s, ctx);
     bc = bankruptcyCheck(s);
     loan = true;
@@ -919,10 +978,21 @@ export function autoPlayDay(s: GameState, day: number, demand: Record<string, nu
 }
 
 /** 自動営業で、日付 day を、group の企業について全社そろえて進める */
-function autoPlayDate(m: MarketState, day: number, group: MarketCompany[], periodId: DateKey): void {
-  for (const c of group) recordLedger(m, c, day, false);
-  const demands = new Map(group.map((c) => [c.id, demandFor(m, c, day)]));
-  for (const c of group) {
+/**
+ * 同じ日付の遅れた企業を自動営業する（limit 社まで。残りは次の呼び出しで）。客の取り合いの倍率は、その日付の最初の呼び出しで
+ * 全社分を計算して同期の状態に置き、続きの呼び出しでも同じ値を使う（一度に計算したときと同じ結果）。営業した社数を返す
+ */
+function autoPlayDate(m: MarketState, day: number, group: MarketCompany[], periodId: DateKey, limit = Infinity): number {
+  const run = m.sync;
+  let demand = run?.dayDemand && run.dayDemand.day === day ? run.dayDemand.demand : null;
+  if (!demand) {
+    for (const c of group) recordLedger(m, c, day, false);
+    demand = Object.fromEntries(group.map((c) => [c.id, demandFor(m, c, day)]));
+    if (run) run.dayDemand = { day, demand };
+  }
+  const demands = new Map(group.map((c) => [c.id, demand[c.id] ?? demandFor(m, c, day)]));
+  const todo = group.slice(0, Math.max(1, limit));
+  for (const c of todo) {
     // 借入は、AI 企業はいつでも、プレイヤー企業は方針で許可したときだけ（仕様書 4.3: 重大な借入は許可されない限り自動でしない）
     const pol = companyPolicyOf(c.state);
     // 閉店後の判断: AI 企業の判断、プレイヤー企業は方針で許可していれば本店の拡張（AI 企業と同じ条件）
@@ -944,6 +1014,7 @@ function autoPlayDate(m: MarketState, day: number, group: MarketCompany[], perio
     c.days.push(dayRecord(c.state, day, periodId, 'auto', null, valueStart));
     refreshMarketRange(m, c, day);
   }
+  return todo.length;
 }
 
 // ───────────────────────── 0時の同期（仕様書 3.4） ─────────────────────────
@@ -1006,9 +1077,10 @@ export function runSync(m: MarketState, now: number, budget: number = B().syncBu
       if (lag.length === 0) break;
       const day = Math.min(...lag.map((c) => c.progress.lastProcessedGameDate)) + 1;
       const group = lag.filter((c) => c.progress.lastProcessedGameDate === day - 1);
-      autoPlayDate(m, day, group, periodId);
-      used += group.length;
-      run.autoDays += group.length;
+      // 1回の呼び出しで budget 社・日まで（25社の市場でも1回の CPU 時間が増えないように、同じ日付の会社も分ける）
+      const n = autoPlayDate(m, day, group, periodId, budget - used);
+      used += n;
+      run.autoDays += n;
       if (used >= budget) return { status: 'more', periodId };
     }
     const from = m.commonMarketDate + 1;
@@ -1016,6 +1088,9 @@ export function runSync(m: MarketState, now: number, budget: number = B().syncBu
     for (let d = from; d <= m.commonMarketDate; d++) m.history.push(marketDayLine(m, d));
     if (m.history.length > 60) m.history.splice(0, m.history.length - 60);
     for (const key of Object.keys(m.ledger)) if (Number(key) <= m.commonMarketDate) delete m.ledger[key];
+    // 企業間の貸し借り: 利息・期限の日の自動の返済・延滞・不履行（全社がそろい、端末で営業中の会社はない）
+    settleCredits(m, now, isEnded(m, now));
+    delete run.dayDemand;
     run.status = 'ranking';
   }
   return { status: 'ranking', periodId };
@@ -1251,14 +1326,21 @@ export function importCompany(m: MarketState, ownerId: string, exp: ExportedComp
   return { ok: true, company: c };
 }
 
-/** 会社を引退させる（終わった市場・破産した会社。記録は残す。1人が持てる会社の数から外れる） */
+/**
+ * 会社を引退させる（記録と順位は残る。1人が持てる会社の数から外れる）。じろ2（改修設計書04。オーナーの判断「引退として抜ける」）:
+ * 競争中でも自分から抜けられる。店は市場から消え、同じ会社では戻れない（新しい会社なら入り直せる）。
+ * 企業間の借金は現金から返せるだけ返し、残りは貸し手の損。返事待ちの申し込みは取り消す
+ */
 export function retireCompany(m: MarketState, ownerId: string, now: number): { ok: boolean; reason?: string } {
   const c = m.companies.find((x) => x.kind === 'player' && x.ownerId === ownerId && (x.status === 'active' || x.status === 'bankrupt'));
   if (!c) return { ok: false, reason: 'この市場に会社がありません' };
-  if (c.status === 'active' && !isEnded(m, now)) return { ok: false, reason: '競争期間中は引退できません（終わってから、または破産したとき）' };
-  if (c.openDay) return { ok: false, reason: '端末で営業中です' };
+  if (c.openDay) return { ok: false, reason: '端末で営業中です。営業を終えてから抜けてください' };
+  if (c.status === 'active' && syncPending(m, now)) return { ok: false, reason: '0時の計算中です。終わるまでお待ちください' };
+  const wasActive = c.status === 'active';
   c.status = 'retired';
-  log(m, c.id, `${c.name}は引退しました（記録は残ります）`);
+  if (wasActive) c.bankruptDay = c.progress.lastProcessedGameDate;
+  exitCredits(m, c, now, wasActive ? '市場を抜けた' : '破産した');
+  log(m, c.id, wasActive && !isEnded(m, now) ? `${c.name}は市場を抜けて引退しました（記録と順位は残ります。店は市場から消えました）` : `${c.name}は引退しました（記録は残ります）`);
   return { ok: true };
 }
 
@@ -1386,6 +1468,13 @@ export function marketAction(m: MarketState, ownerId: string, a: Action, now = 0
     log(m, c.id, `${areaName(a.propertyId)}に出店しました（${st.name}）`);
   }
   return r;
+}
+
+/** 企業間の貸し借りの操作（申し込む・承認する・断る・取り消す・前倒しで返す）。サーバーだけが呼ぶ */
+export function marketCredit(m: MarketState, ownerId: string, op: CreditOp, now: number): CreditResult {
+  const me = playerCompany(m, ownerId);
+  if (!me) return { ok: false, reason: 'この市場に参加していません' };
+  return creditOp(m, { me, now, syncing: syncPending(m, now), ended: isEnded(m, now) }, op);
 }
 
 // ───────────────────────── AI 企業 ─────────────────────────
@@ -1559,6 +1648,8 @@ export interface MarketCompanyView {
   /** 端末で営業中 */
   playing: boolean;
   synchronizationStatus: SynchronizationStatus;
+  /** 企業間の借金で債務不履行になっている（新しく貸せない） */
+  defaulted?: boolean;
 }
 
 /** プレイヤー1人に見せる市場（自分の企業だけ中身ごと） */
@@ -1575,7 +1666,19 @@ export interface MarketView {
   decisions: MarketDecision[];
   history: MarketDayReport[];
   /** 自分の企業（参加していなければ null） */
-  mine: { companyId: Id; state: GameState; progress: CompanyProgress; openDay: OpenDay | null; lastCommit: CommitResult | null; days: CompanyDayRecord[]; range?: ReturnType<typeof marketRangeChecks> } | null;
+  mine: {
+    companyId: Id;
+    state: GameState;
+    progress: CompanyProgress;
+    openDay: OpenDay | null;
+    lastCommit: CommitResult | null;
+    days: CompanyDayRecord[];
+    range?: ReturnType<typeof marketRangeChecks>;
+    /** 自分が貸し手・借り手の企業間の契約（新しい順） */
+    credits?: CompanyCredit[];
+  } | null;
+  /** 設定の変更の記録（新しい順） */
+  settingsLog?: SettingsChange[];
   /** 出店先の地域ごとの空いている物件の数（市場の街） */
   freeSlots: Record<string, number>;
   /** 全社の店の場所と物件（市区町村ごとの空きを数える。じろ1 Q11） */
@@ -1621,6 +1724,7 @@ export function marketView(m: MarketState, ownerId: string | null, now?: number)
         manualDays: c.progress.manualProgressDays,
         playing: c.openDay !== null,
         synchronizationStatus: c.progress.synchronizationStatus,
+        defaulted: !!c.state.creditBlocked,
       };
     });
   companies.sort((a, b) => Number(a.bankrupt) - Number(b.bankrupt) || b.share - a.share);
@@ -1638,8 +1742,18 @@ export function marketView(m: MarketState, ownerId: string | null, now?: number)
     decisions: m.decisions.slice(-60),
     history: m.history.slice(-30),
     mine: me
-      ? { companyId: me.id, state: me.state, progress: me.progress, openDay: me.openDay, lastCommit: me.lastCommit ? (({ token: _t, ...r }) => r)(me.lastCommit) : null, days: me.days.slice(-30), range: marketRangeChecks(m, me) }
+      ? {
+          companyId: me.id,
+          state: me.state,
+          progress: me.progress,
+          openDay: me.openDay,
+          lastCommit: me.lastCommit ? (({ token: _t, ...r }) => r)(me.lastCommit) : null,
+          days: me.days.slice(-30),
+          range: marketRangeChecks(m, me),
+          credits: creditsFor(m, me.id),
+        }
       : null,
+    settingsLog: (m.settingsLog ?? []).slice().reverse(),
     freeSlots: free,
     sites: live.flatMap((c) => c.state.company.stores.filter((x) => x.propertyId !== 'home').map((x) => ({ location: storeLocationIn(m, x), propertyId: x.propertyId }))),
     myStatus: me?.status ?? (ownerId ? ([...m.companies].reverse().find((c) => c.kind === 'player' && c.ownerId === ownerId)?.status ?? null) : null),

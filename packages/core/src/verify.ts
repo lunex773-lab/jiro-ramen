@@ -16,6 +16,7 @@ import { storeReport } from './sim/company';
 import { adFactor } from './sim/ads';
 import { expectedDailyArrivals, priceDemandFactor } from './sim/customers';
 import { finalProfit, netSales, operatingProfit } from './sim/economy';
+import { repaymentCapacity } from './sim/day';
 import type { DayReport, Employee, GameState, StoreEntry, Txn } from './types';
 
 const V = () => BALANCE.market.verify;
@@ -128,6 +129,19 @@ export function verifyCommit(prev: GameState, next: GameState, ticket: VerifyTic
   for (const l of next.loans) {
     const p = prev.loans.find((x) => x.id === l.id);
     if (p && l.remaining > p.remaining) reject.push('融資の残りが増えている');
+  }
+  // 新しい融資は銀行の決まりのとおり（5万円刻み・同じ利率と日数・借入の残りの合計は上限まで。債務不履行の会社は借りられない）
+  if (newLoans.length > 0) {
+    const L = BALANCE.loan;
+    if (prev.creditBlocked) reject.push('債務不履行の会社が融資を受けている');
+    for (const l of newLoans) {
+      if (!Number.isInteger(l.principal) || l.principal < L.step || l.principal % L.step !== 0) reject.push('融資の額が刻みに合わない');
+      if (l.dailyRate !== L.dailyRate || l.dailyPayment !== Math.ceil(l.principal / L.days)) reject.push('融資の条件が銀行の決まりと違う');
+    }
+    const total = next.loans.reduce((a, l) => a + l.remaining, 0);
+    // 返済能力はその日の日報で変わるので、前と後の大きいほうまで許す
+    const cap = Math.min(L.maxTotal, Math.max(repaymentCapacity(prev), repaymentCapacity(next)));
+    if (total > cap) reject.push(`融資の残りの合計が上限（¥${cap}）を超えている`);
   }
   // 未払金は増えてよい（払えなかった分）が、消えるなら支払いの取引がある
   const prevAr = prev.arrears.reduce((a, x) => a + x.amount, 0);

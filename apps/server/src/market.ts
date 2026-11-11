@@ -21,6 +21,7 @@ import {
   joinMarket,
   jstDateKey,
   marketAction,
+  marketCredit,
   marketView,
   migrateMarket,
   MARKET_SCHEMA,
@@ -37,6 +38,7 @@ import {
   type Action,
   type ActionResult,
   type CommunitySettings,
+  type CreditOp,
   type ExportedCompany,
   type MarketSettingsPatch,
   type GameState,
@@ -429,8 +431,11 @@ export class MarketRoom extends DurableObject<Env> {
     }
     if (url.pathname === '/internal/retire' && req.method === 'POST') {
       const before = m.companies.find((x) => x.kind === 'player' && x.ownerId === playerId && (x.status === 'active' || x.status === 'bankrupt'));
+      if (this.syncBusy) return json({ error: 'market_syncing', message: '0時の計算中です。少しあとでもう一度お試しください' }, 409);
       const r = retireCompany(m, playerId, now);
       if (!r.ok) return json({ error: 'retire_refused', message: r.reason ?? '引退できません' }, 409);
+      // 企業間の借金を返した相手の会社の状態も変わる
+      this.markAll();
       this.save();
       return json({ ok: true, companyId: before?.id ?? null });
     }
@@ -439,7 +444,7 @@ export class MarketRoom extends DurableObject<Env> {
       if (this.syncBusy) return json({ error: 'market_syncing', message: '0時の計算中です。少しあとでもう一度お試しください' }, 409);
       const body = safeJsonParse(await req.text());
       if (!isObj(body)) return json({ error: 'bad_request', message: '形式が不正です' }, 400);
-      const r = updateMarketSettings(m, body as MarketSettingsPatch);
+      const r = updateMarketSettings(m, body as MarketSettingsPatch, { by: playerId, now });
       if (!r.ok) return json({ error: 'settings_refused', message: r.reason ?? '変えられません' }, 409);
       this.markAll();
       this.save();
@@ -461,6 +466,23 @@ export class MarketRoom extends DurableObject<Env> {
       if (c) this.dirtyCompanies.add(c.id);
       this.save();
       return json(r);
+    }
+    // 企業間の貸し借り（申し込む・承認する・断る・取り消す・前倒しで返す）。同じ操作の ID は一度だけ
+    if (url.pathname === '/internal/credit' && req.method === 'POST') {
+      if (this.syncBusy) return json({ error: 'market_syncing', message: '0時の計算中です。少しあとでもう一度お試しください' }, 409);
+      const body = (await req.json()) as { cid?: unknown; op?: unknown };
+      if (typeof body.cid !== 'string' || !isObj(body.op)) return json({ error: 'bad_request', message: '形式が不正です' }, 400);
+      const cache = this.cids.get(playerId) ?? new RidCache(100);
+      const prev = cache.get(body.cid);
+      if (prev) return json({ ...prev, duplicate: true });
+      const r = marketCredit(m, playerId, body.op as unknown as CreditOp, now);
+      const out = r.ok ? { ok: true, creditId: r.credit.id, status: r.credit.status } : { ok: false, reason: r.reason };
+      cache.set(body.cid, out as ActionResult);
+      this.cids.set(playerId, cache);
+      // 貸し手・借り手の両方の会社の状態が変わる
+      this.markAll();
+      this.save();
+      return json(out);
     }
     if (url.pathname === '/internal/day/start' && req.method === 'POST') {
       const body = (await req.json()) as { token?: unknown; baseVersion?: unknown };

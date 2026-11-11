@@ -159,7 +159,8 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   expand: {},
   setPrice: { menuId: isId, price: isNum },
   pauseMenu: { menuId: isId, paused: isBool },
-  takeLoan: {},
+  // 銀行の融資（額は5万円刻みで50万円まで。中身は core の takeLoan で確かめる）
+  takeLoan: { amount: (v: unknown) => v === undefined || isIntIn(1, 500_000)(v) },
   payArrears: {},
   rename: { name: isStr(40) },
   renameStore: { storeId: isId, name: isStr(40) },

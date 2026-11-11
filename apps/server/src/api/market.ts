@@ -1,6 +1,6 @@
 // 共通市場（コミュニティ）の作成・参加・表示・操作・日の始めと確定（docs/MARKET_RANKING_PLAN.md）。
 // 市場の中身は Durable Object（MarketRoom）が持ち、D1 には招待コード・参加・企業の記録・期間の集計を置く。
-// オーナーの判断: 招待コードで友達と入る。AI で埋めるかは作る人が決める（2〜6社）。1人が持てる市場の企業は5社まで。
+// オーナーの判断: 招待コードで友達と入る。AI で埋めるかは作る人が決める（2〜25社。じろ2）。1人が持てる市場の企業は5社まで。
 // 手動の営業は端末で処理し、1日ごとにサーバーへ送る（Worker は本文を解釈せずに Durable Object へ渡す。CPU を使わない）。
 
 import { BALANCE, locationInfo, locationLabel, locationProblem } from '@jiro/core';
@@ -211,7 +211,6 @@ export async function joinMarketApi(req: Request, env: Env, ctx: ExecutionContex
   const m = await findMarket(env, body);
   const now = Date.now();
   if (m.ends_at !== null && now >= m.ends_at) throw new HttpError(409, 'market_ended', 'この市場の競争期間は終わっています');
-  const already = await env.DB.prepare('SELECT 1 AS ok FROM market_members WHERE market_id = ? AND player_id = ?').bind(m.id, player.id).first();
   const bring = isObj(body.bring) ? body.bring : null;
   let b: Record<string, unknown>;
   let companyName: string;
@@ -241,7 +240,9 @@ export async function joinMarketApi(req: Request, env: Env, ctx: ExecutionContex
   } else {
     companyName = cleanName(body.companyName) ?? '';
     if (!companyName) throw new HttpError(400, 'invalid_name', '会社（店）の名前は1〜20文字で入力してください');
-    if (!already) await requireCompanySlot(env, player.id);
+    // この市場に営業している会社がなければ、新しい会社を作る（引退したあとに入り直すときも）。1人5社の数を確かめる
+    const activeHere = await env.DB.prepare("SELECT 1 AS ok FROM market_companies WHERE market_id = ? AND player_id = ? AND status NOT IN ('retired', 'moved')").bind(m.id, player.id).first();
+    if (!activeHere) await requireCompanySlot(env, player.id);
     b = await readBody(
       await stub(env, m.id).fetch('https://market/internal/join', {
         method: 'POST',
@@ -301,7 +302,7 @@ export async function publicCommunitiesApi(env: Env): Promise<Response> {
   });
 }
 
-/** POST /api/v1/market/:id/retire → 会社を引退させる（終わった市場・破産した会社。1人5社の数から外れる） */
+/** POST /api/v1/market/:id/retire → 会社を引退させる（競争中でも抜けられる。じろ2。記録は残り、1人5社の数から外れる） */
 export async function retireCompanyApi(env: Env, ctx: ExecutionContext, player: AuthedPlayer, marketId: string): Promise<Response> {
   if (!isUuid(marketId)) throw new HttpError(404, 'market_not_found', '市場が見つかりません');
   await requireMember(env, marketId, player.id);
@@ -453,6 +454,51 @@ export async function actMarketApi(req: Request, env: Env, player: AuthedPlayer,
       body: JSON.stringify({ cid: body.cid, action }),
     }),
   );
+}
+
+/**
+ * POST /api/v1/market/:id/credit {cid, op} → 企業間の貸し借り（じろ2: 改修設計書04）。
+ * op: {op:'offer', borrowerId, amount, days, dailyRate} | {op:'accept'|'decline'|'cancel'|'repay', creditId}。
+ * 形だけここで確かめ、中身（金額の刻み・お金・相手・状態）は Durable Object の core が確かめる。cid が同じなら二度実行しない
+ */
+export async function creditMarketApi(req: Request, env: Env, ctx: ExecutionContext, player: AuthedPlayer, marketId: string): Promise<Response> {
+  if (!isUuid(marketId)) throw new HttpError(404, 'market_not_found', '市場が見つかりません');
+  const body = await readJson(req, MARKET_BODY_LIMIT);
+  if (!isObj(body) || typeof body.cid !== 'string' || !/^[A-Za-z0-9_.:-]{1,64}$/.test(body.cid)) throw new HttpError(400, 'bad_request', '操作の ID が不正です');
+  const op = parseCreditOp(body.op);
+  if (!op) throw new HttpError(400, 'bad_credit', '貸し借りの操作の形式が不正です');
+  await requireMember(env, marketId, player.id);
+  const r = await readBody(
+    await stub(env, marketId).fetch('https://market/internal/credit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...identity(player) },
+      body: JSON.stringify({ cid: body.cid, op }),
+    }),
+  );
+  if (r.ok === true && r.duplicate !== true) ctx.waitUntil(audit(env.DB, { kind: 'market_credit', playerId: player.id, detail: { marketId, op: op.op, creditId: r.creditId ?? null, status: r.status ?? null } }));
+  return json(r);
+}
+
+const CREDIT_ID_RE = /^cr\d{1,9}$/;
+const COMPANY_ID_RE = /^c\d{1,4}$/;
+
+/** 貸し借りの操作の形（知っているキーだけ） */
+export function parseCreditOp(v: unknown): Record<string, unknown> | null {
+  if (!isObj(v) || typeof v.op !== 'string') return null;
+  if (v.op === 'offer') {
+    const { borrowerId, amount, days, dailyRate } = v;
+    if (Object.keys(v).length !== 5) return null;
+    if (typeof borrowerId !== 'string' || !COMPANY_ID_RE.test(borrowerId)) return null;
+    if (typeof amount !== 'number' || !Number.isInteger(amount) || amount <= 0 || amount > 1e9) return null;
+    if (typeof days !== 'number' || !Number.isInteger(days) || days <= 0 || days > 1000) return null;
+    if (typeof dailyRate !== 'number' || !Number.isFinite(dailyRate) || dailyRate < 0 || dailyRate > 1) return null;
+    return { op: 'offer', borrowerId, amount, days, dailyRate };
+  }
+  if (v.op === 'accept' || v.op === 'decline' || v.op === 'cancel' || v.op === 'repay') {
+    if (Object.keys(v).length !== 2 || typeof v.creditId !== 'string' || !CREDIT_ID_RE.test(v.creditId)) return null;
+    return { op: v.op, creditId: v.creditId };
+  }
+  return null;
 }
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;

@@ -148,11 +148,29 @@ describe('育てた会社を別のコミュニティへ（判断 15・16）', ()
 });
 
 describe('引退と終わったあとの営業（判断 16）', () => {
-  it('競争期間中は引退できない。終わったら引退でき、1人5社の数から外れる。終わったあとも営業でき、同期はしない', async () => {
+  it('競争期間中でも自分から抜けられる（じろ2: 引退として抜ける）。記録は残り、新しい会社なら入り直せる', async () => {
+    const a = await newPlayer('途中で抜ける人');
+    const m = await create(a, '途中の店', { periodDays: 30 });
+    await playDay(a, m.marketId);
+    const r = await callJson(`/api/v1/market/${m.marketId}/retire`, { token: a.token, body: {} });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const row = await env.DB.prepare('SELECT status FROM market_companies WHERE market_id = ? AND player_id = ?').bind(m.marketId, a.playerId).first<{ status: string }>();
+    expect(row!.status).toBe('retired');
+    const v = await callJson<View & { myStatus: string; joined: boolean; companies: { name: string; status: string }[] }>(`/api/v1/market/${m.marketId}`, { token: a.token });
+    expect(v.body.joined).toBe(false);
+    expect(v.body.myStatus).toBe('retired');
+    expect(v.body.companies.find((c) => c.name === '途中の店')!.status).toBe('retired');
+    // 同じ会社では戻れない。新しい会社なら入り直せる
+    const j = await callJson<{ companyId: string }>('/api/v1/market/join', { token: a.token, body: { code: m.code, companyName: '出直しの店' } });
+    expect(j.status, JSON.stringify(j.body)).toBe(200);
+    const v2 = await callJson<View & { joined: boolean; mine: { state: { shopName: string } } }>(`/api/v1/market/${m.marketId}`, { token: a.token });
+    expect(v2.body.joined).toBe(true);
+    expect(v2.body.mine.state.shopName).toBe('出直しの店');
+  });
+
+  it('終わったら引退でき、1人5社の数から外れる。終わったあとも営業でき、同期はしない', async () => {
     const a = await newPlayer('引退する人');
     const m = await create(a, '最後の店', { periodDays: 30 });
-    const early = await callJson(`/api/v1/market/${m.marketId}/retire`, { token: a.token, body: {} });
-    expect(early.status).toBe(409);
     await setClock(m.marketId, 31, 9);
     // 終わったあとも営業できる（その日の期間は同期しない）
     await playDay(a, m.marketId);
@@ -306,6 +324,12 @@ describe('市場の設定をあとから変える（作った人だけ。オー�
     expect(down.status).toBe(200);
     const v2 = await view(a, m.marketId);
     expect((v2.body as { companies: { kind: string; status: string }[] }).companies.filter((c) => c.kind === 'ai' && c.status === 'active').length).toBe(1);
+    // 変更の記録（いつ・誰が・何を。じろ2）。入った人にも見える（新しい順）
+    const log = (await view(b, m.marketId)).body as unknown as { settingsLog: { by: string; at: number; changes: { key: string; from: string; to: string }[] }[] };
+    expect(log.settingsLog).toHaveLength(2);
+    expect(log.settingsLog[0]!.by).toBe(a.playerId);
+    expect(log.settingsLog[0]!.changes).toEqual([{ key: 'maxCompanies', from: '5社', to: '3社' }]);
+    expect(log.settingsLog[1]!.changes.map((c) => c.key).sort()).toEqual(['aiFill', 'description', 'maxCompanies', 'name', 'visibility']);
   });
 });
 

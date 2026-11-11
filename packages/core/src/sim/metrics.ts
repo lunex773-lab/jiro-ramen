@@ -48,13 +48,14 @@ export function storeQuality(s: GameState): number {
 
 /** 企業価値（純資産。円） */
 export function enterpriseValue(s: GameState): number {
-  let assets = s.money;
+  // 企業間の貸し借り（共通市場）: 貸しているお金は資産、借りているお金は負債
+  let assets = s.money + (s.companyCredit?.lent ?? 0);
   for (const entry of s.company.stores) {
     const p = partsOf(s, entry);
     for (const e of p.equipment) assets += resaleValue(e);
     for (const l of p.inventory) assets += l.qty * l.unitCost;
     for (const d of p.deliveries) assets += d.qty * d.unitCost;
   }
-  const debt = s.loans.reduce((a, l) => a + l.remaining, 0) + s.arrears.reduce((a, x) => a + x.amount, 0);
+  const debt = s.loans.reduce((a, l) => a + l.remaining, 0) + s.arrears.reduce((a, x) => a + x.amount, 0) + (s.companyCredit?.owed ?? 0);
   return Math.round(assets - debt);
 }

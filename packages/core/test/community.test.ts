@@ -129,11 +129,21 @@ describe('育てた会社で別の市場へ（判断 15）', () => {
     expect(playerCompany(a, 'u1')!.status).toBe('active');
   });
 
-  it('引退: 競争期間中はできない。終わったあと・破産したあとはできる（記録は残る）', () => {
+  it('引退: 競争期間中も自分から抜けられる（じろ2: オーナーの判断「引退として抜ける」）。終わったあと・破産したあともできる（記録は残る）', () => {
     const a = grown(1);
-    expect(retireCompany(a, 'u1', T0).ok).toBe(false);
     expect(retireCompany(a, 'u1', a.settings.endsAt! + 1).ok).toBe(true);
     expect(a.companies.find((c) => c.ownerId === 'u1')!.status).toBe('retired');
+    const d = grown(1);
+    const before = playerCompany(d, 'u1')!;
+    const days = before.days.length;
+    expect(retireCompany(d, 'u1', T0).ok).toBe(true);
+    expect(before.status).toBe('retired');
+    // 記録は残る。店は市場から消える（営業している会社に入らない）。同じ会社では戻れず、新しい会社なら入り直せる
+    expect(before.days.length).toBe(days);
+    expect(playerCompany(d, 'u1')).toBeNull();
+    const again = joinMarket(d, 'u1', '二代目', T0);
+    expect(again.ok).toBe(true);
+    expect(again.company!.id).not.toBe(before.id);
     const b = createMarket({ id: 'C', name: 'C', seed: 5, now: T0, creator: { ownerId: 'u4', companyName: 'c' } });
     playerCompany(b, 'u4')!.status = 'bankrupt';
     expect(retireCompany(b, 'u4', T0).ok).toBe(true);

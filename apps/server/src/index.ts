@@ -7,7 +7,7 @@ import { connectRoom, createSession, joinSession, leaveSession } from './api/ses
 import { rankingsApi, rewardsApi } from './api/ranking';
 import { grantEndedCommunities, grantGlobalRewards } from './rank-store';
 import { jstDateKey } from '@jiro/core';
-import { actMarketApi, commitDayApi, createMarketApi, deleteMarketApi, joinMarketApi, listMarketsApi, publicCommunitiesApi, retireCompanyApi, startDayApi, updateMarketSettingsApi, viewMarketApi } from './api/market';
+import { actMarketApi, commitDayApi, createMarketApi, creditMarketApi, deleteMarketApi, joinMarketApi, listMarketsApi, publicCommunitiesApi, retireCompanyApi, startDayApi, updateMarketSettingsApi, viewMarketApi } from './api/market';
 import { requirePlayer } from './auth';
 import type { Env } from './env';
 import { allowedOrigins, corsHeaders, errorResponse, HttpError, withCors } from './http';
@@ -56,6 +56,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const marketDay = /^\/api\/v1\/market\/([^/]+)\/day\/(start|commit)$/.exec(path);
   const marketRetire = /^\/api\/v1\/market\/([^/]+)\/retire$/.exec(path);
   const marketSettings = /^\/api\/v1\/market\/([^/]+)\/settings$/.exec(path);
+  const marketCredit = /^\/api\/v1\/market\/([^/]+)\/credit$/.exec(path);
   const rankingPath = path === '/api/v1/rankings' || path === '/api/v1/rewards';
   const known =
     path === '/api/v1/profile' ||
@@ -71,6 +72,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     marketDay !== null ||
     marketRetire !== null ||
     marketSettings !== null ||
+    marketCredit !== null ||
     rankingPath;
   if (!known) throw new HttpError(404, 'not_found', 'API が見つかりません');
 
@@ -106,6 +108,10 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (marketRetire && m === 'POST') {
     limit(HTTP_LIMITS.session, player.id);
     return retireCompanyApi(env, ctx, player, decodeURIComponent(marketRetire[1]!));
+  }
+  if (marketCredit && m === 'POST') {
+    limit(HTTP_LIMITS.session, player.id);
+    return creditMarketApi(req, env, ctx, player, decodeURIComponent(marketCredit[1]!));
   }
   if (marketSettings && m === 'POST') {
     limit(HTTP_LIMITS.session, player.id);
