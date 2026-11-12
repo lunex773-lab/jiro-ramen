@@ -490,15 +490,33 @@ export class MarketScreen {
     }
   }
 
-  private async act(a: Action, okMsg?: string): Promise<void> {
+  /** 送っている最中の操作（同じ操作を二重に送らない。じろ6） */
+  private inFlight = new Set<string>();
+
+  /** 同じ操作を続けて押しても1回だけ送る。送っている間は画面を少し薄くする */
+  private async once(key: string, run: () => Promise<void>): Promise<void> {
+    if (this.inFlight.has(key)) return;
+    this.inFlight.add(key);
+    this.body.classList.add('busy');
     try {
-      const r = await this.api.actMarket(this.auth.token, this.marketId, cid(), a);
-      if (!r.ok) toast(this.root, r.reason ?? 'できませんでした', 'warn');
-      else if (okMsg) toast(this.root, okMsg, 'good', 1800);
-    } catch (e) {
-      toast(this.root, errText(e), 'warn');
+      await run();
+    } finally {
+      this.inFlight.delete(key);
+      if (this.inFlight.size === 0) this.body.classList.remove('busy');
     }
-    await this.refresh();
+  }
+
+  private async act(a: Action, okMsg?: string): Promise<void> {
+    await this.once(`act:${JSON.stringify(a)}`, async () => {
+      try {
+        const r = await this.api.actMarket(this.auth.token, this.marketId, cid(), a);
+        if (!r.ok) toast(this.root, `${r.reason ?? 'できませんでした'}`, 'warn', 4000);
+        else if (okMsg) toast(this.root, okMsg, 'good', 1800);
+      } catch (e) {
+        toast(this.root, `送れませんでした: ${errText(e)}（通信を確かめて、もう一度押してください）`, 'warn', 5000);
+      }
+      await this.refresh();
+    });
   }
 
   /** 同期の欄の文（次の0時までの時間など） */
@@ -824,14 +842,16 @@ export class MarketScreen {
 
   /** 企業間の貸し借りの操作（同じ操作の ID は一度だけ） */
   private async credit(op: CreditOp, okMsg: string): Promise<void> {
-    try {
-      const r = await this.api.creditMarket(this.auth.token, this.marketId, cid(), op);
-      if (!r.ok) toast(this.root, r.reason ?? 'できませんでした', 'warn');
-      else toast(this.root, okMsg, 'good', 1800);
-    } catch (e) {
-      toast(this.root, errText(e), 'warn');
-    }
-    await this.refresh();
+    await this.once(`credit:${JSON.stringify(op)}`, async () => {
+      try {
+        const r = await this.api.creditMarket(this.auth.token, this.marketId, cid(), op);
+        if (!r.ok) toast(this.root, r.reason ?? 'できませんでした', 'warn', 4000);
+        else toast(this.root, okMsg, 'good', 1800);
+      } catch (e) {
+        toast(this.root, `送れませんでした: ${errText(e)}（通信を確かめて、もう一度押してください）`, 'warn', 5000);
+      }
+      await this.refresh();
+    });
   }
 
   /** 市場の設定の変更の記録（いつ・誰が・何を。新しい順） */

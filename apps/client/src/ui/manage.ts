@@ -2484,7 +2484,7 @@ export class ManageMenu {
       h('p', null, `シフトリーダーは仕入れ・仕込み・調理・接客・清掃を全部する上位の役職です。店長がいない・休みのときは店長代理として、急ぎの仕込み・当日便・翌日の仕入れをします。日給は ${yenStr(leaderWageFor(e))} になります。`),
       problem ? h('p', { class: 'note bad' }, problem) : null,
     );
-    if (!(await confirmNode(this.root, 'シフトリーダーにする', body, 'シフトリーダーにする'))) return;
+    if (!(await confirmNode(this.root, 'シフトリーダーにする', body, 'シフトリーダーにする', false, 'キャンセル', !!problem))) return;
     await this.act({ type: 'promoteLeader', employeeId: e.id });
   }
 
@@ -2503,7 +2503,7 @@ export class ManageMenu {
       h('ul', { class: 'emp-lines' }, staffSummary(e, s).map((l) => h('li', null, l))),
       info.canPromote ? h('p', { class: 'note bad' }, info.canPromote) : null,
     );
-    if (!(await confirmNode(this.root, '社員にする', body, '社員にする'))) return;
+    if (!(await confirmNode(this.root, '社員にする', body, '社員にする', false, 'キャンセル', !!info.canPromote))) return;
     await this.act({ type: 'promote', employeeId: e.id });
   }
 
@@ -2531,7 +2531,10 @@ export class ManageMenu {
         'section',
         { class: 'card wide' },
         cardHead(`レイアウト — ${st.name}`, '設備の配置で動線（移動距離）が変わり、処理能力が変わります。盛り付け台の近くにスープ寸胴・トッピング台・麺釜を置くと作業が速くなります。'),
-        h('button', { class: 'btn primary', disabled: !editable, onclick: () => this.cb.onLayoutEditor() }, editable ? 'レイアウト編集を開く' : '営業中は編集できません'),
+        // 営業中は押せないボタンの代わりに理由を出す（押せそうに見える黄色のボタンを置かない）
+        editable
+          ? h('button', { class: 'btn primary', onclick: () => this.cb.onLayoutEditor() }, 'レイアウト編集を開く')
+          : h('p', { class: 'note', 'data-layout-locked': '' }, '営業中はレイアウトを編集できません（閉店後か仕込みの時間に開けます）'),
       ),
       h(
         'section',
@@ -2542,7 +2545,7 @@ export class ManageMenu {
           { class: 'row wrap' },
           s.seats.filter((x) => x.index < st.seats.length).map((seat) =>
             seat.installed
-              ? h('span', { class: 'chip on' }, `${seat.index + 1}番`)
+              ? h('span', { class: 'chip-st good' }, `✓ ${seat.index + 1}番`)
               : h('button', { class: 'mini', onclick: () => this.act({ type: 'buySeat', seatIndex: seat.index }, `${seat.index + 1}番席を設置しました`) }, `${seat.index + 1}番を設置 ${yenStr(SEAT_PRICE)}`),
           ),
         ),

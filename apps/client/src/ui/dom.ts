@@ -119,7 +119,7 @@ export function choiceDialog(root: HTMLElement, title: string, body: string, cho
 }
 
 /** 確認ダイアログ（本文に表やリストを入れられる） */
-export function confirmNode(root: HTMLElement, title: string, body: HTMLElement, okLabel = 'OK', danger = false, cancelLabel = 'キャンセル'): Promise<boolean> {
+export function confirmNode(root: HTMLElement, title: string, body: HTMLElement, okLabel = 'OK', danger = false, cancelLabel = 'キャンセル', okDisabled = false): Promise<boolean> {
   return new Promise((resolve) => {
     const close = (v: boolean) => {
       overlay.remove();
@@ -137,7 +137,7 @@ export function confirmNode(root: HTMLElement, title: string, body: HTMLElement,
           'div',
           { class: 'row end' },
           h('button', { class: 'btn ghost', onclick: () => close(false) }, cancelLabel),
-          h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => close(true) }, okLabel),
+          h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, disabled: okDisabled, onclick: () => close(true) }, okLabel),
         ),
       ),
     );

@@ -579,10 +579,10 @@ input, select { font: inherit; }
 .logo-sub { margin-top: 8px; color: var(--muted); font-size: 14px; }
 .menu-col { display: flex; flex-direction: column; gap: 12px; max-width: 420px; margin: 0 auto; }
 .foot { text-align: center; color: var(--muted); font-size: 12px; margin-top: 30px; }
-.slot-list { display: grid; gap: 12px; }
-.slot-card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.slot-list { display: grid; gap: 12px; margin-bottom: 14px; }
+.slot-card { background: var(--s1, var(--panel-2)); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
 .slot-card.bad { border-color: var(--bad); }
-.slot-no { color: var(--yellow); font-weight: 800; }
+.slot-no { color: var(--muted); font-weight: 800; font-size: 13px; }
 .slot-shop { font-size: 18px; font-weight: 800; margin: 4px 0; }
 .big-text { font-size: 18px; font-weight: 800; }
 .help-step { display: flex; gap: 10px; margin: 8px 0; }
@@ -1313,6 +1313,8 @@ details.help:not([open]) > .help-body { display: none; }
   --s3: #2c2621;
   --line2: rgba(255, 255, 255, 0.13);
   --dim: #7d7266;
+  /* チェックボックス・スライダー・ラジオも店の色に（ブラウザの標準の青をやめる） */
+  accent-color: var(--yellow);
 }
 /* 経営メニュー: 細い見出し＋左の縦のナビ */
 .manage {
@@ -1628,3 +1630,25 @@ details.help:not([open]) > .help-body { display: none; }
 .sd-cell.closed b { color: var(--warn); }
 .sd-cell.none { color: var(--dim); align-items: flex-end; }
 .sd-cell.total b { color: var(--text); }
+.market-body.busy { cursor: progress; }
+/* ───────── じろ6 の仕上げ: 経営メニュー以外の画面（入口・セーブ・設定・市場の入口・ランキング・遊び方など）も同じきまりに ───────── */
+/* 画面の題名とカードの題名は白（黄色は選んでいるものと、いちばん押してほしいボタンだけ）。題字のロゴは店の色のまま */
+.screen h2 { color: var(--text); }
+.screen .card h4, .modal .card h4 { color: var(--text); }
+.screen .card { background: var(--s1); border: 1px solid var(--line); border-radius: 12px; }
+/* class の付いていない選択（広告費・ランキングの種別・入る会社など）も、ほかの入力と同じ見た目と押しやすい高さに */
+.screen select:not(.select), .manage select:not(.select), .modal select:not(.select) {
+  min-height: 36px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line2);
+  background: var(--s2);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+.app.touch .screen select:not(.select), .app.touch .manage select:not(.select), .app.touch .modal select:not(.select) { min-height: 40px; }
+/* 確認の画面の題名も白（危ない操作の題名は赤い枠のボタンで分かる） */
+.modal h3 { color: var(--text); }
+.modal { background: var(--s2); border: 1px solid var(--line2); }
