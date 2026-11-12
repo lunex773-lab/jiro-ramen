@@ -5,7 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { firstProfitableWeek, PATTERNS, runPattern, totalsUpTo } from './jiro1-balance';
 
-import { BALANCE } from '../../src';
+import { BALANCE, CHAOS, CHAOS_KINDS, FAME } from '../../src';
 
 /** 調整案を試す: JIRO1_TUNE='{"customers.valueWeight":0.6}'（BALANCE の項目。測定だけに使う） */
 function applyTune(json: string | undefined): void {
@@ -18,6 +18,15 @@ function applyTune(json: string | undefined): void {
   }
 }
 applyTune(process.env.JIRO1_TUNE);
+
+// じろ7 Phase 8: JIRO7_OFF=1 のとき、珍客イベントと知名度・話題性の効果を止めて測る（じろ7 の影響だけを比べるため）
+if (process.env.JIRO7_OFF === '1') {
+  for (const k of CHAOS_KINDS) (CHAOS[k] as { dayChance: number }).dayChance = 0;
+  (FAME as { awarenessMaxBonus: number }).awarenessMaxBonus = 0;
+  (FAME as { topicMaxBonus: number }).topicMaxBonus = 0;
+  (FAME as { buzzByTopic: number }).buzzByTopic = 0;
+  (FAME as { flameMaxRep: number }).flameMaxRep = 0;
+}
 
 const ON = process.env.JIRO1_SIM === '1';
 const DAYS = Number(process.env.JIRO1_DAYS ?? 90);

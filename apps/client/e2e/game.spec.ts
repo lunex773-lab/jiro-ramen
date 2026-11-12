@@ -1941,6 +1941,12 @@ test('話題・伝説: 撮影の許可は5段で答えられ、知名度・評�
   await expect(body.locator('[data-video]')).toContainText('大ヒット');
   await expect(body.locator('[data-post]')).toContainText('UFO');
   await shot(page, 'fame-tab');
+  if (SHOTS) {
+    await body.locator('[data-legends]').scrollIntoViewIfNeeded();
+    await shot(page, 'fame-tab-legends');
+    await body.locator('[data-sns]').scrollIntoViewIfNeeded();
+    await shot(page, 'fame-tab-sns');
+  }
   await press(page.locator('.manage .close, .manage [data-close]').first());
   // 記念品の棚を買って置くと、ランクの高い伝説から飾られる
   const r = await page.evaluate(() => (window as unknown as App).__jiro.host.act({ type: 'buyEquipment', equipType: 'legend_shelf', autoPlace: true }));

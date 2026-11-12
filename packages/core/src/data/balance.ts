@@ -359,6 +359,8 @@ export const BALANCE = {
       /** 来客の上限 = 見込み（イベント込み）× この倍率 + 余裕（人） */
       arrivalMult: 1.8,
       arrivalSlack: 10,
+      /** 知名度が1日に上がってよい幅（じろ7 Phase 7。大バズ 約11 + 神話級 9 + 投稿 2 + 余裕） */
+      awarenessPerDay: 30,
     },
     /** AI 企業の意思決定 */
     ai: {

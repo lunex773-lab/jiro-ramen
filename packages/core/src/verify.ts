@@ -15,6 +15,7 @@ import { validateState } from './save';
 import { storeReport } from './sim/company';
 import { adFactor } from './sim/ads';
 import { expectedDailyArrivals, priceDemandFactor } from './sim/customers';
+import { fameDemandFactor } from './sim/fame';
 import { finalProfit, netSales, operatingProfit } from './sim/economy';
 import { repaymentCapacity } from './sim/day';
 import type { DayReport, Employee, GameState, StoreEntry, Txn } from './types';
@@ -252,6 +253,9 @@ export function verifyCommit(prev: GameState, next: GameState, ticket: VerifyTic
     if (r.served > seatsMax) flags.push(`${entry.name}: 提供（${r.served}杯）が席数の上限（${Math.round(seatsMax)}杯）を超える`);
     if (r.sales > r.served * MAX_PRICE + V().moneyEps) flags.push(`${entry.name}: 売上が提供×最高の値段を超える`);
   }
+  // 知名度が1日で上がりすぎている（大バズ・神話級の伝説が重なっても届かない幅）
+  const awUp = (next.fame?.awareness ?? 0) - (prev.fame?.awareness ?? 0);
+  if (next.company.activeStoreId === prev.company.activeStoreId && awUp > V().awarenessPerDay) flags.push(`知名度が1日で上がりすぎている（+${awUp.toFixed(1)}）`);
   const active = reports.find((x) => x.entry.id === next.company.activeStoreId && x.r.managed === undefined);
   if (active) {
     const bound = arrivalBound(morningOf(prev, d), next, ticket.demand[active.entry.id] ?? 1, active.r.ads ?? 0, d);
@@ -269,7 +273,10 @@ export function arrivalBound(prev: GameState, next: GameState, demand: number, a
   // その日に払った広告費の分も入れる（開店の前の状態では、まだ払っていない）
   const base = expectedDailyArrivals(prev, { events: true }) * adFactor(ads);
   const priceUp = Math.max(1, priceDemandFactor(next) / Math.max(0.05, priceDemandFactor(prev)));
-  return base * priceUp * buzzAllowance(next, day) * Math.max(0, demand) * V().arrivalMult + V().arrivalSlack;
+  // 知名度・話題性（じろ7 Phase 7）: 翌朝の動画の公開・営業中の伝説で上がった分を許す。営業中は上がるだけ（薄れるのは朝だけ）なので、
+  // その日の終わりの値がその日のいちばん高い値になる
+  const fameUp = Math.max(1, fameDemandFactor(next) / Math.max(0.05, fameDemandFactor(prev)));
+  return base * priceUp * fameUp * buzzAllowance(next, day) * Math.max(0, demand) * V().arrivalMult + V().arrivalSlack;
 }
 
 /**

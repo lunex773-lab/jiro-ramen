@@ -116,6 +116,9 @@ describe('メッセージ検証', () => {
     expect(parseAction({ type: 'promote', employeeId: 'e1' })).toEqual({ type: 'promote', employeeId: 'e1' });
     expect(parseAction({ type: 'answerRequest', requestId: 'rq1', accept: false })).toEqual({ type: 'answerRequest', requestId: 'rq1', accept: false });
     expect(parseAction({ type: 'answerRequest', requestId: 'rq1', accept: 'yes' })).toBeNull();
+    // じろ7 Phase 7: 撮影の許可の5段
+    expect(parseAction({ type: 'answerRequest', requestId: 'rq1', accept: true, level: 'dining' })).toEqual({ type: 'answerRequest', requestId: 'rq1', accept: true, level: 'dining' });
+    expect(parseAction({ type: 'answerRequest', requestId: 'rq1', accept: true, level: 'everything' })).toBeNull();
     expect(parseAction({ type: 'giveUp' })).toEqual({ type: 'giveUp' });
     // チュートリアルはひとりプレイのみ
     expect(parseAction({ type: 'tutorial', op: 'next' })).toBeNull();

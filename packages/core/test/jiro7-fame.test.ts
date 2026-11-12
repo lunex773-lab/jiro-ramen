@@ -288,3 +288,24 @@ describe('古いセーブ', () => {
     expect(fameDemandFactor(old)).toBeGreaterThan(0);
   });
 });
+
+describe('共通市場の確かめ方（じろ7 Phase 8）', () => {
+  it('話題性・知名度がその日に上がった分は、来客の上限に入る（ふつうに遊んだ日を順位から外さない）', async () => {
+    const { arrivalBound } = await import('../src/verify');
+    const { s } = newGame(9);
+    s.day = 5;
+    const prev = clone(s);
+    const same = clone(s);
+    const hot = clone(s);
+    const f = ensureFame(hot);
+    f.topic = 80;
+    f.awareness = 30;
+    const b0 = arrivalBound(prev, same, 1);
+    const b1 = arrivalBound(prev, hot, 1);
+    expect(b1).toBeGreaterThan(b0 * 1.3);
+    // 下がったときは広げない
+    const cold = clone(s);
+    ensureFame(prev).topic = 50;
+    expect(arrivalBound(prev, cold, 1)).toBeLessThanOrEqual(arrivalBound(prev, prev, 1) + 1e-9);
+  });
+});

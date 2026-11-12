@@ -73,8 +73,8 @@ function legendsCard(s: GameState): HTMLElement {
   return h(
     'section',
     { class: 'card wide', 'data-legends': String(list.length) },
-    cardHead(`店の伝説（${list.length}件）`, '珍事件を店の歴史として残します。ランクは 通常・希少・激レア・伝説・神話級。記念品の棚（設備）を置くと、ランクの高いものから店内に飾ります。'),
-    !hasShelf && list.length > 0 ? h('p', { class: 'note' }, '記念品の棚がありません。「店舗」のレイアウトで「記念品の棚」を置くと、伝説を店内に飾れます。') : null,
+    cardHead(`店の伝説（${list.length}件）`, '珍事件を店の歴史として残します。ランクは 通常・希少・激レア・伝説・神話級。記念品の棚（「設備」で買える）を置くと、ランクの高いものから6つを店内に飾ります。'),
+    !hasShelf && list.length > 0 ? h('p', { class: 'note' }, '記念品の棚がありません。「設備」の「設備を買う」で「記念品の棚」を買うと、店内の空いている所に置かれ、伝説を飾れます（場所は「店舗 → レイアウト編集」で動かせます）。') : null,
     list.length === 0
       ? h('p', { class: 'note' }, 'まだ伝説はありません。珍しいお客さん・動画の大ヒット・SNS の大拡散・テレビ取材などで生まれます。')
       : h(
