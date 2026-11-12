@@ -108,8 +108,11 @@ export function storeCapacity(s: GameState, lead: { id: string | null; skill: nu
  */
 export function storeLead(s: GameState, entry: StoreEntry): { id: string | null; skill: number; owner: boolean } | null {
   const mgr = entry.managerId ? s.employees.find((e) => e.id === entry.managerId) : undefined;
-  // 店長の休みの曜日は、店長がいない日（店主が回す店でなければ休業）
   if (mgr && shiftFor(mgr, s.day) !== null) return { id: mgr.id, skill: avgSkill(mgr), owner: false };
+  // 店長がいない・休みの日は、その日に勤務のあるシフトリーダーが店長代理として回す（オーナーの判断 2026-11-12「店長代理」）。
+  // いなければ休業（店主が自分で回す店は店主）
+  const deputy = s.employees.filter((e) => e.id !== mgr?.id && e.profile.role === 'leader' && shiftFor(e, s.day) !== null).sort((a, b) => avgSkill(b) - avgSkill(a))[0];
+  if (deputy) return { id: deputy.id, skill: avgSkill(deputy), owner: false };
   if (s.company?.ownerStoreId === entry.id) return { id: null, skill: M().ownerSkill, owner: true };
   return null;
 }
@@ -123,7 +126,7 @@ function applyPolicyPrices(s: GameState, entry: StoreEntry): void {
 export function planManagerDay(s: GameState, entry: StoreEntry, opts: ManagerDayOptions = {}): ManagerDayPlan {
   const lead = storeLead(s, entry);
   const hours = entry.hours ?? DEFAULT_HOURS;
-  const closedReason = s.closedForConstruction > 0 ? '工事・準備のため休業' : isClosedDay(hours, s.day) ? '定休日' : !lead ? '店長がいないため休業' : null;
+  const closedReason = s.closedForConstruction > 0 ? '工事・準備のため休業' : isClosedDay(hours, s.day) ? '定休日' : !lead ? '店長（店長代理のシフトリーダー）がいないため休業' : null;
   const capacity = storeCapacity(s, lead, opts.temps ?? 0, hours);
   const ticket = expectedTicket(s) * M().ticketFactor;
   if (closedReason) return { open: false, closedReason, arrivals: 0, capacity, served: 0, ticket };

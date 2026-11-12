@@ -757,7 +757,8 @@ export class MarketScreen {
         last ? kpi(`${last.day}日目の営業利益（全店）`, yenSigned(last.operatingProfit, true), `純売上 ${yenSigned(last.netSales)}`, last.operatingProfit < 0 ? 'bad' : 'good') : null,
         kpi('評判（本店）', `★ ${s.reputation.toFixed(2)}`, stars(s.reputation), 'accent'),
       ]),
-      // あなたの店（店ごとの最後の日の営業利益。色の点で黒字・赤字）
+      // あなたの店（店ごとの最後の日の売上と営業利益。色の点で黒字・赤字。オーナーの指示 2026-11-12「どの店舗がどれだけ売り上げたか」）
+      h('div', { class: 'store-line store-line-head' }, h('span', { class: 'dot' }), h('span', { class: 'store-line-name' }, '店（席・運営）'), h('span', { class: 'store-line-sales' }, '売上'), h('b', null, '営業利益')),
       h(
         'div',
         { class: 'store-list', 'data-store-list': '' },
@@ -766,13 +767,15 @@ export class MarketScreen {
           const r = day > 0 ? storeReport(s, entry, day) : null;
           const stt = storeStatus(s, entry);
           const lead = entry.managerId ? stt.employees.find((e) => e.id === entry.managerId) : null;
-          const who = lead ? '店長' : s.company.ownerStoreId === entry.id ? '店主' : '店長なし';
+          const deputy = !lead && stt.employees.some((e) => e.profile.role === 'leader');
+          const who = lead ? '店長' : s.company.ownerStoreId === entry.id ? '店主' : deputy ? '店長代理' : '店長なし';
           const op = r ? r.operatingProfit : null;
           return h(
             'div',
             { class: 'store-line' },
             h('span', { class: `dot ${op === null ? '' : op < 0 ? 'bad' : 'good'}` }),
             h('span', { class: 'store-line-name' }, `${storeDisplayName(s, entry)}（${STAGES[stt.stage]?.seats.length ?? 8}席・${who}）`),
+            h('span', { class: 'store-line-sales', 'data-store-line-sales': entry.id }, r ? yenStr(r.netSales ?? r.sales - r.refunds) : '—'),
             h('b', { class: op === null ? '' : op < 0 ? 'tone-bad' : 'tone-good' }, op === null ? '—' : yenSigned(op, true)),
           );
         }),

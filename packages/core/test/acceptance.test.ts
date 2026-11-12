@@ -1,6 +1,6 @@
 // 経済の受け入れの条件（統合進化設計書 v2.1 §4.6）の短い版。90日の測定は test/econ（ECON_SIM=1）で回す。
 import { describe, expect, it } from 'vitest';
-import { expansionAdvice, STAGES } from '../src';
+import { BALANCE, expansionAdvice, expansionInfo, STAGES } from '../src';
 import { CASES, runCase } from './econ/harness';
 import { newGame } from './helpers';
 
@@ -12,12 +12,13 @@ const policy = (id: string) => {
 const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
 
 describe('経済の受け入れの条件（短い版）', () => {
-  it('上手な成長（調理担当・売れ行きに合わせた仕入れ・定期メンテ）: 20〜32日目に12席へ拡張でき、拡張後の利益が拡張前より多い', { timeout: 180_000 }, () => {
-    const { rows } = runCase(policy('c17_growth_full'), 40, 777);
+  // 拡張のあとに手元に30万円の運転資金を残す（オーナーの指示 2026-11-12。前は6万円で20〜32日目）ので、12席への拡張は30〜50日目
+  it('上手な成長（調理担当・売れ行きに合わせた仕入れ・定期メンテ）: 30〜50日目に12席へ拡張でき、拡張後の利益が拡張前より多い', { timeout: 240_000 }, () => {
+    const { rows } = runCase(policy('c17_growth_full'), 60, 777);
     const day = rows.find((r, i) => i > 0 && r.stage > rows[i - 1]!.stage)?.day ?? null;
     expect(day).not.toBeNull();
-    expect(day!).toBeGreaterThanOrEqual(20);
-    expect(day!).toBeLessThanOrEqual(32);
+    expect(day!).toBeGreaterThanOrEqual(30);
+    expect(day!).toBeLessThanOrEqual(50);
     const before = avg(rows.filter((r) => r.day >= day! - 8 && r.day < day!).map((r) => r.op));
     // 工事の休業日と翌日（仕入れが追いつくまで）を除く
     const after = avg(rows.filter((r) => r.day >= day! + 3).map((r) => r.op));
@@ -49,5 +50,23 @@ describe('拡張の案内', () => {
     expect(a.fridgeKgNeeded).toBe(STAGES[1]!.fridgeKgNeeded);
     expect(a.fridges).toBe(1);
     expect(a.total).toBeGreaterThan(STAGES[1]!.constructionCost + STAGES[1]!.minFundsAfter);
+  });
+});
+
+describe('出店・拡張の運転資金（オーナーの指示 2026-11-12: 30万円は残す）', () => {
+  it('拡張は工事費＋30万円以上（いちばん大きい店は40万円）が手元にあるときだけ。出店は初期費用＋30万円', () => {
+    expect(STAGES[1]!.minFundsAfter).toBe(300_000);
+    expect(STAGES[2]!.minFundsAfter).toBe(300_000);
+    expect(STAGES[3]!.minFundsAfter).toBe(400_000);
+    expect(BALANCE.company.minFundsAfterOpen).toBe(300_000);
+    const { s } = newGame(91);
+    s.phase = 'closed';
+    s.career.unlocked.push('stage2');
+    const info0 = expansionInfo(s);
+    s.money = info0.cost + 299_999;
+    expect(expansionInfo(s).canExpand).toBe(false);
+    expect(expansionInfo(s).reason).toContain('運転資金');
+    s.money = info0.cost + 300_000;
+    expect(expansionInfo(s).canExpand).toBe(true);
   });
 });

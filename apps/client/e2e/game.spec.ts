@@ -1633,7 +1633,9 @@ test('会社: 12席・評判★4.0以上の店になると「会社」の画面�
   await map.locator('[data-map-site="residential"] button').click();
   await expect(map.locator('[data-map-site="residential"]')).toContainText('初期費用 ¥450,000');
   // 出店の見込みと公的な統計（じろ2）
-  await expect(map.locator('[data-map-site="residential"]')).toContainText('見込み: 来客');
+  // 見込みは店長の営業と同じ計算（席と人手の上限・給与・家賃・維持費など。オーナーの判断 2026-11-12）
+  await expect(map.locator('[data-map-site="residential"]')).toContainText('見込み（店長＋接客担当のアルバイト1人');
+  await expect(map.locator('[data-map-site="residential"]')).toContainText('席と人手の上限');
   await expect(map.locator('[data-map-site="residential"]')).toContainText('利益は保証されません');
   await expect(map.locator('[data-map-daytime]')).toContainText('昼夜間人口比率');
   await expect(map.locator('[data-map-food]')).toContainText('店');
@@ -1652,6 +1654,8 @@ test('会社: 12席・評判★4.0以上の店になると「会社」の画面�
   expect(st.mgr).toBe(hired.id);
   expect(st.loc).toBe('27100');
   expect(st.name).toContain('大阪市住宅街店');
+  // 2店以上は、会社の先頭に店舗ごとの売上（オーナーの指示 2026-11-12）
+  await expect(body.locator('[data-company-store-sales]')).toContainText('店舗ごとの売上');
   const branchCard = body.locator(`.store-card[data-store="${st.branch}"]`);
   await expect(branchCard).toContainText('準備中');
   await expect(branchCard).toContainText('佐藤 一郎');

@@ -1572,3 +1572,33 @@ details.help:not([open]) > .help-body { display: none; }
 .toast.has-undo { display: flex; align-items: center; gap: 10px; }
 .toast.has-undo > span { flex: 1; min-width: 0; }
 .toast-undo { pointer-events: auto !important; flex: 0 0 auto; min-height: 36px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--line2); background: var(--s3); color: var(--text); font: inherit; font-weight: 800; font-size: 12.5px; cursor: pointer; }
+/* 店舗ごとの売上（1店1行の表）。狭いときは杯数・7日の営業利益・割合の列を隠す */
+.store-sales { container-type: inline-size; }
+.store-sales-grid { display: flex; flex-direction: column; }
+.ss-row { display: grid; grid-template-columns: minmax(7em, 1.4fr) 5.4em minmax(5.5em, 1fr) minmax(5.5em, 1fr) 3.6em minmax(6em, 1fr) minmax(5.5em, 1fr) 7.5em; align-items: center; column-gap: 8px; min-height: 40px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.ss-row.here { background: var(--s2); border-radius: 8px; }
+.ss-head { min-height: 26px; font-size: 11px; color: var(--muted); font-weight: 800; }
+.ss-total { border-bottom: none; border-top: 2px solid var(--line2); font-weight: 800; }
+.ss-c { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-c2, .ss-c3, .ss-c5, .ss-c6 { text-align: right; font-variant-numeric: tabular-nums; }
+.ss-head .ss-c2, .ss-head .ss-c3, .ss-head .ss-c5, .ss-head .ss-c6 { text-align: right; }
+.ss-c3.tone-bad, .ss-c6.tone-bad { color: var(--bad); }
+.ss-c3.tone-good, .ss-c6.tone-good { color: var(--good); }
+.ss-c4 { color: var(--muted); text-align: right; }
+.ss-c7 { display: flex; align-items: center; gap: 6px; }
+.ss-c7 .mbar { flex: 1; height: 7px; }
+.ss-c7 small { width: 2.6em; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+@container (max-width: 700px) {
+  .ss-row { grid-template-columns: minmax(6em, 1.3fr) 5em minmax(5em, 1fr) minmax(5em, 1fr) minmax(5.5em, 1fr) 6.5em; }
+  .ss-c4, .ss-c6 { display: none; }
+}
+@container (max-width: 480px) {
+  .ss-row { grid-template-columns: minmax(6em, 1.3fr) minmax(5em, 1fr) minmax(5em, 1fr) minmax(5.5em, 1fr); }
+  .ss-c1, .ss-c7 { display: none; }
+}
+.store-line .store-line-sales { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--text); min-width: 6em; text-align: right; }
+.store-line-head { font-size: 11px; color: var(--muted); font-weight: 800; }
+.store-line-head b { font-weight: 800; color: var(--muted); }
+.store-line-head .dot { visibility: hidden; }
+.store-line > b { min-width: 6em; text-align: right; font-variant-numeric: tabular-nums; }
+.dash-stores { margin-bottom: 10px; }

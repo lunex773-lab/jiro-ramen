@@ -554,6 +554,77 @@ export class ManageMenu {
   }
 
   // ───────────────── 会社（Phase 2: 店舗一覧・店舗別損益・会社の財務・出店・店長・方針） ─────────────────
+  /** その店の運営のしかた（あなた・店長・店長代理・準備中・休業）の短い文 */
+  private storeRunLabel(s: GameState, entry: StoreEntry): string {
+    if (entry.id === s.company.activeStoreId) return 'あなた';
+    if (entry.snapshot && entry.snapshot.closedForConstruction > 0) return '準備中';
+    const st = storeStatus(s, entry);
+    if (entry.managerId && st.employees.some((e) => e.id === entry.managerId)) return '店長';
+    if (st.employees.some((e) => e.profile.role === 'leader')) return '店長代理';
+    return '休業';
+  }
+
+  /**
+   * 店舗ごとの売上（オーナーの指示 2026-11-12「どの店舗がどれだけ売り上げたかが見づらい」）。
+   * 最後にそろった日の売上・営業利益・杯数と、直近7日の売上・営業利益・全店の売上に占める割合を、1店1行の表で
+   */
+  private storeSalesTable(s: GameState, compact = false): HTMLElement | null {
+    const c = s.company;
+    if (c.stores.length < 2) return null;
+    const last = c.history.at(-1);
+    if (!last) return h('p', { class: 'note' }, '次の日へ進むと、店ごとの売上がここに出ます');
+    const week = c.history.slice(-7);
+    const rows = c.stores.map((entry) => {
+      const line = last.stores.find((x) => x.storeId === entry.id) ?? null;
+      const wk = { sales: 0, op: 0, served: 0 };
+      for (const r of week) {
+        const l = r.stores.find((x) => x.storeId === entry.id);
+        if (!l) continue;
+        wk.sales += l.netSales;
+        wk.op += l.operatingProfit;
+        wk.served += l.served;
+      }
+      const rep = storeReport(s, entry, last.day);
+      const how = line?.played ? 'あなた' : rep?.managed === 'closed' ? '休業' : rep?.managed === 'manager' ? '店長' : this.storeRunLabel(s, entry);
+      return { entry, line, wk, how };
+    });
+    const totalWk = Math.max(1, rows.reduce((a, r) => a + Math.max(0, r.wk.sales), 0));
+    const sum = rows.reduce((a, r) => ({ sales: a.sales + (r.line?.netSales ?? 0), op: a.op + (r.line?.operatingProfit ?? 0), served: a.served + (r.line?.served ?? 0), wkSales: a.wkSales + r.wk.sales, wkOp: a.wkOp + r.wk.op }), { sales: 0, op: 0, served: 0, wkSales: 0, wkOp: 0 });
+    const tone = (v: number) => (v < 0 ? 'tone-bad' : v > 0 ? 'tone-good' : '');
+    const head = h(
+      'div',
+      { class: 'ss-row ss-head' },
+      ['店', '運営', `${last.day}日目の売上`, '営業利益', '杯', `直近${week.length}日の売上`, '営業利益', '割合'].map((t, i) => h('span', { class: `ss-c ss-c${i}` }, t)),
+    );
+    const body = rows.map((r) =>
+      h(
+        'div',
+        { class: `ss-row${r.entry.id === c.activeStoreId ? ' here' : ''}`, 'data-store-sales': r.entry.id },
+        h('span', { class: 'ss-c ss-c0' }, storeDisplayName(s, r.entry)),
+        h('span', { class: 'ss-c ss-c1' }, h('span', { class: `chip-st ${r.how === '休業' ? 'bad' : r.how === 'あなた' ? 'info' : r.how === '準備中' ? 'warn' : 'good'}` }, r.how)),
+        h('b', { class: 'ss-c ss-c2' }, yenStr(r.line?.netSales ?? 0)),
+        h('b', { class: `ss-c ss-c3 ${tone(r.line?.operatingProfit ?? 0)}` }, yenSigned(r.line?.operatingProfit ?? 0, true)),
+        h('span', { class: 'ss-c ss-c4' }, `${r.line?.served ?? 0}杯`),
+        h('b', { class: 'ss-c ss-c5' }, yenStr(r.wk.sales)),
+        h('b', { class: `ss-c ss-c6 ${tone(r.wk.op)}` }, yenSigned(r.wk.op, true)),
+        h('span', { class: 'ss-c ss-c7' }, meterBar(Math.max(0, r.wk.sales) / totalWk, r.entry.id === c.activeStoreId ? 'info' : 'good', `売上の割合 ${Math.round((Math.max(0, r.wk.sales) / totalWk) * 100)}%`), h('small', null, `${Math.round((Math.max(0, r.wk.sales) / totalWk) * 100)}%`)),
+      ),
+    );
+    const total = h(
+      'div',
+      { class: 'ss-row ss-total' },
+      h('span', { class: 'ss-c ss-c0' }, '全店'),
+      h('span', { class: 'ss-c ss-c1' }, `${c.stores.length}店`),
+      h('b', { class: 'ss-c ss-c2' }, yenStr(sum.sales)),
+      h('b', { class: `ss-c ss-c3 ${tone(sum.op)}` }, yenSigned(sum.op, true)),
+      h('span', { class: 'ss-c ss-c4' }, `${sum.served}杯`),
+      h('b', { class: 'ss-c ss-c5' }, yenStr(sum.wkSales)),
+      h('b', { class: `ss-c ss-c6 ${tone(sum.wkOp)}` }, yenSigned(sum.wkOp, true)),
+      h('span', { class: 'ss-c ss-c7' }),
+    );
+    return h('div', { class: `store-sales${compact ? ' compact' : ''}`, 'data-store-sales-table': '' }, h('div', { class: 'store-sales-grid' }, head, body, total));
+  }
+
   private company(s: GameState): HTMLElement {
     const c = s.company;
     const row = (k: string, v: string, cls = '') => h('div', { class: `kv ${cls}` }, h('span', null, k), h('b', null, v));
@@ -585,7 +656,8 @@ export class ManageMenu {
       const mgr = st.employees.find((e) => e.id === entry.managerId) ?? null;
       const prop = storeProperty(entry);
       const name = storeDisplayName(s, entry);
-      const status = active ? '🧑‍🍳 いまここ（あなたが営業）' : entry.snapshot && entry.snapshot.closedForConstruction > 0 ? '🛠 準備中' : mgr ? '👔 店長が営業' : '⛔ 店長がいないため休業';
+      const run = this.storeRunLabel(s, entry);
+      const status = active ? '🧑‍🍳 いまここ（あなたが営業）' : run === '準備中' ? '🛠 準備中' : run === '店長' ? '👔 店長が営業' : run === '店長代理' ? '👔 店長代理（シフトリーダー）が営業' : '⛔ 店長（店長代理のシフトリーダー）がいないため休業';
       const fulls = st.employees.filter((e) => e.profile.employment === 'full');
       const pol = entry.policy;
       const problem = active ? null : enterStoreProblem(s, entry.id);
@@ -750,7 +822,8 @@ export class ManageMenu {
             ),
           )
         : null;
-    return h('div', { class: 'grid2' }, finance, this.marketCredit(), ...storeCards, openCard, moveCard);
+    const sales = c.stores.length > 1 ? h('section', { class: 'card wide', 'data-company-store-sales': '' }, cardHead('店舗ごとの売上', '店ごとの売上（純売上）・営業利益・杯数です。左は最後にそろった日、右は直近7日の合計と、全店の売上に占める割合。運営は、その日に誰が店を回したか（あなた・店長・店長代理・休業）です。'), this.storeSalesTable(s)) : null;
+    return h('div', { class: 'grid2' }, sales, finance, this.marketCredit(), ...storeCards, openCard, moveCard);
   }
 
   // ───────────────── 営業時間（じろ1 5.1） ─────────────────
@@ -879,6 +952,16 @@ export class ManageMenu {
       'div',
       null,
       kpis,
+      // 2店以上: 店舗ごとの売上（8つの数字は今いる店のもの。オーナーの指示 2026-11-12）
+      s.company.stores.length > 1
+        ? h(
+            'section',
+            { class: 'card dash-stores', 'data-dash-stores': '' },
+            cardHead('店舗ごとの売上', '上の8つの数字は今いる店のものです。ほかの店も入れた店ごとの売上・営業利益はこの表と「会社」で見られます。'),
+            this.storeSalesTable(s, true),
+            h('div', { class: 'row' }, goTab('company', '会社の画面へ')),
+          )
+        : null,
       h(
         'div',
         { class: 'grid2' },

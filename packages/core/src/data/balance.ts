@@ -159,7 +159,8 @@ export const BALANCE = {
     unlockStage: 1,
     unlockReputation: 4.0,
     /** 出店のあとに必要な手元資金（初期費用とは別） */
-    minFundsAfterOpen: 100_000,
+    // 出店のあとに手元に残す運転資金（オーナーの指示 2026-11-12「運転資金として30万は確保させてから」。前は10万円）
+    minFundsAfterOpen: 300_000,
     /** 新しい店の最初の評判 = 初期値 + (出店を決めた店の評判 − 初期値) × brandCarry（のれん） */
     brandCarry: 0.5,
     /**

@@ -34,6 +34,7 @@ export interface StageDef {
   rent: number;
   constructionCost: number;
   /** 工事の追加で必要な手元資金 */
+  /** 工事のあとに手元に残す運転資金（オーナーの指示 2026-11-12: 30万円以上。いちばん大きい店は40万円のまま） */
   minFundsAfter: number;
   unlock?: string;
   maxEquipment: number;
@@ -87,7 +88,7 @@ export const STAGES: StageDef[] = [
     playerSpawn: { x: 3.0, z: 3.0 },
     // 工事費 600,000 → 300,000円・運転資金 100,000 → 60,000円・移設 3,000 → 2,000円/台（経済の調整 Phase 1-5）。
     // 上手に経営すると25日前後で、工事費＋移設＋席＋2台目の冷蔵庫＋運転資金がたまる（オーナーの判断: 約4時間で12席）
-    rent: 11_000, constructionCost: 300_000, minFundsAfter: 60_000, unlock: 'stage2', maxEquipment: 24, closureDays: 1,
+    rent: 11_000, constructionCost: 300_000, minFundsAfter: 300_000, unlock: 'stage2', maxEquipment: 24, closureDays: 1,
     relocationPerItem: 2_000, fridgeKgNeeded: 200,
     description: '隣の区画を借りてカウンターを12席に延長。厨房も広がる。',
   },
@@ -103,7 +104,7 @@ export const STAGES: StageDef[] = [
     waitSpots: waitRow(15, 3.1, 0.62, 0.62),
     staffSpawn: { x: 0.5, z: 3.0 },
     playerSpawn: { x: 3.0, z: 3.0 },
-    rent: 15_000, constructionCost: 1_400_000, minFundsAfter: 200_000, unlock: 'stage3', maxEquipment: 32, closureDays: 1,
+    rent: 15_000, constructionCost: 1_400_000, minFundsAfter: 300_000, unlock: 'stage3', maxEquipment: 32, closureDays: 1,
     relocationPerItem: 4_000, fridgeKgNeeded: 250,
     description: '奥行きを広げた中規模店。厨房に複数の作業列を置ける。',
   },
