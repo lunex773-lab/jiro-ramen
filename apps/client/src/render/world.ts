@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { ResolutionGovernor } from './resolution';
 import { Aftermath, hash01, type FireSpot } from './aftermath';
 import { ArmoryFx } from './armory-fx';
+import { Sky } from './sky';
 import { equipmentWreck, lingeringFires } from './wreck';
 import { eatenContents, eatenStep, eatMotion, eatProgress } from './eat-motion';
 import { createSteam } from './models/fx';
@@ -21,6 +22,7 @@ import {
   equipmentCenter,
   seatCounterPoint,
   seatPos,
+  skyState,
   stageOf,
   STAGES,
   storeDisplayName,
@@ -132,6 +134,10 @@ export class World {
   private camFx = { shake: 0, eyeY: EYE_HEIGHT, roll: 0 };
   /** 隠し扉と武器庫の演出（じろ1 5.12） */
   private armoryFx: ArmoryFx;
+  /** 昼夜・星空・街の明かり（じろ7 1） */
+  private sky: Sky;
+  /** 夜に光を強める材質（建物の窓・看板・自販機など。元の強さは userData.baseEmissive） */
+  private nightMats: THREE.MeshStandardMaterial[] = [];
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -174,7 +180,36 @@ export class World {
     this.overlay.appendChild(this.tutEdge);
     this.after = new Aftermath(this.scene);
     this.armoryFx = new ArmoryFx(this.scene);
+    // 空（球はカメラに付いて動く）と通りの街灯・車のライト。背景の色と霧は空の地平線の色に合わせる
+    this.sky = new Sky(quality, { x0: -30, x1: 40 });
+    this.scene.add(this.sky.dome);
+    this.scene.add(this.sky.street);
     this.resize();
+  }
+
+  /** 調べる用: 今の空（時刻・夜の度合い・星の見え方・光害） */
+  skyInfo(): Sky['last'] {
+    return this.sky.last;
+  }
+
+  /** 昼夜（じろ7 1）: 空・星・月を描き、太陽（夜は月）・空の明かり・霧・夜の窓や看板の光を時刻に合わせる */
+  private updateSky(s: GameState, t: number, dt: number): void {
+    const L = this.sky.update(skyState(s), dt, t, this.camera, this.renderer.getPixelRatio());
+    this.hemi.color.copy(L.hemiSky);
+    this.hemi.groundColor.copy(L.hemiGround);
+    this.hemi.intensity = L.hemiIntensity;
+    this.sun.color.copy(L.sunColor);
+    this.sun.intensity = L.sunIntensity;
+    const st = stageOf(s);
+    const cx = (st.w * CELL) / 2;
+    const cz = (st.d * CELL) / 2;
+    this.sun.target.position.set(cx, 0, cz);
+    this.sun.position.set(cx + L.lightDir.x * 20, L.lightDir.y * 20, cz + L.lightDir.z * 20);
+    (this.scene.fog as THREE.Fog).color.copy(L.fog);
+    (this.scene.background as THREE.Color).copy(L.fog);
+    // 夜は窓・看板・自販機の光を少し強める（昼の 2 倍強まで。強すぎると白く飛ぶ）
+    const boost = 1 + 1.1 * L.night;
+    for (const m of this.nightMats) m.emissiveIntensity = (m.userData.baseEmissive as number) * boost;
   }
 
   /** ゲームの出来事（武器庫の演出: 血しぶき・発砲・爆発） */
@@ -255,6 +290,7 @@ export class World {
 
   setQuality(q: Quality): void {
     this.quality = q;
+    this.sky.setQuality(q);
     this.res.reset();
     this.resize();
   }
@@ -357,6 +393,21 @@ export class World {
     this.shellName = name;
     this.shell.setOpen(s.phase === 'open');
     this.scene.add(this.shell.group);
+    // 夜に光を強める材質を集める（共有の材質は元の強さを一度だけ覚える）
+    const mats = new Set<THREE.MeshStandardMaterial>();
+    this.shell.group.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        const sm = m as THREE.MeshStandardMaterial;
+        if (!sm || !(sm as { isMeshStandardMaterial?: boolean }).isMeshStandardMaterial || sm.emissiveIntensity <= 0 || sm.emissive.getHex() === 0) continue;
+        if (sm.userData.baseEmissive === undefined) sm.userData.baseEmissive = sm.emissiveIntensity;
+        mats.add(sm);
+      }
+    });
+    this.nightMats = [...mats];
+    // 通りの街灯（地域に合わせて）
+    this.sky.setStreet(surr, -30, stage.w * CELL + 30);
     const spots = (this.shell as ShopShell & { lightSpots?: THREE.Vector3[] }).lightSpots ?? [];
     const maxLights = this.quality === 'low' ? 2 : 4;
     const chosen = spots.length > 0 ? spots.filter((_, i) => i % Math.max(1, Math.ceil(spots.length / maxLights)) === 0).slice(0, maxLights) : [new THREE.Vector3((stage.w * CELL) / 2, 2.4, (stage.d * CELL) / 2)];
@@ -800,6 +851,7 @@ export class World {
 
   update(s: GameState, myId: string, t: number, dt: number, smooth: boolean): void {
     this.syncShell(s);
+    this.updateSky(s, t, dt);
     this.syncAutographs(s);
     this.syncFilmPhones(s);
     this.updateAccident(s, t, dt);
@@ -995,6 +1047,7 @@ export class World {
     for (const b of this.bowls.values()) b.dispose();
     this.shell?.dispose();
     this.armoryFx.dispose();
+    this.sky.dispose();
     for (const b of this.bubbles.values()) b.el.remove();
     this.tutEdge.remove();
     this.renderer.dispose();

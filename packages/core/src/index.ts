@@ -34,6 +34,7 @@ export * from './sim/customers';
 export * from './sim/employees';
 export * from './sim/staff';
 export * from './sim/deputy';
+export * from './sim/sky';
 export * from './sim/hours';
 export * from './sim/wages';
 export * from './sim/calendar';

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from './fixtures';
+import { locationInfo, MUNICIPALITIES, SEC_PER_MIN } from '@jiro/core';
 
 const SHOTS = process.env.SHOTS_DIR;
 
@@ -1780,4 +1781,43 @@ test('期限を過ぎた未払金を払えず次の日に進めないとき、�
   await page.locator('.modal').getByRole('button', { name: '破産する', exact: true }).click();
   await expect(page.locator('.screen.bankrupt')).toBeVisible();
   await shot(page, '52-overdue-bankrupt');
+});
+
+test('昼夜と星空: ゲーム内の時刻で空が変わり、夜は星が出る。都会は光害で星が少なく、田舎はよく見える（じろ7 1）', async ({ page }) => {
+  await startNewGame(page);
+  type Sky = { minute: number; night: number; starsVisible: number; lightPollution: number };
+  const sky = () => page.evaluate(() => (window as unknown as { __jiro: { world: { skyInfo(): Sky } } }).__jiro.world.skyInfo());
+  // 仕込みの時間（11時開店の店）: 朝・昼の空。星は出ない
+  await expect.poll(async () => (await sky()).minute).toBeGreaterThan(500);
+  expect((await sky()).night).toBeLessThan(0.05);
+  expect((await sky()).starsVisible).toBe(0);
+  // 夜の営業（21:30）にする: 表示の時刻が数秒かけて追いつき、夜になる
+  const setNight = (loc: string | null) =>
+    page.evaluate(
+      ({ loc, spm }) => {
+        const s = (window as unknown as { __jiro: { host: { state: Record<string, unknown> } } }).__jiro.host.state as unknown as {
+          paused: boolean; phase: string; openT: number; todayHours: unknown; company: { stores: { location?: string }[] };
+        };
+        if (loc) s.company.stores[0]!.location = loc;
+        else delete s.company.stores[0]!.location;
+        s.todayHours = { sessions: [{ open: 18 * 60, close: 23 * 60 }], closedDays: [] };
+        s.phase = 'open';
+        s.openT = (21 * 60 + 30 - 18 * 60) * spm;
+        s.paused = true;
+      },
+      { loc, spm: SEC_PER_MIN },
+    );
+  await setNight('13104');
+  await expect.poll(async () => (await sky()).night, { timeout: 15_000 }).toBeGreaterThan(0.95);
+  const city = await sky();
+  expect(city.lightPollution).toBeGreaterThan(0.85);
+  expect(city.starsVisible).toBeGreaterThan(0);
+  await shot(page, 'sky-city-night');
+  // 田舎（人口密度のとても低い町村）の夜: 星がよく見える
+  const rural = Object.keys(MUNICIPALITIES).find((c) => (locationInfo(c)?.densityIndex ?? 0) < -0.9)!;
+  await setNight(rural);
+  await expect.poll(async () => (await sky()).lightPollution).toBeLessThan(0.15);
+  const country = await sky();
+  expect(country.starsVisible).toBeGreaterThan(city.starsVisible * 2);
+  await shot(page, 'sky-rural-night');
 });
