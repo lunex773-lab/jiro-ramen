@@ -257,6 +257,13 @@ test('経営メニューとレイアウト編集が開ける', async ({ page }) 
   await row.getByRole('button', { name: '翌朝便' }).click();
   await expect(page.locator('.toast').filter({ hasText: '入荷予定' }).last()).toContainText('翌朝便（あすの開店前に届く）で頼みました');
   await expect(row.locator('.sn.coming b')).toHaveText(/^\+/);
+  // じろ6: 取り消せる操作は「元に戻す」で戻せる（自動の仕入れを止める → 元に戻す）
+  const autoBtn = row.locator('[data-auto-item]');
+  await expect(autoBtn).toHaveText('自動 ON');
+  await autoBtn.click();
+  await expect(autoBtn).toHaveText('自動 OFF');
+  await page.locator('.toast [data-undo]').last().click();
+  await expect(autoBtn).toHaveText('自動 ON');
   await page.getByRole('button', { name: '店舗' }).click();
   await page.getByRole('button', { name: 'レイアウト編集を開く' }).click();
   await expect(page.locator('.layout-editor')).toBeVisible();

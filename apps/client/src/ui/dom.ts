@@ -205,6 +205,44 @@ export function promptDialog(root: HTMLElement, title: string, initial: string, 
   });
 }
 
+/**
+ * 「元に戻す」付きのお知らせ（じろ6: 取り消せる操作は取り消せるようにする）。押すと onUndo を1回だけ呼んで消える
+ */
+export function toastUndo(root: HTMLElement, text: string, onUndo: () => void, ms = 5000): void {
+  let host = root.querySelector<HTMLElement>('.toasts');
+  if (!host) {
+    host = h('div', { class: 'toasts' });
+    root.appendChild(host);
+  }
+  let used = false;
+  const t = h(
+    'div',
+    { class: 'toast good has-undo' },
+    h('span', null, text),
+    h(
+      'button',
+      {
+        class: 'toast-undo',
+        'data-undo': '',
+        onclick: (ev: Event) => {
+          ev.stopPropagation();
+          if (used) return;
+          used = true;
+          t.remove();
+          onUndo();
+        },
+      },
+      '元に戻す',
+    ),
+  );
+  host.appendChild(t);
+  while (host.children.length > 4) host.firstElementChild?.remove();
+  setTimeout(() => {
+    t.classList.add('out');
+    setTimeout(() => t.remove(), 400);
+  }, ms);
+}
+
 export function toast(root: HTMLElement, text: string, level: 'info' | 'warn' | 'danger' | 'good' = 'info', ms = 2600): void {
   let host = root.querySelector<HTMLElement>('.toasts');
   if (!host) {

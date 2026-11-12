@@ -131,7 +131,7 @@ function companyTabVisible(s: GameState): boolean {
   const B = BALANCE.company;
   return s.career.stage >= B.unlockStage && s.reputation >= B.unlockReputation;
 }
-import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
+import { confirmDialog, confirmNode, h, replace, stars, toast, toastUndo, yenStr } from './dom';
 import { openStoreMap } from './store-map';
 import { hoursDialog, hoursSummary } from './hours-dialog';
 import { loanControl, loanSummary } from './loan';
@@ -451,6 +451,13 @@ export class ManageMenu {
     else if (okMsg) toast(this.root, okMsg, 'good', 1600);
     this.render();
     return r.ok;
+  }
+
+  /** 取り消せる操作: 結果の知らせに「元に戻す」を付ける（押すと inverse を送る。じろ6） */
+  private async actUndo(a: Action, msg: string, inverse: Action): Promise<boolean> {
+    const ok = await this.act(a);
+    if (ok) toastUndo(this.root, msg, () => void this.act(inverse, '元に戻しました'));
+    return ok;
   }
 
   render(live = false): void {
@@ -1076,13 +1083,13 @@ export class ManageMenu {
                   {
                     class: `mini ${autoOrderEnabled(s, d.id) ? 'on' : 'ghost'}`,
                     'data-auto-item': d.id,
-                    onclick: () => this.act({ type: 'setAutoOrderItem', itemId: d.id, enabled: !autoOrderEnabled(s, d.id) }, `${d.name}の自動の仕入れを${autoOrderEnabled(s, d.id) ? '止めました' : '戻しました'}`),
+                    onclick: () => this.actUndo({ type: 'setAutoOrderItem', itemId: d.id, enabled: !autoOrderEnabled(s, d.id) }, `${d.name}の自動の仕入れを${autoOrderEnabled(s, d.id) ? '止めました' : '戻しました'}`, { type: 'setAutoOrderItem', itemId: d.id, enabled: autoOrderEnabled(s, d.id) }),
                   },
                   autoOrderEnabled(s, d.id) ? '自動 ON' : '自動 OFF',
                 ),
-                h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setAutoOrder', itemId: d.id, qty: Math.max(0, target - d.packQty) }) }, '−'),
+                h('button', { class: 'mini ghost', onclick: () => this.actUndo({ type: 'setAutoOrder', itemId: d.id, qty: Math.max(0, target - d.packQty) }, `${d.name}の目安の量 ${target.toLocaleString('ja-JP')} → ${Math.max(0, target - d.packQty).toLocaleString('ja-JP')}${d.unit}`, { type: 'setAutoOrder', itemId: d.id, qty: target }) }, '−'),
                 h('b', null, target > 0 ? `${target.toLocaleString('ja-JP')}${d.unit}` : 'なし'),
-                h('button', { class: 'mini ghost', onclick: () => this.act({ type: 'setAutoOrder', itemId: d.id, qty: target + d.packQty }) }, '＋'),
+                h('button', { class: 'mini ghost', onclick: () => this.actUndo({ type: 'setAutoOrder', itemId: d.id, qty: target + d.packQty }, `${d.name}の目安の量 ${target.toLocaleString('ja-JP')} → ${(target + d.packQty).toLocaleString('ja-JP')}${d.unit}`, { type: 'setAutoOrder', itemId: d.id, qty: target }) }, '＋'),
                 s.autoOrderMode === 'sales' && target > 0 ? h('small', { class: 'auto-now' }, `今夜の目安 ${autoOrderTarget(s, d.id).toLocaleString('ja-JP')}${d.unit}`) : null,
                 Number.isFinite(shelfLifeCap(s, d.id)) ? h('small', { class: 'auto-now' }, `保存期間の上限 ${Math.round(shelfLifeCap(s, d.id)).toLocaleString('ja-JP')}${d.unit}`) : null,
               ),
@@ -1154,7 +1161,7 @@ export class ManageMenu {
     const last = s.history.at(-1)?.managerOrder;
     const who = mgr ? `店長（${mgr.profile.name}さん）` : `店長代理（シフトリーダーの${leaders.map((e) => e.profile.name).join('・')}さん）`;
     const act = actingManager(s);
-    const set = (orderBy: 'manager' | 'self', msg: string) => this.act({ type: 'setStorePolicy', storeId: st.id, policy: { orderBy } }, msg);
+    const set = (orderBy: 'manager' | 'self', msg: string) => this.actUndo({ type: 'setStorePolicy', storeId: st.id, policy: { orderBy } }, msg, { type: 'setStorePolicy', storeId: st.id, policy: { orderBy: byMgr ? 'manager' : 'self' } });
     return h(
       'div',
       { class: 'manager-order', 'data-manager-order': byMgr ? 'manager' : 'self' },
@@ -1228,7 +1235,7 @@ export class ManageMenu {
                 'data-prep-target': itemId,
                 onchange: (ev: Event) => {
                   const v = (ev.target as HTMLSelectElement).value;
-                  void this.act({ type: 'setPrepTarget', itemId, qty: v === '' ? null : Number(v) }, `${d.name}の仕込みの目安を${v === '' ? '自動' : `${servings(Number(v))}人前（${Number(v).toLocaleString('ja-JP')}${d.unit}）`}にしました`);
+                  void this.actUndo({ type: 'setPrepTarget', itemId, qty: v === '' ? null : Number(v) }, `${d.name}の仕込みの目安を${v === '' ? '自動' : `${servings(Number(v))}人前（${Number(v).toLocaleString('ja-JP')}${d.unit}）`}にしました`, { type: 'setPrepTarget', itemId, qty: cur ?? null });
                 },
               },
               opts.map(([v, label]) => h('option', { value: v, selected: v === (cur === undefined ? '' : String(cur)) }, label)),
@@ -1425,11 +1432,11 @@ export class ManageMenu {
             h(
               'div',
               { class: 'tbtns' },
-              h('button', { class: 'mini ghost', disabled: !editable, onclick: () => this.act({ type: 'setPrice', menuId: m.id, price: price - 50 }) }, '−50'),
+              h('button', { class: 'mini ghost', disabled: !editable, onclick: () => this.actUndo({ type: 'setPrice', menuId: m.id, price: price - 50 }, `${m.name}の値段 ${yenStr(price)} → ${yenStr(price - 50)}`, { type: 'setPrice', menuId: m.id, price }) }, '−50'),
               h('b', { class: 'price' }, yenStr(price)),
-              h('button', { class: 'mini ghost', disabled: !editable, onclick: () => this.act({ type: 'setPrice', menuId: m.id, price: price + 50 }) }, '+50'),
+              h('button', { class: 'mini ghost', disabled: !editable, onclick: () => this.actUndo({ type: 'setPrice', menuId: m.id, price: price + 50 }, `${m.name}の値段 ${yenStr(price)} → ${yenStr(price + 50)}`, { type: 'setPrice', menuId: m.id, price }) }, '+50'),
             ),
-            h('button', { class: `mini ${paused ? 'warn' : 'ghost'}`, onclick: () => this.act({ type: 'pauseMenu', menuId: m.id, paused: !paused }) }, paused ? '販売停止中' : '販売中'),
+            h('button', { class: `mini ${paused ? 'warn' : 'ghost'}`, onclick: () => this.actUndo({ type: 'pauseMenu', menuId: m.id, paused: !paused }, `${m.name}を${paused ? '販売中にしました' : '販売停止にしました'}`, { type: 'pauseMenu', menuId: m.id, paused }) }, paused ? '販売停止中' : '販売中'),
           );
         }),
       ),
@@ -1513,7 +1520,7 @@ export class ManageMenu {
                 ? h('button', { class: `mini ${e.status === 'broken' ? 'danger' : ''}`, disabled: e.status === 'repairing', onclick: () => this.act({ type: 'repair', equipmentId: e.id }, '修理を依頼しました') }, e.status === 'repairing' ? '修理中' : `修理 ${yenStr(e.status === 'broken' ? def.repairCost : Math.round(def.repairCost * 0.5))}`)
                 : null,
               def.repairCost > 0
-                ? h('button', { class: `mini ${e.maintenanceBooked ? 'on' : 'ghost'}`, title: `ONにすると、状態が${MAINTENANCE_THRESHOLD}%を下回った日の閉店後にメンテ（状態+40%）を行います`, onclick: () => this.act({ type: 'maintenance', equipmentId: e.id, on: !e.maintenanceBooked }) }, `自動メンテ ${e.maintenanceBooked ? 'ON' : 'OFF'}`)
+                ? h('button', { class: `mini ${e.maintenanceBooked ? 'on' : 'ghost'}`, title: `ONにすると、状態が${MAINTENANCE_THRESHOLD}%を下回った日の閉店後にメンテ（状態+40%）を行います`, onclick: () => this.actUndo({ type: 'maintenance', equipmentId: e.id, on: !e.maintenanceBooked }, `${def.name}の自動メンテを${e.maintenanceBooked ? 'OFF' : 'ON'}にしました`, { type: 'maintenance', equipmentId: e.id, on: e.maintenanceBooked }) }, `自動メンテ ${e.maintenanceBooked ? 'ON' : 'OFF'}`)
                 : null,
               this.host.isHost
                 ? h(
@@ -1838,7 +1845,10 @@ export class ManageMenu {
           'select',
           {
             class: 'select',
-            onchange: (ev: Event) => this.act({ type: 'setRole', employeeId: e.id, role: (ev.target as HTMLSelectElement).value as EmployeeRole }),
+            onchange: (ev: Event) => {
+              const role = (ev.target as HTMLSelectElement).value as EmployeeRole;
+              void this.actUndo({ type: 'setRole', employeeId: e.id, role }, `${e.profile.name}さんの担当 ${ROLE_LABEL[e.profile.role]} → ${ROLE_LABEL[role]}`, { type: 'setRole', employeeId: e.id, role: e.profile.role });
+            },
           },
           // シフトリーダーは昇格でなる（担当の変更では選べない）
           (Object.keys(ROLE_LABEL) as EmployeeRole[])
