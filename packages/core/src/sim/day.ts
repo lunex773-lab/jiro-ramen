@@ -395,6 +395,22 @@ export function bankruptcyCheck(s: GameState): { bankrupt: boolean; overdue: num
   return { bankrupt: s.money + rescueCapacity(s) < overdue, overdue };
 }
 
+/**
+ * 期限を過ぎた未払金があって次の日に進めないときの数字（画面で選択肢を出すため。オーナーの指示 2026-11-12）。
+ * なければ null。loanPick: 足りない額をまかなう銀行の融資の額（借りられる上限まで・刻みに合わせる）
+ */
+export function overdueShortfall(s: GameState): { overdue: number; money: number; shortfall: number; loanMax: number; loanPick: number; sellable: number } | null {
+  const bc = bankruptcyCheck(s);
+  if (bc.overdue <= 0) return null;
+  const shortfall = Math.max(0, bc.overdue - Math.max(0, s.money));
+  const lim = loanLimit(s);
+  const step = BALANCE.loan.step;
+  const loanMax = lim.reason ? 0 : lim.max;
+  const loanPick = loanMax > 0 ? Math.min(loanMax, Math.max(step, Math.ceil(shortfall / step) * step)) : 0;
+  const sellable = s.equipment.reduce((a, e) => a + resaleValue(e), 0);
+  return { overdue: bc.overdue, money: s.money, shortfall, loanMax, loanPick, sellable };
+}
+
 export function declareBankruptcy(s: GameState, ctx: SimCtx, reason: string): void {
   s.phase = 'bankrupt';
   s.bankruptcy = { day: s.day, cash: s.money, debt: totalDebt(s), reason };

@@ -22,6 +22,7 @@ import {
   saveToSlot,
   type GameState,
   type SaveStore,
+  overdueShortfall,
 } from '@jiro/core';
 import { Sfx } from '../audio/sfx';
 import { World } from '../render/world';
@@ -976,6 +977,11 @@ export class App {
             return;
           }
           if (!res.ok) {
+            // 期限を過ぎた未払金を払えずに進めないときは、どうするかを選んでもらう（オーナーの指示 2026-11-12）
+            if (host.state.phase === 'closed' && overdueShortfall(host.state)) {
+              await this.resolveOverdue();
+              return;
+            }
             toast(this.uiLayer, res.reason ?? '進めません', 'danger', 5000);
             this.openManage('dash');
           }
@@ -992,6 +998,70 @@ export class App {
         },
       }),
     );
+  }
+
+  /**
+   * 期限を過ぎた未払金を払えず、次の日に進めないとき（オーナーの指示 2026-11-12「破産など何かしらの選択肢を出して」）。
+   * 銀行の融資で払う・設備を売る・ほかの会社から借りる（オンライン市場）・破産する・あとで決める、から選ぶ
+   */
+  private async resolveOverdue(): Promise<void> {
+    const host = this.host;
+    if (!host) return;
+    const yen = (v: number) => `¥${Math.round(v).toLocaleString('ja-JP')}`;
+    for (let round = 0; round < 4; round++) {
+      const f = overdueShortfall(host.state);
+      if (!f || host.state.phase !== 'closed') return;
+      const lines = [
+        `期限を過ぎた未払金 ${yen(f.overdue)} を払わないと、次の日に進めません。`,
+        `手元の現金 ${yen(f.money)}・足りない額 ${yen(f.shortfall)}`,
+        '',
+        f.loanMax > 0 ? `・銀行の融資: 今借りられるのは ${yen(f.loanMax)} まで（${yen(f.loanPick)} を借りて払えます）` : '・銀行の融資: 今は借りられません（借入の上限・評判）',
+        f.sellable > 0 ? `・設備を売る: 全部売ると最大 ${yen(f.sellable)}（売った設備は使えなくなります）` : null,
+        this.marketPlay ? '・ほかの会社から借りる: 企業間の貸し借り（相手の承認が要ります）' : null,
+        '・破産する: この店の経営を終えます（元に戻せません）',
+      ].filter((x): x is string => x !== null);
+      const choices: { label: string; value: string; kind?: 'primary' | 'danger' | 'ghost' }[] = [];
+      if (f.loanPick > 0) choices.push({ label: `🏦 ${yen(f.loanPick)} を借りて払う`, value: 'loan', kind: 'primary' });
+      if (f.sellable > 0) choices.push({ label: '🔧 設備を売る', value: 'equip', kind: 'ghost' });
+      if (this.marketPlay) choices.push({ label: '🤝 ほかの会社から借りる', value: 'credit', kind: 'ghost' });
+      choices.push({ label: '💀 破産する', value: 'bankrupt', kind: 'danger' });
+      choices.push({ label: 'あとで決める', value: 'later', kind: 'ghost' });
+      const v = await choiceDialog(this.uiLayer, '⚠ 支払いの期限が過ぎています', lines.join('\n'), choices);
+      if (v === 'loan') {
+        const r = await host.act({ type: 'takeLoan', amount: f.loanPick });
+        if (!r.ok) {
+          toast(this.uiLayer, r.reason ?? '借りられませんでした', 'danger', 5000);
+          continue;
+        }
+        await host.act({ type: 'payArrears' });
+        const res = await host.act({ type: 'nextDay' });
+        if (res.ok || (host.state.phase as string) === 'bankrupt') {
+          toast(this.uiLayer, `${yen(f.loanPick)} を借りて未払金を払いました`, 'good', 3000);
+          if (this.marketPlay) await this.commitMarketDay();
+          return;
+        }
+        // まだ足りなければ、もう一度選ぶ
+        continue;
+      }
+      if (v === 'equip') {
+        this.openManage('equip');
+        toast(this.uiLayer, '売る設備を選んでください。売ったら「翌日の仕込みへ →」をもう一度押すと、未払金を払って次の日へ進みます', 'info', 7000);
+        return;
+      }
+      if (v === 'credit') {
+        this.openManage('company');
+        toast(this.uiLayer, '「企業間の貸し借り」で、ほかの会社の申し込みを承認すると借りられます（借りられるのは同時に1社まで）', 'info', 7000);
+        return;
+      }
+      if (v === 'bankrupt') {
+        const ok = await confirmDialog(this.uiLayer, '破産する', `期限を過ぎた未払金 ${yen(f.overdue)} を払えないので、この店の経営を終えます。\n元に戻せません（セーブデータは残り、記録を見られます）。`, '破産する', true);
+        if (!ok) continue;
+        await host.act({ type: 'giveUp' });
+        if (this.marketPlay) await this.commitMarketDay();
+        return;
+      }
+      return;
+    }
   }
 
   // ───────────────── メニュー ─────────────────

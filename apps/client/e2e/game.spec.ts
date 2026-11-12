@@ -1723,3 +1723,46 @@ test('複数店舗: 日ごとの店舗別の売上（日 × 店の表と積み�
   }
   await shot(page, '51-store-days');
 });
+
+test('期限を過ぎた未払金を払えず次の日に進めないとき、融資で払う・設備を売る・破産するなどを選べる（オーナーの指示 2026-11-12）', async ({ page }) => {
+  test.setTimeout(120_000);
+  type OD = { __jiro: { host: { state: { phase: string; day: number; money: number; loans: unknown[]; arrears: { id: string; amount: number; reason: string; sinceDay: number; dueDay: number }[] }; act(a: unknown): Promise<unknown>; tick(dt: number): void } } };
+  const closeDayWithDebt = async () => {
+    await page.evaluate(async () => {
+      const app = (window as unknown as OD).__jiro;
+      await app.host.act({ type: 'openShop' });
+      for (let i = 0; i < 20000 && app.host.state.phase !== 'closed'; i++) app.host.tick(0.5);
+    });
+    await expect(page.getByRole('button', { name: '翌日の仕込みへ →' })).toBeVisible();
+    await page.evaluate(() => {
+      const s = (window as unknown as OD).__jiro.host.state;
+      s.money = 1_000;
+      s.arrears.push({ id: 'ar-test', amount: 50_000, reason: '家賃（テスト）', sinceDay: s.day - 3, dueDay: s.day - 1 });
+    });
+  };
+  await startNewGame(page);
+  await closeDayWithDebt();
+  await page.getByRole('button', { name: '翌日の仕込みへ →' }).click();
+  const dlg = page.locator('.modal');
+  await expect(dlg).toContainText('支払いの期限が過ぎています');
+  await expect(dlg).toContainText('足りない額 ¥49,000');
+  await expect(dlg.getByRole('button', { name: '💀 破産する' })).toBeVisible();
+  await expect(dlg.getByRole('button', { name: 'あとで決める' })).toBeVisible();
+  // 融資で払って次の日へ
+  await dlg.getByRole('button', { name: /を借りて払う/ }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as OD).__jiro.host.state.phase)).toBe('prep');
+  const st = await page.evaluate(() => {
+    const s = (window as unknown as OD).__jiro.host.state;
+    return { loans: s.loans.length, arrears: s.arrears.length };
+  });
+  expect(st.loans).toBe(1);
+  expect(st.arrears).toBe(0);
+  // 次の日も払えない → 破産を選ぶと、確かめてから破産の画面へ
+  await closeDayWithDebt();
+  await page.getByRole('button', { name: '翌日の仕込みへ →' }).click();
+  await page.locator('.modal').getByRole('button', { name: '💀 破産する' }).click();
+  await expect(page.locator('.modal')).toContainText('元に戻せません');
+  await page.locator('.modal').getByRole('button', { name: '破産する', exact: true }).click();
+  await expect(page.locator('.screen.bankrupt')).toBeVisible();
+  await shot(page, '52-overdue-bankrupt');
+});
