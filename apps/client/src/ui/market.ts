@@ -40,6 +40,7 @@ import {
   SETTINGS_LABEL,
   settingsText,
   type CreditOp,
+  enterpriseValue,
 } from '@jiro/core';
 import type { App } from '../game/app';
 import { Api, ApiError, defaultServerUrl, type Auth, type MyMarket } from '../net/api';
@@ -49,7 +50,7 @@ import { hoursDialog, hoursSummary } from './hours-dialog';
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { codeBlock } from './room-code';
 import { cardHead, kpi, kpiRow, meterBar, yenSigned } from './kit';
-import { loanControl } from './loan';
+import { loanControl, loanSummary } from './loan';
 import { creditCard } from './market-credit';
 import { forecastLines } from './site-lines';
 
@@ -67,6 +68,16 @@ export type MarketScreenView = MarketView & {
 };
 
 const PERIOD_LABEL = (d: number | null) => (d === null ? '無期限' : `${d}日`);
+
+/** 市場の画面の上の切り替え（じろ6: 改修設計書06。1枚の長いページをやめる） */
+type MarketSub = 'rank' | 'mine' | 'grow' | 'credit' | 'settings';
+const MARKET_TABS: [MarketSub, string][] = [
+  ['rank', '📊 順位'],
+  ['mine', '🏢 自社'],
+  ['grow', '🗾 出店と採用'],
+  ['credit', '🤝 貸し借り'],
+  ['settings', '⚙ 設定'],
+];
 
 /**
  * 市場の読み直しの間隔。画面が見えているときだけ読み直す（Free の要求数を使いすぎないため）。
@@ -396,6 +407,8 @@ export class MarketScreen {
   private clockTimer: number | null = null;
   private pressing = false;
   private loading = false;
+  /** 上の切り替えで選んでいるもの */
+  private sub: MarketSub = 'rank';
 
   constructor(
     private root: HTMLElement,
@@ -418,7 +431,7 @@ export class MarketScreen {
     void this.refresh();
     this.timer = window.setInterval(() => this.poll(), POLL_TICK_MS);
     document.addEventListener('visibilitychange', this.onVisible);
-    this.clockTimer = window.setInterval(() => this.renderHead(), 1000);
+    this.clockTimer = window.setInterval(() => this.tickClock(), 1000);
   }
 
   private release = (): void => {
@@ -487,34 +500,105 @@ export class MarketScreen {
     await this.refresh();
   }
 
-  private renderHead(): void {
-    const v = this.view;
-    if (!v) return;
+  /** 同期の欄の文（次の0時までの時間など） */
+  private syncText(v: MarketScreenView): string {
     const now = Date.now() + this.offset;
     const left = Math.max(0, Math.ceil((v.clock.nextMidnight - now) / 1000));
     const hh = Math.floor(left / 3600);
     const mm = String(Math.floor((left % 3600) / 60)).padStart(2, '0');
-    const mine = v.mine;
-    const playing = !!mine?.openDay;
-    const bankrupt = mine ? mine.state.phase === 'bankrupt' : true;
-    const myDay = mine ? mine.progress.lastProcessedGameDate + 1 : 0;
-    const syncText = v.ended
+    return v.ended
       ? '競争期間は終わりました（0時の同期・ランキングはありません）'
       : v.clock.syncPending
         ? '0時の計算中（終わるまで新しい日は始められません）'
         : `次の0時まで ${hh}時間${mm}分`;
+  }
+
+  /** 1秒ごと: 時計の文だけ書き換える（見出し全体を作り直すと、押そうとしたボタンが入れ替わってしまう） */
+  private tickClock(): void {
+    const v = this.view;
+    if (!v) return;
+    const el = this.head.querySelector<HTMLElement>('[data-sync]');
+    const t = this.syncText(v);
+    if (el && el.textContent !== t) el.textContent = t;
+  }
+
+  private renderHead(): void {
+    const v = this.view;
+    if (!v) return;
+    const mine = v.mine;
+    const playing = !!mine?.openDay;
+    const bankrupt = mine ? mine.state.phase === 'bankrupt' : true;
+    const myDay = mine ? mine.progress.lastProcessedGameDate + 1 : 0;
+    const syncText = this.syncText(v);
+    // じろ6: 先頭に自分の順位・シェア・売上・企業価値（どの切り替えでも見える）。同期の様子は小さく1行に
+    const myIdx = v.companies.findIndex((c) => c.mine);
+    const me = myIdx >= 0 ? v.companies[myIdx]! : null;
+    const alive = v.companies.filter((c) => !c.bankrupt).length;
+    const rankIn = (rep: (typeof v.history)[number] | undefined) => {
+      if (!rep || !mine) return -1;
+      return [...rep.companies].filter((c) => !c.bankrupt).sort((a, b) => b.share - a.share).findIndex((c) => c.id === mine.companyId);
+    };
+    const cur = rankIn(v.history.at(-1));
+    const prev = rankIn(v.history.at(-2));
+    const move = cur >= 0 && prev >= 0 ? prev - cur : null;
+    const lastEvent = v.decisions.at(-1) ?? null;
+    const names = new Map(v.companies.map((c) => [c.id, c.name]));
     replace(
       this.head,
-      h('h2', null, v.name),
-      // 数字のカード（じろ1 P6・承認した見た目の案）
       h(
         'div',
-        { class: 'kpi-row market-stats' },
+        { class: 'market-title' },
+        h('h2', null, v.name),
+        h('div', { class: 'market-code' }, h('span', { class: 'note' }, '招待コード'), codeBlock(this.root, v.code)),
+        h(
+          'button',
+          {
+            class: 'btn',
+            'data-open-ranking': '',
+            onclick: () => {
+              this.stop();
+              this.onRanking();
+            },
+          },
+          '🏆 全国の順位',
+        ),
+        // いちばん押してほしいボタン（黄色）は見出しの行の右に
+        mine
+          ? h(
+              'button',
+              {
+                class: 'btn primary big',
+                'data-market-play': '',
+                disabled: bankrupt || v.clock.syncPending,
+                onclick: () => {
+                  this.stop();
+                  this.onPlay();
+                },
+              },
+              bankrupt ? '破産しています' : playing ? `${myDay}日目の営業を続ける（初めから）` : `${myDay}日目を営業する`,
+            )
+          : null,
+      ),
+      me && mine
+        ? kpiRow(
+            [
+              kpi('順位（この市場）', me.bankrupt ? '—' : `${myIdx + 1}位 / ${alive}社`, move === null ? '前日との比較はまだありません' : move > 0 ? `前日から ▲${move}` : move < 0 ? `前日から ▼${-move}` : '前日と同じ', 'accent', move !== null && move > 0 ? 'good' : move !== null && move < 0 ? 'bad' : '', { 'data-my-market-rank': String(myIdx + 1) }),
+              kpi('シェア', pct(me.share), `直近${BALANCE.market.shareDays}日の純売上の割合`),
+              kpi('売上', v.commonMarketDate > 0 ? yenStr(me.netSales) : '—', v.commonMarketDate > 0 ? `${v.commonMarketDate}日目・営業利益 ${yenSigned(me.operatingProfit, true)}` : 'まだ全社がそろった日がありません', '', me.operatingProfit < 0 ? 'bad' : ''),
+              kpi('企業価値', yenSigned(enterpriseValue(mine.state)), '現金＋設備＋在庫−借入（純資産）'),
+            ],
+            'market-my-kpis',
+          )
+        : null,
+      h(
+        'div',
+        { class: 'market-status' },
         stat('全社が営業済み', { 'data-market-day': String(v.commonMarketDate) }, v.commonMarketDate === 0 ? 'まだ0日' : `${v.commonMarketDate}日目まで`),
         stat('いちばん進んだ会社', { 'data-leader-day': String(v.leaderDay) }, `${v.leaderDay}日目まで`),
         stat('同期', { 'data-sync': v.ended ? 'ended' : v.clock.syncPending ? 'pending' : 'idle' }, syncText, v.clock.syncPending ? 'warn' : ''),
         stat('自動営業', { 'data-auto-status': v.sync ? v.sync.status : 'idle' }, autoStatusText(v)),
       ),
+      lastEvent ? h('p', { class: 'note market-event', 'data-market-event': '' }, `📣 市場の出来事（${lastEvent.day}日目）: ${names.get(lastEvent.companyId) ?? ''} ${lastEvent.text}`) : null,
       v.ended
         ? h(
             'p',
@@ -522,38 +606,8 @@ export class MarketScreen {
             '🏁 この市場の競争期間は終わりました。営業は続けられます（ほかの会社とは同期しません）。上位3社には大会の称号が届きます。会社は「育てた企業も参加できる」別のコミュニティへ持っていけます（入口の「参加する会社」で選びます）。',
           )
         : null,
-      v.isOwner ? h('button', { class: 'btn ghost', 'data-edit-market': '', onclick: () => void this.editSettings(v) }, '⚙ 市場の設定を変える') : null,
-      v.isOwner ? h('button', { class: 'btn ghost danger', 'data-delete-this-market': '', onclick: () => void this.deleteMarket(v) }, '🗑 この市場を消す') : null,
       !mine && v.myStatus === 'moved' ? h('p', { class: 'note', 'data-my-status': 'moved' }, 'あなたの会社は別のコミュニティへ移りました（この市場の記録は残ります）') : null,
       !mine && v.myStatus === 'retired' ? h('p', { class: 'note', 'data-my-status': 'retired' }, 'あなたの会社は引退しました（この市場の記録は残ります）') : null,
-      h('div', { class: 'market-code' }, h('span', { class: 'note' }, '招待コード'), codeBlock(this.root, v.code)),
-      h(
-        'button',
-        {
-          class: 'btn',
-          'data-open-ranking': '',
-          onclick: () => {
-            this.stop();
-            this.onRanking();
-          },
-        },
-        '🏆 ランキング',
-      ),
-      mine
-        ? h(
-            'button',
-            {
-              class: 'btn primary big',
-              'data-market-play': '',
-              disabled: bankrupt || v.clock.syncPending,
-              onclick: () => {
-                this.stop();
-                this.onPlay();
-              },
-            },
-            bankrupt ? '破産しています' : playing ? `${myDay}日目の営業を続ける（初めから）` : `${myDay}日目を営業する`,
-          )
-        : null,
       playing
         ? h('p', { class: 'note', 'data-playing-note': '' }, `端末で${myDay}日目を営業中です。この画面で変えたこと（値段・人・出店・融資など）は、営業を続けるときに入ります（その日は初めからやり直します）。`)
         : null,
@@ -566,6 +620,27 @@ export class MarketScreen {
               : `あなたの会社は ${mine.progress.lastProcessedGameDate}日目まで営業済み（今日 手動で ${mine.progress.manualProgressDays}日）。0時に、遅れている会社は自動営業で ${v.leaderDay}日目までそろいます。`,
           )
         : null,
+      h(
+        'div',
+        { class: 'market-tabs', role: 'tablist', 'aria-label': '市場の画面の切り替え' },
+        MARKET_TABS.map(([id, label]) =>
+          h(
+            'button',
+            {
+              class: `mtab${this.sub === id ? ' on' : ''}`,
+              role: 'tab',
+              'aria-selected': String(this.sub === id),
+              'data-market-tab': id,
+              onclick: () => {
+                this.sub = id;
+                this.render();
+                this.el.querySelector('.screen-inner')?.scrollTo({ top: 0 });
+              },
+            },
+            label,
+          ),
+        ),
+      ),
     );
   }
 
@@ -574,7 +649,20 @@ export class MarketScreen {
     if (!v) return;
     this.renderHead();
     const scroll = this.body.scrollTop;
-    replace(this.body, h('div', { class: 'grid2' }, this.standings(v), this.mine(v), this.decisions(v), this.history(v)));
+    const bankrupt = !v.mine || v.mine.state.phase === 'bankrupt';
+    const content: (HTMLElement | null)[] =
+      this.sub === 'rank'
+        ? [this.standings(v), this.decisions(v), this.history(v)]
+        : this.sub === 'mine'
+          ? this.mineCards(v)
+          : this.sub === 'grow'
+            ? v.mine
+              ? [this.rangeCard(v), this.growth(v.mine.state, v), this.hiring(v.mine.state)]
+              : [h('section', { class: 'card wide' }, h('p', { class: 'note' }, 'この市場に企業がありません'))]
+            : this.sub === 'credit'
+              ? [bankrupt ? h('section', { class: 'card wide' }, h('p', { class: 'note' }, '企業間の貸し借りは、市場で営業している会社だけができます')) : creditCard(this.root, v, { op: (op, okMsg) => this.credit(op, okMsg) })]
+              : this.settingsCards(v);
+    replace(this.body, h('div', { class: 'grid2', 'data-market-sub': this.sub }, content));
     this.body.scrollTop = scroll;
   }
 
@@ -652,10 +740,10 @@ export class MarketScreen {
     );
   }
 
-  private mine(v: MarketScreenView): HTMLElement {
-    if (!v.mine) return h('section', { class: 'card wide' }, h('p', { class: 'note' }, 'この市場に企業がありません'));
+  /** 自社: お金（借入の内訳・融資）・店・自動経営の方針・店ごとの設定 */
+  private mineCards(v: MarketScreenView): (HTMLElement | null)[] {
+    if (!v.mine) return [h('section', { class: 'card wide' }, h('p', { class: 'note' }, 'この市場に企業がありません'))];
     const s = v.mine.state;
-    const row = (k: string, val: string, cls = '') => h('div', { class: `kv ${cls}` }, h('span', null, k), h('b', null, val));
     const last = s.company.history[s.company.history.length - 1] ?? null;
     const bankrupt = s.phase === 'bankrupt';
     const finance = h(
@@ -665,7 +753,7 @@ export class MarketScreen {
       bankrupt ? null : this.renameRow('屋号', s.shopName, 'data-rename-shop', '', (v) => void this.act({ type: 'rename', name: v }, `店名を「${v}」にしました`)),
       kpiRow([
         kpi('現金', yenSigned(s.money), null, s.money < 50_000 ? 'bad' : ''),
-        kpi('借入・未払金', yenSigned(totalDebt(s)), null, totalDebt(s) > 0 ? 'warn' : ''),
+        kpi('返済の残り（借入・未払金）', yenSigned(totalDebt(s)), `借入の総額 ${yenStr(s.loans.reduce((a, l) => a + l.principal, 0))}`, totalDebt(s) > 0 ? 'warn' : ''),
         last ? kpi(`${last.day}日目の営業利益（全店）`, yenSigned(last.operatingProfit, true), `純売上 ${yenSigned(last.netSales)}`, last.operatingProfit < 0 ? 'bad' : 'good') : null,
         kpi('評判（本店）', `★ ${s.reputation.toFixed(2)}`, stars(s.reputation), 'accent'),
       ]),
@@ -690,12 +778,19 @@ export class MarketScreen {
         }),
       ),
       bankrupt ? h('p', { class: 'note bad' }, '破産しました。市場から消えています') : null,
+      h('h5', null, '🏦 銀行の借入'),
+      loanSummary(s),
       !bankrupt ? loanControl(this.root, s, (amount) => this.act({ type: 'takeLoan', amount }, '融資を受けました')) : null,
-      // 競争中でも自分から抜けられる（じろ2: 引退として抜ける）
-      h('button', { class: 'btn ghost danger', 'data-retire': '', onclick: () => void this.retire(bankrupt, !!v.ended) }, bankrupt || v.ended ? '会社を引退させる' : '市場を抜ける（引退）'),
     );
     const stores = s.company.stores.map((entry) => this.storeCard(s, entry, v.mine!.progress.lastProcessedGameDate));
+    return [finance, this.autoPolicy(s), ...stores];
+  }
+
+  /** 設定: この市場の決まり・設定の変更の記録・市場の設定を変える／消す（作った人）・市場を抜ける（危ない操作は奥に） */
+  private settingsCards(v: MarketScreenView): (HTMLElement | null)[] {
+    const row = (k: string, val: string, cls = '') => h('div', { class: `kv ${cls}` }, h('span', null, k), h('b', null, val));
     const st = v.settings;
+    const bankrupt = !v.mine || v.mine.state.phase === 'bankrupt';
     const rules = h(
       'section',
       { class: 'card market-rules' },
@@ -708,9 +803,19 @@ export class MarketScreen {
       row('参加の方法', st.visibility === 'public' ? '公開（一覧から誰でも）' : '招待コード'),
       row('終わったあと', 'この市場で営業を続けられる（同期・順位なし）／別のコミュニティへ移せる／上位3社に称号'),
       h('p', { class: 'note' }, '営業していない間の経営（値段・人・出店）は、この画面で決められます。拡張の工事は、営業の画面で閉店後に決めます。'),
+      v.isOwner ? h('button', { class: 'btn ghost', 'data-edit-market': '', onclick: () => void this.editSettings(v) }, '⚙ 市場の設定を変える') : null,
     );
-    const credit = bankrupt ? null : creditCard(this.root, v, { op: (op, okMsg) => this.credit(op, okMsg) });
-    return h('div', { class: 'market-mine-col' }, finance, credit, rules, this.settingsLog(v), this.rangeCard(v), this.autoPolicy(s), ...stores, this.growth(s, v), this.hiring(s));
+    // 危ない操作（市場を抜ける・市場を消す）は、いちばん下にまとめて、必ず確認を出す
+    const danger = h(
+      'section',
+      { class: 'card market-danger', 'data-market-danger': '' },
+      h('h4', null, '⚠ 取り消せない操作'),
+      v.mine ? h('p', { class: 'note' }, '市場を抜けると、この市場ではもう営業できません（記録と順位は残ります）。') : null,
+      v.mine ? h('button', { class: 'btn ghost danger', 'data-retire': '', onclick: () => void this.retire(bankrupt, !!v.ended) }, bankrupt || v.ended ? '会社を引退させる' : '市場を抜ける（引退）') : null,
+      v.isOwner ? h('p', { class: 'note' }, '市場を消すと、この市場の会社・店・お金・記録がすべて消えます。') : null,
+      v.isOwner ? h('button', { class: 'btn ghost danger', 'data-delete-this-market': '', onclick: () => void this.deleteMarket(v) }, '🗑 この市場を消す') : null,
+    );
+    return [rules, this.settingsLog(v), v.mine || v.isOwner ? danger : null];
   }
 
   /** 企業間の貸し借りの操作（同じ操作の ID は一度だけ） */

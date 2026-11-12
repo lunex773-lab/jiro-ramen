@@ -1493,3 +1493,50 @@ details.help:not([open]) > .help-body { display: none; }
 .loan-cell.good b { color: var(--good); }
 .loan-row { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px; padding: 3px 0; }
 .loan-row b { font-variant-numeric: tabular-nums; }
+/* じろ6: 市場の画面（先頭に自分の順位・シェア・売上・企業価値、上の切り替え。危ない操作は「設定」のいちばん下） */
+.market-head { display: flex; flex-direction: column; gap: 6px; }
+.market-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.market-title h2 { margin: 0; flex: 1 1 auto; min-width: 0; font-size: 20px; }
+.market-head .market-title .market-code { display: flex; align-items: center; gap: 6px; }
+.market-head .room-code { font-size: 18px; padding: 2px 10px; }
+.market-my-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 0; }
+.market-my-kpis .kpi-value { font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.market-my-kpis .kpi-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@container app (max-width: 560px) {
+  .market-my-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.market-status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.market-status .kpi { padding: 3px 8px; background: transparent; border-color: var(--line); }
+.market-status .kpi-label { font-size: 10.5px; }
+.market-status .kpi-value.small { font-size: 12.5px; font-weight: 700; line-height: 1.3; }
+@container app (max-width: 700px) {
+  .market-status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.market-event { margin: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.market-head > .note { margin: 0; }
+.market-tabs { position: sticky; top: 0; z-index: 3; display: flex; gap: 4px; padding: 6px 0; background: var(--ink); border-bottom: 1px solid var(--line); overflow-x: auto; }
+.mtab { flex: 1 0 auto; min-height: 44px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--s1); color: var(--muted); font: inherit; font-weight: 800; font-size: 13px; white-space: nowrap; }
+.mtab.on { background: var(--s3); color: var(--yellow); border-color: rgba(242, 194, 0, 0.5); box-shadow: inset 0 -3px 0 var(--yellow); }
+.market-danger { border-color: rgba(231, 76, 60, 0.35) !important; }
+.market-danger .btn { margin-top: 4px; }
+.market-head { align-items: stretch; margin-bottom: 4px; }
+.market-head > * { grid-column: auto; }
+.market-title [data-market-play] { margin-left: auto; min-height: 48px; padding: 8px 22px; font-size: 16px; }
+.market-head > .note { font-size: 12px; }
+.market-tabs { justify-content: stretch; }
+@container app (max-height: 500px) {
+  .market-title { gap: 6px; }
+  .market-title h2 { font-size: 16px; }
+  .market-title .market-code .note { display: none; }
+  .market-head .room-code { font-size: 14px; padding: 2px 8px; letter-spacing: 0.08em; }
+  .market-title .btn { min-height: 40px; padding: 4px 10px; font-size: 13px; }
+  .market-title [data-market-play] { min-height: 44px; padding: 6px 14px; font-size: 14px; }
+  .market-my-kpis .kpi { padding: 4px 8px; }
+  .market-my-kpis .kpi-value { font-size: 16px; }
+  .market-status .kpi { padding: 2px 6px; }
+}
+@container app (max-height: 500px) {
+  .market-status { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .market-status .kpi-label { font-size: 9.5px; }
+  .market-status .kpi-value.small { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}

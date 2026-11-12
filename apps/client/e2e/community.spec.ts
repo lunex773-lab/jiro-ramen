@@ -188,11 +188,14 @@ test('コミュニティ: 公開の一覧から、終わった市場で育てた
   await modal.getByRole('button', { name: '持っていく' }).click();
   const screen = page.locator('.screen.market');
   await expect(screen.locator('.market-head')).toContainText('みんなの市場');
-  await expect(screen.locator('.market-mine')).toContainText('¥456,789');
   await expect(screen.locator('.market-standings .trow.mine')).toContainText('去年の大会の店（あなた）');
+  await expect(screen.locator('[data-history]')).toContainText('無期限');
+  // じろ6: 上の切り替え（自社・設定）
+  await screen.locator('[data-market-tab="mine"]').click();
+  await expect(screen.locator('.market-mine')).toContainText('¥456,789');
+  await screen.locator('[data-market-tab="settings"]').click();
   await expect(screen.locator('.market-rules')).toContainText('公開（一覧から誰でも）');
   await expect(screen.locator('[data-description]')).toHaveText('誰でもどうぞ');
-  await expect(screen.locator('[data-history]')).toContainText('無期限');
   await expect(screen.locator('[data-market-play]')).toContainText('1日目を営業する');
   // 元の市場では「移った」
   expect(mock.markets.get('old1')!.m.companies.find((c) => c.ownerId === ME)!.status).toBe('moved');
@@ -213,6 +216,7 @@ test('コミュニティ: 終わった市場でも営業でき、会社を引退
   await expect(screen.locator('[data-market-play]')).toBeEnabled();
   await expect(screen.locator('[data-history]')).toContainText('ランキングの「累計」が大会の結果です');
   await shot(page, '71-community-ended');
+  await screen.locator('[data-market-tab="settings"]').click();
   await screen.locator('[data-retire]').click();
   const modal = page.locator('.modal');
   await expect(modal).toContainText('記録・称号は残ります');
@@ -230,6 +234,7 @@ test('コミュニティ: 自分が作った市場は、確認してから消せ
   await lobby.locator('[data-join-public="pub1"]').click();
   const screen = page.locator('.screen.market');
   await expect(screen.locator('.market-head')).toContainText('みんなの市場');
+  await screen.locator('[data-market-tab="settings"]').click();
   await expect(screen.locator('[data-delete-this-market]')).toHaveCount(0);
   await screen.getByRole('button', { name: '← 市場から出る' }).click();
   const lobby2 = await openLobby(page);
@@ -246,6 +251,7 @@ test('コミュニティ: 自分が作った市場は、確認してから消せ
   expect(mock.markets.has('old2')).toBe(false);
   // 市場の画面からも消せる
   await lobby2.locator('[data-open-market="old1"]').click();
+  await screen.locator('[data-market-tab="settings"]').click();
   await screen.locator('[data-delete-this-market]').click();
   await page.locator('.modal').getByRole('button', { name: '消す' }).click();
   await expect(page.locator('.market-lobby')).toBeVisible();

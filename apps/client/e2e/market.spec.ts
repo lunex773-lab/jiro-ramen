@@ -215,11 +215,17 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   await expect(rows).toHaveCount(4);
   expect(mock.market!.settings.maxCompanies).toBe(4);
   await expect(screen.locator('.market-standings .trow.mine')).toContainText('テスト亭（あなた）');
+  // じろ6: 先頭に自分の順位・シェア・売上・企業価値（どの切り替えでも見える）
+  await expect(screen.locator('.market-head [data-my-market-rank]')).toContainText('位 / 4社');
+  await expect(screen.locator('.market-head .market-my-kpis')).toContainText('企業価値');
+  // 決まりは「設定」の切り替え
+  await screen.locator('[data-market-tab="settings"]').click();
   await expect(screen.locator('.market-rules')).toContainText('4社まで');
   expect(mock.market!.settings.cityCode).toBe('27100');
   expect(mock.market!.companies.every((c) => c.state.company.stores[0]!.location === '27100')).toBe(true);
   await expect(screen.locator('.market-rules')).toContainText('大阪府 大阪市');
-  // 出店の範囲（じろ1 Q13）: はじめは市場の街。次の「同じ都道府県」の条件の様子が出る
+  // 出店の範囲（じろ1 Q13）: はじめは市場の街。次の「同じ都道府県」の条件の様子が出る（「出店と採用」の切り替え）
+  await screen.locator('[data-market-tab="grow"]').click();
   const range = screen.locator('[data-market-range="city"]');
   await expect(range).toContainText('出店の範囲: 市場の街');
   await expect(range.locator('[data-range-check="cityStores"]')).toContainText('市場の街に2店以上（今 1店）');
@@ -238,15 +244,18 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   await expect(siteMap.locator('[data-map-confirm]')).toBeDisabled();
   await siteMap.locator('[data-map-close]').click();
   await expect(siteMap).toHaveCount(0);
-  // 屋号を変える（市場の会社の名前も変わる）
+  // 屋号を変える（市場の会社の名前も変わる。「自社」の切り替え）
+  await screen.locator('[data-market-tab="mine"]').click();
   await screen.locator('[data-rename-shop]').fill('テスト亭 本舗');
   await screen.locator('[data-rename-shop-ok]').click();
   await expect.poll(() => mock.market!.companies[0]!.name).toBe('テスト亭 本舗');
+  await screen.locator('[data-market-tab="rank"]').click();
   await expect(screen.locator('.market-standings .trow.mine')).toContainText('テスト亭 本舗（あなた）');
   expect(mock.acts.map((a) => a.type)).toContain('rename');
   await shot(page, '60-market');
   // 営業していない間の経営: 本店の方針の値段を定価の90%にする（サーバーへ操作を送る）
   const storeId = mock.market!.companies[0]!.state.company.stores[0]!.id;
+  await screen.locator('[data-market-tab="mine"]').click();
   await screen.locator(`[data-price="${storeId}"]`).selectOption('0.9');
   await expect.poll(() => mock.market!.companies[0]!.state.company.stores[0]!.policy.priceMult).toBe(0.9);
   expect(mock.acts.map((a) => a.type)).toContain('setStorePolicy');
@@ -305,9 +314,11 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   void page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.returnToTitle());
   await page.getByRole('button', { name: '市場の画面に戻る' }).click();
   await expect(screen.locator('[data-leader-day]')).toHaveText('1日目まで');
+  await screen.locator('[data-market-tab="rank"]').click();
   await expect(screen.locator('.market-standings .trow.mine [data-progress]')).toContainText('1日目まで（今日 手動1日）');
   // 端末で2日目を営業中でも、市場の画面から経営の操作ができる（オーナーの指示 2026-11-11）
   await expect(screen.locator('[data-playing-note]')).toContainText('2日目を営業中');
+  await screen.locator('[data-market-tab="mine"]').click();
   await screen.locator(`[data-price="${storeId}"]`).selectOption('1.1');
   await expect.poll(() => mock.market!.companies[0]!.state.company.stores[0]!.policy.priceMult).toBe(1.1);
 
@@ -384,6 +395,7 @@ test('共通市場: 作った人は、あとから市場の名前・公開・会
   await lobby.locator('input[placeholder="会社（店）の名前"]').fill('設定亭');
   await lobby.locator('[data-create-market]').click();
   const screen = page.locator('.screen.market');
+  await screen.locator('[data-market-tab="settings"]').click();
   await expect(screen.locator('[data-edit-market]')).toBeVisible();
   await screen.locator('[data-edit-market]').click();
   const dlg = page.locator('.modal');
@@ -420,8 +432,11 @@ test('共通市場: 銀行の融資は額を選べる。企業間の貸し借り
   await lobby.locator('input[placeholder="会社（店）の名前"]').fill('貸し亭');
   await lobby.locator('[data-create-market]').click();
   const screen = page.locator('.screen.market');
+  // じろ6: 貸し借りは「貸し借り」、銀行の融資は「自社」の切り替え
+  await screen.locator('[data-market-tab="credit"]').click();
   await expect(screen.locator('[data-market-credit]')).toBeVisible();
   // 銀行の融資: 5万円刻みで選ぶ（日報がないので返済能力は最低の20万円）
+  await screen.locator('[data-market-tab="mine"]').click();
   await expect(screen.locator('[data-loan-amount] option')).toHaveCount(4);
   await screen.locator('[data-loan-amount]').selectOption('100000');
   await screen.locator('[data-take-loan]').click();
@@ -431,6 +446,10 @@ test('共通市場: 銀行の融資は額を選べる。企業間の貸し借り
   expect(joinMarket(mock.market!, 'u2', '借り軒').ok).toBe(true);
   await screen.getByRole('button', { name: '← 市場から出る' }).click();
   await page.locator('.market-lobby [data-open-market]').first().click();
+  // 借入の総額と返済の残りを分けて出す
+  await screen.locator('[data-market-tab="mine"]').click();
+  await expect(screen.locator('[data-loan-summary]')).toContainText('借入の総額（借りた額）¥100,000');
+  await screen.locator('[data-market-tab="credit"]').click();
   const credit = page.locator('.screen.market [data-market-credit]');
   await credit.locator('[data-credit-to]').selectOption({ label: '借り軒' });
   await credit.locator('[data-credit-amount]').selectOption('50000');
@@ -443,11 +462,13 @@ test('共通市場: 銀行の融資は額を選べる。企業間の貸し借り
   expect(marketCredit(mock.market!, 'u2', { op: 'accept', creditId: id }, Date.now()).ok).toBe(true);
   await screen.getByRole('button', { name: '← 市場から出る' }).click();
   await page.locator('.market-lobby [data-open-market]').first().click();
+  await screen.locator('[data-market-tab="credit"]').click();
   await expect(page.locator('.screen.market [data-credit-status="active"]')).toContainText('返している最中');
   await expect(page.locator('.screen.market [data-credit-book]')).toContainText('貸している ¥50,000');
   await page.locator('.screen.market [data-market-credit]').scrollIntoViewIfNeeded();
   await shot(page, '62-market-credit');
-  // 競争中でも市場を抜けられる（引退）
+  // 競争中でも市場を抜けられる（引退）。危ない操作は「設定」のいちばん下
+  await screen.locator('[data-market-tab="settings"]').click();
   await page.locator('.screen.market [data-retire]').click();
   await expect(page.locator('.modal')).toContainText('この市場の記録と順位は残ります');
   await page.locator('.modal').getByRole('button', { name: '抜ける' }).click();

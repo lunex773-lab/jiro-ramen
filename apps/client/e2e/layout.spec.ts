@@ -363,6 +363,12 @@ async function walk(page: Page, p: Profile): Promise<{ issues: Issue[]; shots: s
   await expect(page.locator('.screen.market .market-head')).toBeVisible();
   await page.waitForTimeout(400);
   await check('market');
+  // じろ6: 上の切り替えのどの画面でも、ボタン・文字が重ならず、はみ出さない
+  for (const t of ['mine', 'grow', 'credit', 'settings', 'rank']) {
+    await page.locator(`.screen.market [data-market-tab="${t}"]`).click();
+    await page.waitForTimeout(250);
+    await check(`market-${t}`);
+  }
   await page.locator('[data-open-ranking]').click();
   await expect(page.locator('.screen.ranking')).toBeVisible();
   await check('ranking');
