@@ -1303,3 +1303,163 @@ details.help:not([open]) > .help-body { display: none; }
 .prep-amount-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .prep-amount-row .chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .prep-amount-row .chips .mini { min-height: 32px; min-width: 44px; }
+
+/* ───────── じろ6（改修設計書06 UI/UX 全面改善）: デザインのきまり ─────────
+   地の色は落ち着いた黒〜こげ茶。黄色（店の色）は「選んでいるもの」と「いちばん押してほしいボタン」だけ。
+   良い・悪い・注意の色は数字の変化と状態だけ。数字は桁がそろう字形。押す場所は高さ 40px 以上（指で押しやすく） */
+:root {
+  --s1: #1a1613;
+  --s2: #221d19;
+  --s3: #2c2621;
+  --line2: rgba(255, 255, 255, 0.13);
+  --dim: #7d7266;
+}
+/* 経営メニュー: 細い見出し＋左の縦のナビ */
+.manage {
+  background: #110e0c;
+  padding: calc(var(--sat) + 4px) calc(var(--sar) + 8px) calc(var(--sab) + 4px) calc(var(--sal) + 6px);
+  font-variant-numeric: tabular-nums;
+}
+.manage-head { gap: 10px; min-height: 40px; border-bottom: 1px solid var(--line); padding-bottom: 4px; justify-content: flex-start; }
+.manage-title { font-size: 16px; color: var(--text); white-space: nowrap; }
+.manage-crumb { flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.manage-head .readonly-badge { flex: 0 1 auto; }
+.manage .close { min-height: 36px; padding: 4px 12px; flex: 0 0 auto; margin-left: auto; }
+.manage-main { flex: 1; min-height: 0; display: flex; gap: 8px; padding-top: 6px; }
+.manage .tabs { flex-direction: column; flex: 0 0 64px; width: 64px; overflow-y: auto; overflow-x: hidden; padding: 0; gap: 2px; touch-action: pan-y; }
+.manage .tab {
+  flex: 1 1 0;
+  min-height: 30px;
+  max-height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 2px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+.manage .tab .tab-icon { font-size: 17px; line-height: 1; }
+.manage .tab.on { background: var(--s3); color: var(--yellow); box-shadow: inset 3px 0 0 var(--yellow); }
+.manage .tab[hidden] { display: none; }
+.manage-body { min-width: 0; padding-right: 2px; }
+/* カード・数字のカード: 地の色を1段明るく、見出しは白（黄色は使わない） */
+.manage .card, .screen.market .card { background: var(--s1); border: 1px solid var(--line); border-radius: 12px; }
+.manage .card h4, .screen.market .card h4 { color: var(--text); font-size: 14px; letter-spacing: 0.02em; }
+.kpi { background: var(--s1); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px 7px; }
+.kpi-value { font-size: 20px; font-variant-numeric: tabular-nums; }
+.kpi-label, .kpi-sub { font-size: 11.5px; }
+.kpi.tone-hero { background: linear-gradient(180deg, #2a2218, #1d1814); border-color: rgba(242, 194, 0, 0.3); }
+.kpi-tag { display: inline-block; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 999px; margin-left: 4px; vertical-align: 1px; background: var(--s3); color: var(--muted); }
+.kpi-tag.actual { background: rgba(93, 173, 226, 0.14); color: var(--info); }
+.kpi-tag.live { background: rgba(46, 204, 113, 0.14); color: var(--good); }
+.kpi-tag.forecast { background: rgba(243, 156, 18, 0.14); color: var(--warn); }
+/* 状態の札 */
+.chip-st { display: inline-block; font-size: 11px; font-weight: 800; border-radius: 999px; padding: 2px 8px; white-space: nowrap; background: var(--s3); color: var(--muted); }
+.chip-st.good { background: rgba(46, 204, 113, 0.14); color: var(--good); }
+.chip-st.bad { background: rgba(231, 76, 60, 0.15); color: var(--bad); }
+.chip-st.warn { background: rgba(243, 156, 18, 0.15); color: var(--warn); }
+.chip-st.info { background: rgba(93, 173, 226, 0.14); color: var(--info); }
+/* 小さいボタンも押す場所は十分に */
+.btn.mini { min-height: 36px; }
+.app.touch .btn.mini { min-height: 40px; }
+/* 送信中のボタン（二重に押さない） */
+.btn.busy, button.busy { opacity: 0.6; pointer-events: none; }
+/* 確認の画面を開いている間は、お知らせを下に出して重ねない（グルメサイトの記事の題名が隠れていた） */
+.app:has(.ui-layer .modal) .toasts { top: auto; bottom: calc(var(--sab) + 12px); }
+/* 経営: 先頭の8つの数字（PC は1列に8枚、iPhone 横は4枚×2段、縦は2枚×4段） */
+.dash-title { color: var(--muted); font-size: 12px; margin: 0 0 4px; }
+.dash-kpis { margin-bottom: 8px; }
+.dash-kpis-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; color: var(--muted); margin-bottom: 4px; }
+.dash-kpi-row { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 0; }
+@media (min-width: 1100px) {
+  .dash-kpi-row { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .dash-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.dash-kpi-row .kpi { padding: 5px 8px 6px; }
+.dash-kpi-row .kpi-value { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-kpi-row .kpi-label, .dash-kpi-row .kpi-sub { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 今日の勤務（1人1行） */
+.dash-staff { display: flex; flex-direction: column; gap: 2px; max-height: 210px; overflow-y: auto; }
+.dash-staff-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'name st' 'when when'; column-gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.dash-staff-name { grid-area: name; font-weight: 700; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-staff-name small { color: var(--muted); font-weight: 400; margin-left: 6px; font-size: 11px; }
+.dash-staff-row .chip-st { grid-area: st; align-self: center; }
+.dash-staff-when { grid-area: when; color: var(--muted); font-size: 11px; }
+/* 在庫があと何日もつか */
+.dash-days-row { display: grid; grid-template-columns: 84px minmax(0, 1fr) 76px; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+.dash-days-row b { text-align: right; font-variant-numeric: tabular-nums; }
+.dash-days-row b.tone-bad { color: var(--bad); }
+.dash-days-row b.tone-warn { color: var(--warn); }
+.dash-days-row { grid-template-columns: minmax(0, 8em) minmax(0, 1fr) 76px; }
+.dash-days-row > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 横向きのスマホ（高さが低い）: 縦のナビを2列にして、全部のタブを画面に入れ、押す場所を 44px 以上にする */
+@media (max-height: 500px) {
+  .manage .tabs { display: grid; grid-template-columns: repeat(2, 46px); grid-auto-rows: minmax(44px, 1fr); flex-basis: 94px; width: 94px; align-content: start; }
+  .manage .tab { max-height: none; min-height: 44px; }
+}
+/* 経営メニューを開いている間のお知らせは、右下に小さく、新しい2つだけ（中身を隠さない） */
+.app:has(.ui-layer > .manage) .toasts { left: auto; right: calc(var(--sar) + 10px); transform: none; width: min(320px, 44cqw); align-items: stretch; }
+.app:has(.ui-layer > .manage) .toast { font-size: 12px; padding: 5px 9px; opacity: 0.94; }
+.app:has(.ui-layer > .manage) .toast:nth-last-child(n + 3) { display: none; }
+.dash-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.dash-stack > .card { margin: 0; }
+@media (max-height: 500px) {
+  .manage .tab { font-size: 10px; padding: 2px 0; }
+}
+/* 従業員の一覧（1人1行の表）。操作の列（社員にする）はいつも右端。狭いときは能力・シフト、もっと狭いときは担当・給与の列を隠す */
+.staff-table-wrap { container-type: inline-size; }
+.staff-table { display: flex; flex-direction: column; }
+.st-row {
+  display: grid;
+  grid-template-columns: minmax(6.5em, 1.5fr) minmax(3.5em, 0.8fr) 4.6em 6.2em minmax(5.5em, 0.9fr) 9.6em 7.6em;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 46px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.st-row.sel { background: var(--s3); border-radius: 8px; }
+.st-head { min-height: 26px; font-size: 11px; color: var(--muted); font-weight: 800; }
+.st-c { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-c6 { justify-self: end; overflow: visible; }
+.st-name { display: flex; align-items: center; gap: 4px; min-height: 44px; background: none; border: none; color: var(--text); padding: 0 4px; text-align: left; font: inherit; cursor: pointer; }
+.st-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-name .emp-type { flex: 0 0 auto; margin-left: 2px; }
+.st-row.sel .st-name b { color: var(--yellow); }
+.st-c3 { display: flex; align-items: center; gap: 6px; }
+.st-c3 .mbar { flex: 1; height: 7px; }
+.st-c3 small { color: var(--muted); font-variant-numeric: tabular-nums; width: 2em; text-align: right; }
+.st-c4 { font-variant-numeric: tabular-nums; }
+.st-week { display: flex; gap: 2px; }
+.st-day { font-style: normal; width: 1.25em; text-align: center; border-radius: 4px; font-size: 11px; color: var(--dim); background: transparent; }
+.st-day.on { background: rgba(46, 204, 113, 0.18); color: var(--good); font-weight: 800; }
+.st-day.today { outline: 1px solid var(--line2); }
+.st-promote { white-space: nowrap; min-height: 40px; }
+@container (max-width: 640px) {
+  .st-row { grid-template-columns: minmax(6.5em, 1.5fr) minmax(3.5em, 0.8fr) 4.6em minmax(5.5em, 0.9fr) 7.6em; }
+  .st-c3, .st-c5 { display: none; }
+}
+@container (max-width: 420px) {
+  .st-row { grid-template-columns: minmax(6em, 1fr) 4.6em 7.6em; }
+  .st-c1, .st-c4 { display: none; }
+}
+.staff-detail .emp { border-bottom: none; }
+.st-head .st-c { text-align: left; }
+.st-head .st-c6 { justify-self: end; }
+@container (min-width: 900px) {
+  .st-row { grid-template-columns: minmax(9em, 1.1fr) minmax(6em, 1fr) 5em 8em minmax(6.5em, 0.8fr) minmax(10em, 1fr) 8em; }
+}
+/* 勤務のカレンダーの日のボタン: 縦のナビの分だけ狭くなったので、日付は折り返す */
+.team-day .td-date { white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+/* 操作を送っている間（ネットの市場など）は、少しだけ薄くして待っていることを示す */
+.manage-body.busy { cursor: progress; }
+.manage-body.busy button:focus { opacity: 0.6; }

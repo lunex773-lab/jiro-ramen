@@ -311,6 +311,8 @@ async function walk(page: Page, p: Profile): Promise<{ issues: Issue[]; shots: s
   // 社員にする確認の画面（中身が長くても、下のボタンが画面の中にあって押せる）
   await page.locator('.manage .tabs .tab', { hasText: '従業員' }).first().click();
   const promote = page.locator('.manage').getByRole('button', { name: '社員にする' }).first();
+  // じろ6: 「社員にする」は従業員の表の行の右端に、どの画面の幅でも全部見えている（改修設計書06 で特に直すもの）
+  await expect(page.locator('.manage [data-row-promote]').first()).toBeInViewport({ ratio: 1 });
   if (await promote.isVisible().catch(() => false)) {
     await promote.click();
     const dlg = page.locator('.modal-overlay .modal');
@@ -323,7 +325,7 @@ async function walk(page: Page, p: Profile): Promise<{ issues: Issue[]; shots: s
     throw new Error('従業員のタブに「社員にする」がない');
   }
   // 設定（店の中から）
-  await page.locator('.manage .tabs .tab', { hasText: 'セーブ・設定' }).first().click();
+  await page.locator('.manage .tabs .tab[data-tab="system"]').click();
   const settingsBtn = page.locator('.manage').getByRole('button', { name: /^設定/ }).first();
   if (await settingsBtn.isVisible().catch(() => false)) {
     await settingsBtn.click();

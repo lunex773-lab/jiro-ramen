@@ -2,7 +2,7 @@
 // 気をつけること。長い説明は「？」を押したときだけ出す）。
 import { h } from './dom';
 
-export type Tone = 'good' | 'bad' | 'warn' | 'info' | 'accent' | '';
+export type Tone = 'good' | 'bad' | 'warn' | 'info' | 'accent' | 'hero' | '';
 
 /** 円の文字（+/− 付き）。¥1,234 / −¥1,234 / +¥1,234 */
 export function yenSigned(v: number, plus = false): string {

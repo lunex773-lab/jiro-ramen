@@ -141,17 +141,18 @@ import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
 
 export type ManageTab = 'dash' | 'company' | 'stock' | 'prep' | 'menu' | 'equip' | 'staff' | 'layout' | 'career' | 'system';
 
-const TABS: [ManageTab, string][] = [
-  ['dash', '経営'],
-  ['company', '会社'],
-  ['stock', '在庫・発注'],
-  ['prep', '仕込み'],
-  ['menu', 'メニュー'],
-  ['equip', '設備'],
-  ['staff', '従業員'],
-  ['layout', '店舗'],
-  ['career', 'キャリア'],
-  ['system', 'セーブ・設定'],
+/** タブ: id・正式な名前（読み上げ・見出し）・左のナビの短い名前・アイコン（じろ6: 左の縦のナビ） */
+const TABS: [ManageTab, string, string, string][] = [
+  ['dash', '経営', '経営', '📊'],
+  ['company', '会社', '会社', '🏢'],
+  ['stock', '在庫・発注', '在庫', '📦'],
+  ['prep', '仕込み', '仕込み', '🔪'],
+  ['menu', 'メニュー', 'メニュー', '🍜'],
+  ['equip', '設備', '設備', '🔧'],
+  ['staff', '従業員', '従業員', '👥'],
+  ['layout', '店舗', '店舗', '🏪'],
+  ['career', 'キャリア', '記録', '🏆'],
+  ['system', 'セーブ・設定', '設定', '⚙️'],
 ];
 
 export interface ManageCallbacks {
@@ -215,6 +216,10 @@ export class ManageMenu {
   private timer: number | null = null;
   /** 開いている従業員の欄（シフト・記録・担当設定） */
   private empPanel: { id: string; kind: 'shift' | 'record' | 'prio' } | null = null;
+  /** 送っている最中の操作（二重に送らない） */
+  private inFlight = new Set<string>();
+  /** 従業員の表で選んでいる人（下にくわしい欄を出す） */
+  private empSel: string | null = null;
   /** シフトのカレンダーで選んでいる日と編集中の内容（保存するまで状態は変えない。自動更新で消えないようここに持つ） */
   private shiftEdit: { id: string; days: number[]; draft?: ShiftDay | null } | null = null;
   /** みんなの勤務のカレンダーで選んだ日 */
@@ -227,6 +232,9 @@ export class ManageMenu {
   private pressing = false;
   /** 閲覧専用の印（共同経営のゲスト） */
   private badge: HTMLElement;
+  /** 見出し（今のタブの名前）と、店・日の小さな文字 */
+  private titleEl: HTMLElement;
+  private crumbEl: HTMLElement;
   /** 最後に描いたときの状態の版（ゲストはホストの更新を受けたら描き直す） */
   private renderedVersion = -1;
 
@@ -236,28 +244,36 @@ export class ManageMenu {
     private cb: ManageCallbacks,
   ) {
     // タブは一度だけ作り、選択中の表示だけ切り替える
+    // じろ6（改修設計書06）: 左の縦のナビ（アイコン＋短い名前。読み上げは正式な名前）と、細い見出し
     this.tabsEl = h(
-      'div',
-      { class: 'tabs' },
-      TABS.map(([id, label]) => {
-        const b = h('button', { class: 'tab', onclick: () => { this.tab = id; this.render(); this.body.scrollTop = 0; } }, label);
+      'nav',
+      { class: 'tabs', 'aria-label': '経営メニュー' },
+      TABS.map(([id, label, short, icon]) => {
+        const b = h(
+          'button',
+          { class: 'tab', 'data-tab': id, 'aria-label': label, title: label, onclick: () => { this.tab = id; this.render(); this.body.scrollTop = 0; } },
+          h('span', { class: 'tab-icon', 'aria-hidden': 'true' }, icon),
+          h('span', { class: 'tab-label' }, short),
+        );
         this.tabButtons.set(id, b);
         return b;
       }),
     );
     this.body = h('div', { class: 'manage-body' });
+    this.titleEl = h('div', { class: 'manage-title' }, '経営');
+    this.crumbEl = h('div', { class: 'manage-crumb' });
     this.el = h(
       'div',
       { class: 'manage' },
       h(
         'div',
         { class: 'manage-head' },
-        h('div', { class: 'manage-title' }, '経営メニュー'),
+        this.titleEl,
+        this.crumbEl,
         (this.badge = h('div', { class: 'readonly-badge', hidden: true }, '👀 閲覧専用（経営はホストが行います）')),
         h('button', { class: 'btn ghost close', onclick: () => cb.onClose() }, '✕ 閉じる'),
       ),
-      this.tabsEl,
-      this.body,
+      h('div', { class: 'manage-main' }, this.tabsEl, this.body),
     );
     this.el.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
@@ -398,7 +414,18 @@ export class ManageMenu {
       toast(this.root, '経営の操作はホストだけができます', 'warn');
       return false;
     }
-    const r = await this.host.act(a);
+    // 同じ操作を続けて押しても二重に送らない（送っている間は同じ操作を受け付けない。じろ6）
+    const key = JSON.stringify(a);
+    if (this.inFlight.has(key)) return false;
+    this.inFlight.add(key);
+    this.body.classList.add('busy');
+    let r: { ok: boolean; reason?: string };
+    try {
+      r = await this.host.act(a);
+    } finally {
+      this.inFlight.delete(key);
+      if (this.inFlight.size === 0) this.body.classList.remove('busy');
+    }
     if (!r.ok) toast(this.root, r.reason ?? 'できませんでした', 'warn');
     else if (okMsg) toast(this.root, okMsg, 'good', 1600);
     this.render();
@@ -422,7 +449,15 @@ export class ManageMenu {
     const ct = this.tabButtons.get('company');
     if (ct && ct.hidden === showCompany) ct.hidden = !showCompany;
     if (this.tab === 'company' && !showCompany) this.tab = 'dash';
-    for (const [id, b] of this.tabButtons) b.classList.toggle('on', id === this.tab);
+    for (const [id, b] of this.tabButtons) {
+      b.classList.toggle('on', id === this.tab);
+      if (id === this.tab) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    }
+    const label = TABS.find(([id]) => id === this.tab)?.[1] ?? '経営';
+    if (this.titleEl.textContent !== label) this.titleEl.textContent = label;
+    const crumb = `${s.company ? storeDisplayName(s, activeStore(s)) : s.shopName}・${s.day}日目・${STAGES[s.career.stage]?.name ?? ''}`;
+    if (this.crumbEl.textContent !== crumb) this.crumbEl.textContent = crumb;
     if (this.badge.hidden !== !ro) this.badge.hidden = !ro;
     this.el.classList.toggle('readonly', ro);
     let content: HTMLElement;
@@ -715,10 +750,7 @@ export class ManageMenu {
   private dash(s: GameState): HTMLElement {
     const d = s.today;
     const op = operatingProfit(d);
-    const net = d.sales - d.refunds;
     const fc = fixedCosts(s);
-    const avgSat = d.satisfactionCount > 0 ? d.satisfactionSum / d.satisfactionCount : 0;
-    const avgWait = d.served > 0 ? d.totalSeatWait / d.served : 0;
     const arrears = s.arrears.reduce((a, b) => a + b.amount, 0);
     const loan = s.loans.reduce((a, b) => a + b.remaining, 0);
     const lowStock = ['yasai', 'buta', 'garlic', 'abura', 'tare', 'noodle'].filter((id) => stockOf(s, id) < (id === 'noodle' ? 1500 : id === 'buta' ? 6 : 100));
@@ -727,13 +759,39 @@ export class ManageMenu {
     const prev = s.history.filter((r) => r.day < s.day).slice(-1)[0] ?? null;
     const repDelta = delta(s.reputation, prev ? prev.reputation : null, (v) => v.toFixed(2));
     const cashDelta = s.phase === 'closed' && s.history[s.history.length - 1]?.day === s.day ? s.history[s.history.length - 1]! : null;
-    // ── 数字のカード ──
-    const kpis = kpiRow([
-      kpi('現在資金', yenStr(s.money), cashDelta ? `今日 ${yenSigned(cashDelta.cashEnd - cashDelta.cashStart, true)}` : `翌営業日の支出 ${yenStr(fc.total)}`, s.money < fc.total ? 'bad' : '', cashDelta ? (cashDelta.cashEnd >= cashDelta.cashStart ? 'good' : 'bad') : '', { 'data-kpi': 'cash' }),
-      kpi('今日の営業利益', yenSigned(op, true), `純売上 ${yenStr(net)}`, op > 0 ? 'good' : op < 0 ? 'bad' : '', '', { 'data-kpi': 'op' }),
-      kpi('評判', `★ ${s.reputation.toFixed(2)}`, `${repDelta ? `${repDelta.text}・` : ''}常連 ${s.regulars.length}人`, 'accent', repDelta?.tone ?? '', { 'data-kpi': 'rep' }),
-      kpi('提供 / 来客', `${d.served}杯 / ${d.customers}人`, d.lost + d.balked > 0 ? `帰った客 ${d.lost}人・諦めた ${d.balked}人` : '帰った客なし', '', d.lost > 0 ? 'warn' : '', { 'data-kpi': 'served' }),
-    ]);
+    // ── 先頭の8つの数字（じろ6: 現金・売上・営業利益・最終利益・負債・在庫・来客・勤務）。実績（昨日・今日）と営業中の今日を札で区別する ──
+    const lastRep = s.history.at(-1) ?? null;
+    const live = s.phase === 'open' || s.phase === 'closing';
+    const rep = !live && lastRep && (s.phase === 'closed' ? lastRep.day === s.day : lastRep.day < s.day) ? lastRep : null;
+    const src = rep ?? d;
+    const srcOp = rep ? rep.operatingProfit : op;
+    const srcFinal = rep ? (rep.finalProfit ?? rep.operatingProfit - rep.interest) : op - d.interest;
+    const tag = live ? h('span', { class: 'kpi-tag live' }, '今日・営業中') : rep ? h('span', { class: 'kpi-tag actual' }, rep.day === s.day ? '今日の実績' : '昨日の実績') : h('span', { class: 'kpi-tag' }, 'まだ営業していません');
+    const debt = loan + arrears;
+    const borrowed = s.loans.reduce((a, b) => a + b.principal, 0);
+    const scheduled = s.employees.filter((e) => e.att?.day === s.day ? e.att.shift !== null || e.att.calledIn : shiftFor(e, s.day) !== null);
+    const working = s.employees.filter((e) => e.presentToday).length;
+    const absent = s.employees.filter((e) => e.att?.day === s.day && e.att.status === 'absent').length;
+    const late = s.employees.filter((e) => e.att?.day === s.day && e.att.status === 'late').length;
+    const injured = s.employees.filter((e) => injuredOn(e, s.day)).length;
+    const kpis = h(
+      'div',
+      { class: 'dash-kpis' },
+      h('div', { class: 'dash-kpis-head' }, h('span', null, '大事な数字'), tag),
+      kpiRow(
+        [
+          kpi('💴 現金残高', yenStr(s.money), cashDelta ? `今日 ${yenSigned(cashDelta.cashEnd - cashDelta.cashStart, true)}` : rep ? `前日比 ${yenSigned(rep.cashEnd - rep.cashStart, true)}` : `翌営業日の支出 ${yenStr(fc.total)}`, s.money < fc.total ? 'bad' : 'hero', '', { 'data-kpi': 'cash' }),
+          kpi('売上', yenStr(src.sales), `${src.served}杯${src.refunds > 0 ? `・返金 ${yenStr(src.refunds)}` : ''}`, '', '', { 'data-kpi': 'sales' }),
+          kpi('営業利益', yenSigned(srcOp, true), src.sales > 0 ? `利益率 ${Math.round((srcOp / Math.max(1, src.sales - src.refunds)) * 100)}%` : '売上から費用を引いた額', srcOp > 0 ? 'good' : srcOp < 0 ? 'bad' : '', '', { 'data-kpi': 'op' }),
+          kpi('最終利益', yenSigned(srcFinal, true), src.interest > 0 ? `利息など −${yenStr(src.interest)}` : '利息なし', srcFinal > 0 ? 'good' : srcFinal < 0 ? 'bad' : '', '', { 'data-kpi': 'final' }),
+          kpi('負債（返済の残り）', yenStr(debt), borrowed > 0 ? `借入の総額 ${yenStr(borrowed)}${arrears > 0 ? `・未払金 ${yenStr(arrears)}` : ''}` : arrears > 0 ? `未払金 ${yenStr(arrears)}` : '借入なし', arrears > 0 ? 'bad' : '', '', { 'data-kpi': 'debt' }),
+          kpi('在庫', lowStock.length > 0 ? `${lowStock.length}品 少ない` : '足りている', lowStock.length > 0 ? lowStock.slice(0, 3).map((id) => (INGREDIENTS[id]?.name ?? id).replace(/（.*）/, '')).join('・') : '主な食材と仕込み品', lowStock.length > 0 ? 'warn' : '', '', { 'data-kpi': 'stock' }),
+          kpi('来客', `${src.customers}人`, src.lost + src.balked > 0 ? `帰った客 ${src.lost}人・諦めた ${src.balked}人` : '帰った客なし', '', src.lost > 0 ? 'warn' : '', { 'data-kpi': 'customers' }),
+          kpi('今日の勤務', `${working} / ${scheduled.length}人`, `${absent > 0 ? `欠勤 ${absent}・` : ''}${late > 0 ? `遅刻 ${late}・` : ''}${injured > 0 ? `療養 ${injured}・` : ''}店にいる / 予定`, absent + injured > 0 ? 'warn' : '', '', { 'data-kpi': 'staff' }),
+        ],
+        'dash-kpi-row',
+      ),
+    );
     // ── 気をつけること（色付きの短い文。ボタンで対応できるものはボタンを付ける） ──
     const alerts: HTMLElement[] = [];
     const goTab = (tab: ManageTab, label: string) => h('button', { class: 'mini', onclick: () => { this.tab = tab; this.render(); this.body.scrollTop = 0; } }, label);
@@ -755,58 +813,121 @@ export class ManageMenu {
     // ── お金の流れ（純売上を100%として、費用と利益） ──
     const flow = flowBar(
       [
-        { label: '原価', value: d.cogs + d.waste, color: '#e0a457' },
-        { label: '人件費', value: d.wages, color: '#6fb3e0' },
-        { label: '家賃', value: d.rent, color: '#b48ad6' },
-        { label: 'その他', value: d.upkeep + d.utilities + d.repairs + d.hiring + (d.ads ?? 0), color: '#9aa3ad' },
+        { label: '原価', value: src.cogs + src.waste, color: '#e0a457' },
+        { label: '人件費', value: src.wages, color: '#6fb3e0' },
+        { label: '家賃', value: src.rent, color: '#b48ad6' },
+        { label: 'その他', value: src.upkeep + src.utilities + src.repairs + src.hiring + (src.ads ?? 0), color: '#9aa3ad' },
       ],
-      op,
+      srcOp,
     );
+    // ── 今日の勤務（1人1行・状態の札） ──
+    const stTone: Record<string, string> = { working: 'good', break: 'info', scheduled: '', late: 'warn', absent: 'bad', left: '', off: '', closed: '' };
+    const staffRows = s.employees.map((e) => {
+      const a = e.att && e.att.day === s.day ? e.att : null;
+      const inj = injuredOn(e, s.day) || e.injury?.day === s.day;
+      const label = inj ? '療養' : a ? ATTENDANCE_LABEL[a.status] : e.presentToday ? '勤務中' : '休み';
+      const tone = inj ? 'bad' : a ? (stTone[a.status] ?? '') : e.presentToday ? 'good' : '';
+      return h(
+        'div',
+        { class: 'dash-staff-row', 'data-dash-staff': e.id },
+        h('span', { class: 'dash-staff-name' }, e.profile.name, h('small', null, `${isPartTime(e) ? 'アルバイト' : '社員'}・${ROLE_LABEL[e.profile.role]}`)),
+        h('span', { class: `chip-st ${tone}` }, label),
+        h('small', { class: 'dash-staff-when' }, attendanceText(e, s).replace(/^勤務中（|の予定$|）$/g, '')),
+      );
+    });
+    // ── 在庫があと何日もつか（直近7営業日に使った量の平均から。届く予定を入れる） ──
+    const used = (id: string) => {
+      let sum = 0;
+      let n = 0;
+      for (let i = s.history.length - 1; i >= 0 && n < 7; i--) {
+        const r = s.history[i]!;
+        if (r.served <= 0) continue;
+        n += 1;
+        sum += r.usedItems?.[id] ?? 0;
+      }
+      return n > 0 ? sum / n : 0;
+    };
+    const stockDays = Object.values(INGREDIENTS)
+      .filter((x) => x.purchasable && isUnlocked(s, x.unlock))
+      .map((x) => ({ x, per: used(x.id), have: stockOf(s, x.id), coming: pendingOf(s, x.id) }))
+      .filter((r) => r.per > 0)
+      .map((r) => ({ ...r, days: (r.have + r.coming) / r.per }))
+      .sort((a, b) => a.days - b.days)
+      .slice(0, 6);
+    const srcLabel = live ? '今日（営業中）' : rep ? (rep.day === s.day ? '今日' : '昨日') : '今日';
     return h(
       'div',
       null,
-      h('p', { class: 'dash-title' }, `${storeDisplayName(s, activeStore(s))} — ${s.day}日目・${STAGES[s.career.stage]?.name ?? ''}`),
       kpis,
       h(
         'div',
         { class: 'grid2' },
         h(
           'section',
-          { class: 'card' },
-          cardHead('本日の損益（お金の流れ）', '家賃・給与・維持費・基本光熱費は閉店後の精算で計上されます。食材の仕入れは在庫（資産）になり、使ったときに原価になります。仕入れと設備投資は現金の支出で、損益には入りません。'),
+          { class: 'card', 'data-dash-flow': '' },
+          cardHead(`${srcLabel}のお金の流れ`, '売上から、原価・人件費・家賃・その他の費用を引いた残りが営業利益、そこから利息などを引いたものが最終利益です。家賃・給与・維持費・基本光熱費は閉店後の精算で計上されます。食材の仕入れは在庫（資産）になり、使ったときに原価になります。仕入れと設備投資は現金の支出で、損益には入りません。'),
           flow,
-          row('売上', yenStr(d.sales)),
-          d.refunds > 0 ? row('返金', `−${yenStr(d.refunds)}`) : null,
-          row('食材原価＋廃棄', `−${yenStr(d.cogs + d.waste)}`, d.waste > 0 ? 'warn' : ''),
-          row('人件費', `−${yenStr(d.wages)}`),
-          row('家賃', `−${yenStr(d.rent)}`),
-          row('光熱費・維持費・修理', `−${yenStr(d.utilities + d.upkeep + d.repairs)}`),
-          d.hiring > 0 ? row('採用・解雇', `−${yenStr(d.hiring)}`) : null,
-          (d.ads ?? 0) > 0 ? row('広告', `−${yenStr(d.ads ?? 0)}`) : null,
-          row('営業利益', yenSigned(op, true), op < 0 ? 'bad' : 'good'),
-          d.interest > 0 ? row('利息（融資）', `−${yenStr(d.interest)}`) : null,
-          d.interest > 0 ? row('最終利益', yenSigned(op - d.interest, true), op - d.interest < 0 ? 'bad' : 'good') : null,
-          row('仕入れ・設備投資（現金の支出）', `${yenStr(d.purchases)}・${yenStr(d.capex)}`),
+          row('売上', yenStr(src.sales)),
+          src.refunds > 0 ? row('返金', `−${yenStr(src.refunds)}`) : null,
+          row('食材原価＋廃棄', `−${yenStr(src.cogs + src.waste)}`, src.waste > 0 ? 'warn' : ''),
+          row('人件費', `−${yenStr(src.wages)}`),
+          row('家賃', `−${yenStr(src.rent)}`),
+          row('光熱費・維持費・修理', `−${yenStr(src.utilities + src.upkeep + src.repairs)}`),
+          src.hiring > 0 ? row('採用・解雇', `−${yenStr(src.hiring)}`) : null,
+          (src.ads ?? 0) > 0 ? row('広告', `−${yenStr(src.ads ?? 0)}`) : null,
+          row('営業利益', yenSigned(srcOp, true), srcOp < 0 ? 'bad' : 'good'),
+          src.interest > 0 ? row('利息など', `−${yenStr(src.interest)}`) : null,
+          row('最終利益', yenSigned(srcFinal, true), srcFinal < 0 ? 'bad' : 'good'),
+          row('仕入れ・設備投資（現金の支出）', `${yenStr(src.purchases)}・${yenStr(src.capex)}`),
         ),
-        h('section', { class: 'card' }, cardHead('この2週間の営業利益'), profitBars(hist.map((r) => ({ day: r.day, value: r.operatingProfit })))),
-        h('section', { class: 'card', 'data-alerts': '' }, cardHead('気をつけること'), h('div', { class: 'alerts' }, alerts)),
         h(
-          'section',
-          { class: 'card' },
-          cardHead('本日の営業', '平均待ち時間は、席に着いてから提供されるまで。帰った客は、待ちすぎ・品切れで食べずに帰った人。諦めた客は、行列を見て並ばなかった人です。'),
-          row('来客数', `${d.customers}人`),
-          row('提供数', `${d.served}杯`),
-          row('途中で帰った客', `${d.lost}人`, d.lost > 0 ? 'warn' : ''),
-          row('行列を見て諦めた客', `${d.balked}人`),
-          row('平均待ち時間（着席→提供）', `${avgWait.toFixed(0)}秒`),
-          row('平均満足度', `${Math.round(avgSat * 100)}%`),
-          row('注文ミス / クレーム', `${d.mistakes} / ${d.complaints}`),
-          row('品切れ / 設備故障', `${d.stockouts}回 / ${d.breakdowns}回`, d.stockouts > 0 ? 'warn' : ''),
+          'div',
+          { class: 'dash-stack' },
+          h('section', { class: 'card' }, cardHead('この2週間の営業利益', '1本が1日。0の線から上が黒字、下が赤字です。棒を押すと（PCではマウスを乗せると）その日の額が出ます。'), profitBars(hist.map((r) => ({ day: r.day, value: r.operatingProfit })))),
+          h('section', { class: 'card', 'data-alerts': '' }, cardHead('気をつけること'), h('div', { class: 'alerts' }, alerts)),
         ),
         h(
           'section',
+          { class: 'card', 'data-dash-staff-card': '' },
+          cardHead(`今日の勤務（${working}人が店に）`, '今日の予定と状態です。シフトの変更・社員にする・担当の変更は「従業員」でできます。'),
+          staffRows.length > 0 ? h('div', { class: 'dash-staff' }, staffRows) : h('p', { class: 'note' }, 'まだ誰も雇っていません'),
+          h('div', { class: 'row' }, goTab('staff', 'シフト・勤務を見る')),
+        ),
+        h(
+          'section',
+          { class: 'card', 'data-dash-stockdays': '' },
+          cardHead('在庫があと何日もつか', '直近7営業日に使った量の平均で、今の在庫と届く予定の分が何日もつかの目安です。3日を切ると黄色、1日を切ると赤になります。'),
+          stockDays.length > 0
+            ? stockDays.map((r) =>
+                h(
+                  'div',
+                  { class: 'dash-days-row' },
+                  h('span', null, (r.x.name ?? r.x.id).replace(/（.*）/, '')),
+                  meterBar(Math.min(1, r.days / 7), r.days < 1 ? 'bad' : r.days < 3 ? 'warn' : 'good', `${r.x.name} あと${r.days.toFixed(1)}日`),
+                  h('b', { class: r.days < 1 ? 'tone-bad' : r.days < 3 ? 'tone-warn' : '' }, r.days >= 30 ? '30日以上' : `あと${r.days < 10 ? r.days.toFixed(1) : Math.round(r.days)}日`),
+                ),
+              )
+            : h('p', { class: 'note' }, '営業すると、使った量からここに出ます'),
+          h('div', { class: 'row' }, goTab('stock', '発注の画面へ')),
+        ),
+        h(
+          'section',
           { class: 'card' },
-          cardHead('翌営業日の予測支出'),
+          cardHead(`${srcLabel}の営業`, '平均待ち時間は、席に着いてから提供されるまで。帰った客は、待ちすぎ・品切れで食べずに帰った人。諦めた客は、行列を見て並ばなかった人です。'),
+          row('来客数', `${src.customers}人`),
+          row('提供数', `${src.served}杯`),
+          row('途中で帰った客', `${src.lost}人`, src.lost > 0 ? 'warn' : ''),
+          row('行列を見て諦めた客', `${src.balked}人`),
+          row('平均待ち時間（着席→提供）', `${(src.served > 0 ? src.totalSeatWait / src.served : 0).toFixed(0)}秒`),
+          row('平均満足度', `${Math.round((src.satisfactionCount > 0 ? src.satisfactionSum / src.satisfactionCount : 0) * 100)}%`),
+          row('評判', `${s.reputation.toFixed(2)}${repDelta ? `（${repDelta.text}）` : ''}`, repDelta?.tone === 'bad' ? 'bad' : ''),
+          row('注文ミス / クレーム', `${src.mistakes} / ${src.complaints}`),
+          row('品切れ / 設備故障', `${src.stockouts}回 / ${src.breakdowns}回`, src.stockouts > 0 ? 'warn' : ''),
+        ),
+        h(
+          'section',
+          { class: 'card' },
+          cardHead('翌営業日の支出の予想', '次の営業日の閉店後の精算で払う見込みの額です（給与はシフトの予定から）。現金がこれより少ないと赤くなります。'),
           row('家賃', yenStr(fc.rent)),
           row('給与', yenStr(fc.wages)),
           row('設備維持費', yenStr(fc.upkeep)),
@@ -1387,6 +1508,7 @@ export class ManageMenu {
     const present = s.employees.filter((e) => e.presentToday).length;
     const tomorrowPay = s.employees.reduce((a, e) => a + expectedPay(e, s.day + 1, storeHours(s)), 0);
     const short = s.employees.length > 0 ? shiftTable(s).reduce((a, r) => a + r.cells.filter((c) => c.staff < c.need).length, 0) : 0;
+    const sel = s.employees.find((e) => e.id === this.empSel) ?? s.employees[0] ?? null;
     return h(
       'div',
       null,
@@ -1401,13 +1523,14 @@ export class ManageMenu {
       ),
       h(
         'section',
-        { class: 'card wide' },
-        h('h4', null, `従業員（${s.employees.length}人）`),
+        { class: 'card wide', 'data-staff-list': '' },
+        cardHead(`従業員（${s.employees.length}人）`, '1人1行の一覧です。名前を押すと、下にくわしい欄（担当・シフト・記録・能力・解雇）が出ます。「社員にする」はいつも行の右端にあります。'),
         s.employees.length > 0 ? h('p', { class: 'note staff-today' }, `今日（${s.day}日目・${WEEKDAY_LABEL[wd]}曜）の出勤: ${today}`) : null,
         s.employees.length === 0 ? h('p', { class: 'note' }, hiring ? 'まだ誰も雇っていません。下の採用候補から雇えます（通常の採用は2日後から出勤。今日すぐ人手が要るときは短期バイト）。' : '採用はまだできません。') : null,
-        s.employees.length > 0 ? this.teamCalendar(s) : null,
-        s.employees.map((e) => this.staffCard(s, e)),
+        s.employees.length > 0 ? this.staffTable(s) : null,
       ),
+      sel ? h('section', { class: 'card wide staff-detail', 'data-staff-detail': sel.id }, cardHead(`くわしく: ${sel.profile.name}`), this.staffCard(s, sel)) : null,
+      s.employees.length > 0 ? h('section', { class: 'card wide' }, this.teamCalendar(s)) : null,
       s.employees.length > 0 ? this.shiftTableCard(s) : null,
       hiring
         ? h(
@@ -1563,6 +1686,67 @@ export class ManageMenu {
     this.empPanel = open ? null : { id: e.id, kind };
     if (kind === 'shift' && !open) this.shiftEdit = null;
     this.render();
+  }
+
+  /**
+   * 従業員の一覧（じろ6: 1人1行の表）。名前・雇用・担当・今日の状態・能力・給与・この先7日のシフト・操作。
+   * 「社員にする」（アルバイト）と「リーダーにする」（社員）は、どの画面の幅でも行の右端に出す（列が狭いときは能力・シフトの列を隠す）
+   */
+  private staffTable(s: GameState): HTMLElement {
+    const host = this.host.isHost;
+    const hrs = storeHours(s);
+    const st = s.company ? activeStore(s) : null;
+    const stTone: Record<string, string> = { working: 'good', break: 'info', scheduled: '', late: 'warn', absent: 'bad', left: '', off: '', closed: '' };
+    const selId = (s.employees.find((e) => e.id === this.empSel) ?? s.employees[0])?.id;
+    const head = h(
+      'div',
+      { class: 'st-row st-head', role: 'row' },
+      ['名前', '担当', '今日', '能力', '給与', 'この先7日', ''].map((t, i) => h('span', { class: `st-c st-c${i}`, role: 'columnheader' }, t)),
+    );
+    const rows = s.employees.map((e) => {
+      const part = isPartTime(e);
+      const a = e.att && e.att.day === s.day ? e.att : null;
+      const inj = injuredOn(e, s.day) || e.injury?.day === s.day;
+      const label = inj ? '療養' : a ? ATTENDANCE_LABEL[a.status] : e.presentToday ? '勤務中' : '休み';
+      const tone = inj ? 'bad' : a ? (stTone[a.status] ?? '') : e.presentToday ? 'good' : '';
+      const sk = e.profile.skills;
+      const avg = Math.round(((sk.speed + sk.cooking + sk.service + sk.hygiene + sk.movement) / 5) * 100);
+      const pay = part ? `時給${yenStr(hourlyOf(e))}` : `日給${yenStr(fullTimePayFor(e, hrs))}`;
+      const week = Array.from({ length: 7 }, (_, i) => {
+        const d = s.day + i;
+        const on = !isClosedDay(hrs, d) && shiftFor(e, d) !== null;
+        return h('i', { class: `st-day${on ? ' on' : ''}${i === 0 ? ' today' : ''}`, title: `${d}日目（${WEEKDAY_LABEL[weekdayOf(d)]}）${on ? '出勤' : '休み'}` }, WEEKDAY_LABEL[weekdayOf(d)]);
+      });
+      const isMgr = st?.managerId === e.id;
+      const op = part
+        ? host
+          ? h('button', { class: 'mini st-promote', 'data-row-promote': e.id, onclick: () => void this.promoteDialog(e) }, '社員にする')
+          : h('span', { class: 'chip-st' }, 'アルバイト')
+        : isMgr
+          ? h('span', { class: 'chip-st info' }, '店長')
+          : e.profile.role === 'leader'
+            ? h('span', { class: 'chip-st info' }, 'リーダー')
+            : host
+              ? h('button', { class: 'mini ghost st-promote', 'data-row-leader': e.id, onclick: () => void this.leaderDialog(e) }, '⭐ リーダーに')
+              : h('span', { class: 'chip-st' }, '社員');
+      return h(
+        'div',
+        { class: `st-row${e.id === selId ? ' sel' : ''}`, role: 'row', 'data-emp-row': e.id },
+        h(
+          'button',
+          { class: 'st-c st-c0 st-name', 'data-guest-ok': '1', 'aria-pressed': String(e.id === selId), onclick: () => { this.empSel = e.id; this.render(); } },
+          h('b', null, e.profile.name),
+          h('span', { class: `emp-type ${employmentOf(e)}` }, EMPLOYMENT_LABEL[employmentOf(e)]),
+        ),
+        h('span', { class: 'st-c st-c1' }, ROLE_LABEL[e.profile.role].replace('担当', '')),
+        h('span', { class: 'st-c st-c2' }, h('span', { class: `chip-st ${tone}` }, label)),
+        h('span', { class: 'st-c st-c3', title: '速さ・調理・接客・衛生・移動の平均（100が最高）' }, meterBar(avg / 100, avg >= 70 ? 'good' : avg >= 45 ? 'accent' : 'warn', `能力の平均 ${avg}`), h('small', null, String(avg))),
+        h('span', { class: 'st-c st-c4' }, pay),
+        h('span', { class: 'st-c st-c5 st-week' }, week),
+        h('span', { class: 'st-c st-c6' }, op),
+      );
+    });
+    return h('div', { class: 'staff-table-wrap' }, h('div', { class: 'staff-table', role: 'table', 'aria-label': '従業員の一覧' }, head, rows));
   }
 
   private staffCard(s: GameState, e: Employee): HTMLElement {

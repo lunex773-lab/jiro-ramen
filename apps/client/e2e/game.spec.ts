@@ -243,7 +243,11 @@ test('経営メニューとレイアウト編集が開ける', async ({ page }) 
   await startNewGame(page);
   await page.locator('.chip.menu').click();
   await expect(page.locator('.manage')).toBeVisible();
-  await expect(page.locator('.manage')).toContainText('本日の損益');
+  // じろ6: 先頭に大事な数字8つ（現金・売上・営業利益・最終利益・負債・在庫・来客・勤務）。まだ営業していない日は札で分かる
+  await expect(page.locator('.manage .dash-kpis [data-kpi]')).toHaveCount(8);
+  await expect(page.locator('.manage .dash-kpis')).toContainText('まだ営業していません');
+  await expect(page.locator('.manage')).toContainText('今日のお金の流れ');
+  for (const k of ['cash', 'sales', 'op', 'final', 'debt', 'stock', 'customers', 'staff']) await expect(page.locator(`.manage [data-kpi="${k}"]`)).toBeInViewport();
   await shot(page, '06-manage');
   await page.getByRole('button', { name: '在庫・発注' }).click();
   await expect(page.locator('.manage')).toContainText('仕入れ');
