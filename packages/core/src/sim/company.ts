@@ -40,6 +40,8 @@ const STORE_KEY_SET: Record<StoreKey, true> = {
   prepSchedule: true,
   autoOrderOff: true,
   purchaseLog: true,
+  // じろ7 Phase 7: 知名度・話題性・SNS・YouTuber・店の伝説は店ごと
+  fame: true,
 };
 export const STORE_KEYS = Object.keys(STORE_KEY_SET) as StoreKey[];
 

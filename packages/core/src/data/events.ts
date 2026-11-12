@@ -174,6 +174,7 @@ export const MANNER_RESPONSE_LABEL = {
   leave: '退店を促す',
   smoke: '禁煙をお伝えする',
   nose: '鼻ほじりを注意する',
+  quarrel: '口論を仲裁する',
 } as const;
 
 // ───────────────────────── 第2版 Phase 4: YouTuber・テレビ取材 ─────────────────────────

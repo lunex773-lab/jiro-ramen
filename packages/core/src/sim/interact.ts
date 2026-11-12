@@ -50,7 +50,7 @@ import { planComplaintResponse, respondToComplaint } from './complaints';
 import { askToLeave, lingerBlocked, mannerBlocked, respondManner, smokeBlocked, warnSmoker } from './manners';
 import { FILM_RESPONSE_LABEL, LINGER_RESPONSE_LABEL, MANNER_RESPONSE_LABEL } from '../data/events';
 import { filmBlocked, respondFilm } from './media';
-import { warnNosepicker } from './chaos';
+import { calmQuarrel, warnNosepicker } from './chaos';
 import { accidentHalted } from './events';
 
 export type Actor = Player | Employee;
@@ -986,6 +986,24 @@ const VERBS: VerbDef[] = [
     applyUnit: (s, _a, t) => {
       const c = s.customers.find((x) => x.id === seatOf(t).customerId);
       if (c) warnNosepicker(s, c);
+    },
+  },
+  // じろ7 Phase 7: 客どうしの口論を仲裁する（どちらの席からでも）
+  {
+    id: 'quarrel_calm',
+    match: (t) => t.kind === 'seat',
+    phases: ['open', 'closing'],
+    skill: 'service',
+    plan: (s, _a, t) => {
+      const label = MANNER_RESPONSE_LABEL.quarrel;
+      const c = s.customers.find((x) => x.id === seatOf(t).customerId);
+      if (!c?.quarrel || c.quarrel.count === 0) return no(label, '口論しているお客さんはいません');
+      if (c.quarrel.calmed) return no(label, 'もう仲裁しました');
+      return ok(label, 2, 1);
+    },
+    applyUnit: (s, _a, t) => {
+      const c = s.customers.find((x) => x.id === seatOf(t).customerId);
+      if (c) calmQuarrel(s, c);
     },
   },
   {

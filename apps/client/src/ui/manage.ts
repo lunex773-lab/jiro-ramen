@@ -140,9 +140,10 @@ import { forecastLines } from './site-lines';
 import { storeDaysCard } from './store-days';
 import { alertBox, cardHead, delta, flowBar, kpi, kpiRow, meterBar, profitBars, yenSigned } from './kit';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
+import { fameView } from './fame-view';
 import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
 
-export type ManageTab = 'dash' | 'company' | 'stock' | 'prep' | 'menu' | 'equip' | 'staff' | 'layout' | 'career' | 'system';
+export type ManageTab = 'dash' | 'company' | 'stock' | 'prep' | 'menu' | 'equip' | 'staff' | 'layout' | 'fame' | 'career' | 'system';
 
 /** タブ: id・正式な名前（読み上げ・見出し）・左のナビの短い名前・アイコン（じろ6: 左の縦のナビ） */
 const TABS: [ManageTab, string, string, string][] = [
@@ -154,6 +155,7 @@ const TABS: [ManageTab, string, string, string][] = [
   ['equip', '設備', '設備', '🔧'],
   ['staff', '従業員', '従業員', '👥'],
   ['layout', '店舗', '店舗', '🏪'],
+  ['fame', '話題・伝説', '話題', '📣'],
   ['career', 'キャリア', '記録', '🏆'],
   ['system', 'セーブ・設定', '設定', '⚙️'],
 ];
@@ -234,6 +236,7 @@ const EVENT_LOG_LABEL: Record<string, string> = {
   bounce: '💃 横バウンス',
   nosepick: '👃 鼻をほじる客',
   bear: '🧸 クマ「みつぐま」',
+  quarrel: '💢 客どうしの口論',
 };
 
 export class ManageMenu {
@@ -506,6 +509,7 @@ export class ManageMenu {
         : this.tab === 'equip' ? this.equip(s)
         : this.tab === 'staff' ? this.staff(s)
         : this.tab === 'layout' ? this.layout(s)
+        : this.tab === 'fame' ? fameView(s)
         : this.tab === 'career' ? this.career(s)
         : this.system(s);
     } catch (e) {

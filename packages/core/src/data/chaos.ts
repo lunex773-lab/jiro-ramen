@@ -137,9 +137,30 @@ export const CHAOS: Readonly<Record<ChaosKind, ChaosDef>> = {
     reactMood: 0.03,
     links: [{ to: 'bounce', chance: 0.2, mult: 2, days: 2, why: 'クマの来店がうわさになり、踊る客も来そう' }],
   },
+  // 客どうしの口論（じろ7 Phase 7・オーナーの判断 Q8）: となりの客と言い合いになる。店員が仲裁すると収まる
+  quarrel: {
+    kind: 'quarrel',
+    label: '客どうしの口論',
+    dayChance: 0.06,
+    minDay: 3,
+    cooldownDays: 2,
+    priority: 2,
+    disruptive: false,
+    lines: ['ちょっと、肘が当たってるんですけど', 'ここ、私が先に座ってたんですけど？', 'コールの声、大きすぎませんか？', 'さっきから麺の汁が飛んでるんですよ'],
+    reactions: { annoyed: 4, scared: 2, film: 2, tell: 2 },
+    reactRadius: 3.5,
+    reactMood: -0.04,
+    links: [],
+  },
 };
 
-export const CHAOS_KINDS: readonly ChaosKind[] = ['ufo', 'golden', 'bounce', 'nosepick', 'bear'];
+export const CHAOS_KINDS: readonly ChaosKind[] = ['ufo', 'golden', 'bounce', 'nosepick', 'bear', 'quarrel'];
+
+/** 口論の言い返し（相手の側） */
+export const QUARREL_REPLIES: readonly string[] = ['はあ？ 狭いんだから仕方ないでしょ', '次郎系でそれ言います？', 'そっちこそ、すすり方がうるさいんですよ', '関係ないでしょ！', 'こっちだって急いでるんです'];
+
+/** 仲裁されたときのセリフ */
+export const QUARREL_CALMED: readonly string[] = ['……すみません、言いすぎました', 'お騒がせしました', 'まあ、ラーメンに罪はないですね'];
 
 /** 反応のセリフ */
 export const REACT_LINES: Readonly<Record<ReactKind, readonly string[]>> = {

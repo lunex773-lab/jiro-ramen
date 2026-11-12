@@ -19,6 +19,7 @@ import { addLot, consume, packPriceOf, stockOf } from './inventory';
 import { emit, notify, type SimCtx } from './notices';
 import { runManagerDay } from './manager';
 import { locationInfo, locationProblem, storeRangeProblem } from './location';
+import { newFame } from './fame';
 
 /** 店の表示名（1店舗目は店名の変更に合わせる） */
 export function storeDisplayName(s: GameState, entry: StoreEntry): string {
@@ -168,6 +169,9 @@ export function openStore(s: GameState, ctx: SimCtx, propertyId: string, manager
   s.employees = [mgr];
   const R = BALANCE.reputation.initial;
   s.reputation = clamp(R + (fromRep - R) * BALANCE.company.brandCarry, 1, 5);
+  // 知名度も評判と同じ割合で引き継ぐ（会社の名前を知っている人）。話題性・SNS・YouTuber・伝説は新しい店のもの（じろ7 Phase 7）
+  const fromFame = mine.fame;
+  s.fame = fromFame ? { ...newFame(s.seed + c.stores.length * 7919), awareness: fromFame.awareness * BALANCE.company.brandCarry } : undefined;
   s.closedForConstruction = prop.openingDays;
   const snap = takeStore(s);
   putStore(s, mine);

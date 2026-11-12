@@ -19,6 +19,9 @@ import { addDaily, cooledDown, ensureEvents, eventsAllowed, evRand, noteDraw, no
 import { noteTrouble } from './manners';
 import { emit, notify, type SimCtx } from './notices';
 import { argueChance } from './staff';
+import { addLegend, creatorSnubbed, creatorVisitFactor, makeVideo, pickCreator, pickPlan, planAllowed } from './fame';
+import { FILM_LEVEL_LABEL, VIDEO_PLANS, creatorTierLabel } from '../data/fame';
+import type { FilmLevel } from '../types';
 
 const Y = BALANCE.events.youtuber;
 const T = BALANCE.events.tv;
@@ -46,12 +49,13 @@ function addRequest(s: GameState, ctx: SimCtx, kind: HostRequest['kind'], subjec
 }
 
 /** 確認に答える（ホストの操作。共同経営ではサーバーがホストだけに許す） */
-export function answerRequest(s: GameState, ctx: SimCtx, requestId: Id, accept: boolean): { ok: boolean; reason?: string } {
+export function answerRequest(s: GameState, ctx: SimCtx, requestId: Id, accept: boolean, level?: FilmLevel): { ok: boolean; reason?: string } {
   const ev = ensureEvents(s);
   const r = (ev.requests ?? []).find((x) => x.id === requestId);
   if (!r) return { ok: false, reason: 'この確認はもう終わっています' };
   ev.requests = (ev.requests ?? []).filter((x) => x.id !== requestId);
-  if (r.kind === 'filming') decideFilming(s, ctx, r.subjectId, accept);
+  // 撮影の許可は5段（じろ7 Phase 7）。段を指定しない答え（前の版の画面・時間切れ）は「全面許可／撮影禁止」
+  if (r.kind === 'filming') decideFilming(s, ctx, r.subjectId, level ?? (accept ? 'full' : 'deny'));
   else decideTv(s, ctx, accept);
   return { ok: true };
 }
@@ -74,7 +78,8 @@ export function drawMediaPlans(s: GameState): void {
   const fy = takeForced(s, 'youtuber');
   if (fy || (eventsAllowed(s, Y.minDay) && cooledDown(s, 'youtuber', Y.cooldownDays))) {
     noteDraw(s, 'youtuber');
-    if (fy || evRand(s) < Y.chancePerDay) ev.youtuberPlan = { day: s.day, afterOpenT: fy ? 0 : (Y.arriveFrom + (Y.arriveTo - Y.arriveFrom) * evRand(s)) * openDurationOf(s), forced: fy };
+    // 大ヒット・大バズの動画を見たほかの YouTuber が来やすい（じろ7 Phase 7。乱数を引く回数は変えない）
+    if (fy || evRand(s) < Math.min(0.6, Y.chancePerDay * creatorVisitFactor(s))) ev.youtuberPlan = { day: s.day, afterOpenT: fy ? 0 : (Y.arriveFrom + (Y.arriveTo - Y.arriveFrom) * evRand(s)) * openDurationOf(s), forced: fy };
   }
   const ft = takeForced(s, 'tv');
   if (ft || (eventsAllowed(s, T.minDay) && cooledDown(s, 'tv', T.cooldownDays))) {
@@ -93,24 +98,34 @@ export function maybeYoutuber(s: GameState, c: Customer, ctx: SimCtx): void {
   noteFire(s, 'youtuber', !!plan.forced);
   const asks = evRand(s) < Y.askChance;
   const film: FilmState = { permission: asks ? 'asking' : 'unasked', filming: 'none', sneaky: !asks && evRand(s) < Y.sneakUnasked, warned: 0, tried: [], requestId: null, troubleId: newId(s, 'tr'), talkAt: 0 };
+  // 続く YouTuber と企画（じろ7 Phase 7。名簿と企画は fame の乱数で決める）
+  const cr = pickCreator(s);
+  film.creatorId = cr.id;
+  film.plan = pickPlan(s, cr);
   c.special = { kind: 'youtuber', eventId: newId(s, 'ev'), spoken: false, film };
   // 撮影の相手はクレームを言いにくく、口コミは動画のかわり（書かない）
   c.traits.complaintPropensity = Math.min(c.traits.complaintPropensity, 0.3);
   c.traits.reviewPropensity = 0;
   c.patience *= 1.4;
   if (asks) {
-    film.requestId = addRequest(s, ctx, 'filming', c.id, YOUTUBER_LINES.ask, Y.answerTimeout).id;
+    const text = `${cr.name}（${cr.channel}・登録者 ${cr.subs.toLocaleString('ja-JP')}人・${creatorTierLabel(cr.subs)}）: 「${VIDEO_PLANS[film.plan].label}」の撮影をしてもいいですか？${cr.visits > 0 ? `（${cr.visits + 1}回目の来店）` : ''}`;
+    film.requestId = addRequest(s, ctx, 'filming', c.id, text, Y.answerTimeout).id;
     sayEvent(c, s, YOUTUBER_LINES.ask, 5);
   }
   emit(ctx, { type: 'youtuberArrive', targetId: c.id });
 }
 
-function decideFilming(s: GameState, ctx: SimCtx, customerId: Id, accept: boolean): void {
+function decideFilming(s: GameState, ctx: SimCtx, customerId: Id, level: FilmLevel): void {
   const c = s.customers.find((x) => x.id === customerId);
   const film = c?.special?.film;
   if (!c || !film || film.permission !== 'asking') return;
+  const accept = level !== 'deny';
   film.permission = accept ? 'permitted' : 'denied';
+  film.level = level;
   film.requestId = null;
+  // 許可の範囲で企画が撮れないときは、ふつうの食レポにする（動画を作るときに決める）。断られると関係が少し下がる
+  if (!accept) creatorSnubbed(s, film.creatorId, 0.1);
+  else if (film.plan && !planAllowed(film.plan, level)) notify(s, ctx, `filmplan:${c.id}`, 'info', `「${FILM_LEVEL_LABEL[level].label}」では「${VIDEO_PLANS[film.plan].label}」は撮れないため、ふつうの食レポにしてもらいます`);
   // 許可がなくても撮る人がいる（許可の有無と撮影の状態は別）
   film.sneaky = !accept && evRand(s) < Y.sneakDenied;
   sayEvent(c, s, pickEv(s, accept ? YOUTUBER_LINES.permitted : YOUTUBER_LINES.denied), 3);
@@ -130,6 +145,20 @@ function updateYoutuber(s: GameState, c: Customer, ctx: SimCtx): void {
     if (f.permission === 'permitted') {
       f.filming = 'filming';
       f.talkAt = s.t + 2;
+      // 映り込みへの配慮（じろ7 Phase 7・設計書 7-4）: 生配信はまわりの客がそのまま映るので、となりの席の、迷惑を我慢しにくい客が少し嫌がる。
+      // 「店内のみ」の許可では客席を写さないように撮る（嫌がらない）
+      if (f.plan === 'live' && f.level !== 'dining') {
+        const seat = s.seats.find((x) => x.id === c.seatId);
+        for (const o of s.customers) {
+          if (o.id === c.id || !o.seatId || !seat) continue;
+          const os = s.seats.find((x) => x.id === o.seatId);
+          if (!os || Math.abs(os.index - seat.index) > 1 || o.botheredBy?.includes(f.troubleId)) continue;
+          const tol = typeof o.traits.tolerance === 'number' ? o.traits.tolerance : 0.5;
+          if (tol >= 0.4) continue;
+          (o.botheredBy ??= []).push(f.troubleId);
+          o.sat.comfort = clamp01(o.sat.comfort - 0.05);
+        }
+      }
       emit(ctx, { type: 'filmingStart', targetId: c.seatId ?? undefined, text: 'permitted' });
     } else if (f.sneaky) {
       f.filming = 'filming';
@@ -167,6 +196,8 @@ export function onMealFinished(s: GameState, c: Customer, ctx: SimCtx): void {
   const f = sp.film;
   if (sp.kind !== 'youtuber' || !f || f.filming !== 'filming') return;
   f.filming = 'done';
+  // 動画を作り、翌日に投稿する（じろ7 Phase 7）。許可なく撮り終えた動画も投稿される（炎上しやすい）
+  makeVideo(s, ctx, c, f.permission !== 'permitted');
   if (f.permission !== 'permitted') return;
   // 許可した撮影が完了した: その日から3日間 SNS バズの確率が上がる（重ねられる）
   const ev = ensureEvents(s);
@@ -212,6 +243,7 @@ export function respondFilm(s: GameState, ctx: SimCtx, seat: Seat, a: Actor, kin
     }
     relieveFilmVictims(s, f);
     handled(s, c);
+    creatorSnubbed(s, f.creatorId, 0.3);
     finalizeVisit(s, c, ctx, true);
     startLeaving(s, c, ctx, 'left');
     emit(ctx, { type: 'filmLeave', targetId: seat.id });
@@ -241,6 +273,7 @@ export function respondFilm(s: GameState, ctx: SimCtx, seat: Seat, a: Actor, kin
   }
   relieveFilmVictims(s, f);
   handled(s, c);
+  creatorSnubbed(s, f.creatorId, 0.15);
   emit(ctx, { type: 'filmStopped', targetId: seat.id });
 }
 
@@ -418,6 +451,9 @@ function finishTv(s: GameState, ctx: SimCtx, tv: TvVisit, ok: boolean): void {
   }
   addTvEffects(s, tv);
   const got = collectSigns(s, tv);
+  // 店の伝説（じろ7 Phase 7）: テレビ取材
+  const names = tv.celebs.map((id) => CELEBRITIES.find((x) => x.id === id)?.name ?? id);
+  addLegend(s, ctx, 'tv', { title: `テレビ取材「${tv.show}」`, summary: `「${tv.show}」の取材で${names.join('さん・')}さんが来店し、ラーメンを食べた`, people: names, related: [tv.id], bonus: 0.05 });
   notify(s, ctx, 'tv', 'good', `テレビ取材が終わりました。放送は明日。明日と明後日はお客さんが大幅に増えます（食材と人手の準備を）。${got}`);
   emit(ctx, { type: 'tvDone', targetId: tv.id });
 }

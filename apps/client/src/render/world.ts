@@ -599,6 +599,7 @@ export class World {
         : cu.state === 'crew' && cu.special?.kind === 'tv_camera' ? 'tvcamera'
         : cu.fromBuzz && (cu.state === 'arriving' || cu.state === 'queue' || cu.state === 'waitingSeat') ? 'phone'
         : cu.react && cu.react.kind === 'film' && cu.react.until > s.t ? 'phone'
+        : handheldFilming(s, cu) ? 'phone'
         : null;
       c.model.setHeld(held);
       this.setSmoke(c, smoking);
@@ -628,6 +629,8 @@ export class World {
       const act: CharacterAct | null =
         flyFor >= 0 ? 'fly'
         : cu.nosepick && (cu.nosepick.pickUntil ?? -1) > s.t ? 'nose'
+        : cu.quarrel && !cu.quarrel.calmed && (cu.quarrel.argueUntil ?? -1) > s.t ? 'argue'
+        : handheldFilming(s, cu) ? 'film'
         : cu.react && cu.react.until > s.t ? cu.react.kind
         : sp?.kind === 'dancer' && cu.state !== 'eating' && cu.state !== 'ticket' ? 'dance'
         : null;
@@ -1163,3 +1166,14 @@ function waitYaw(_c: Customer): number {
 }
 
 export type { Employee };
+
+/**
+ * 手持ちのカメラ・生配信の YouTuber が撮影している（じろ7 Phase 7: 撮影のしかたで見た目を変える。三脚はカウンターのスマホ）。
+ * 食べている間は箸を持つので構えない
+ */
+function handheldFilming(s: GameState, cu: Customer): boolean {
+  const f = cu.special?.film;
+  if (cu.special?.kind !== 'youtuber' || !f || f.filming !== 'filming' || cu.state === 'eating') return false;
+  const style = s.fame?.creators.find((c) => c.id === f.creatorId)?.style;
+  return style === 'handheld' || style === 'live';
+}

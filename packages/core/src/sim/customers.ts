@@ -35,6 +35,7 @@ import { COMPLAINT_TEXT, UNREASONABLE_TEXT } from '../data/events';
 import { drawGroupSize, findGroupSeats, groupMembers, holdAfterMeal, leaveAfterMeal, meanGroupSize, messyLeaveDirt, rollMessy } from './manners';
 import { maybeYoutuber, onMealFinished } from './media';
 import { onChaosArrival } from './chaos';
+import { fameDemandFactor, onVisitSns } from './fame';
 import { activeStore } from './company';
 import { priceFeelOf, storeDemandMult, type PriceFeel } from './location';
 
@@ -273,7 +274,9 @@ export function arrivalRate(s: GameState, opts: { events?: boolean } = {}): numb
   const calF = s.tutorial ? 1 : calendarDemand(s.day);
   // その日に払った広告費（オーナーの判断 14）
   const adF = adFactor(s.today?.ads ?? 0);
-  return c.baseRate * repF * hourDemand(clock) * priceF * demand * regularF * ticketF * eventF * stageF * propF * calF * adF;
+  // 知名度・話題性（じろ7 Phase 7。上限はオーナーの判断 Q7。イベントを入れない見込みでは話題性を入れない）
+  const fameF = fameDemandFactor(s, opts.events !== false);
+  return c.baseRate * repF * hourDemand(clock) * priceF * demand * regularF * ticketF * eventF * stageF * propF * calF * adF * fameF;
 }
 
 /** 共通市場の客の取り合いの倍率（プレイヤーがいる店。市場の外では 1） */
@@ -1150,6 +1153,8 @@ export function finalizeVisit(s: GameState, c: Customer, _ctx: SimCtx, failed: b
   const sat = failed ? Math.min(0.25, overallSatisfaction(c)) : overallSatisfaction(c);
   s.today.satisfactionSum += sat;
   s.today.satisfactionCount += 1;
+  // SNS の投稿（じろ7 Phase 7。専用の乱数。口コミ・常連の乱数の並びは変えない）
+  onVisitSns(s, c, sat, failed);
   // 口コミ: 不満が大きいほど書かれやすい
   const pReview = c.traits.reviewPropensity * (sat < 0.4 ? 1.6 : sat > 0.8 ? 1.2 : 0.7);
   if (rand(s) < pReview) {

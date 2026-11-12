@@ -203,6 +203,12 @@ export const EQUIPMENT: Record<string, EquipmentDef> = {
     price: 18_000, upkeep: 0, fineAdjust: true, maxCount: 2, effects: { comfort: 0.02, lostItemReduction: 0.4 },
     description: '荷物の置き場。忘れ物が減る。', color: '#7a5c3e',
   },
+  // じろ7 Phase 7・オーナーの判断 Q9: 店の伝説を飾る棚（ランクの高い順に6つ）
+  legend_shelf: {
+    ...base, id: 'legend_shelf', name: '記念品の棚', role: 'decor', zone: 'dining', w: 2, d: 1, h: 1.8,
+    price: 30_000, upkeep: 0, fineAdjust: true, maxCount: 1, effects: { comfort: 0.01 },
+    description: '店の伝説（珍事件の記念品）を飾る棚。トロフィー・記念プレート・写真を、ランクの高い順に6つまで飾る。', color: '#6b4a2e',
+  },
   vent: {
     ...base, id: 'vent', name: '換気設備の強化', role: 'upgrade', zone: 'none', w: 0, d: 0, h: 0,
     price: 200_000, upkeep: 300, maxCount: 1, effects: { comfort: 0.05, grimeReduction: 0.35 },

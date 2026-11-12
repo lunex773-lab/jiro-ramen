@@ -605,6 +605,8 @@ export function buildTasks(s: GameState): Task[] {
       if (cust && cust.messy && cust.messy.count >= 2 && !cust.messy.calmed && cust.messy.warned === 0 && cust.state === 'eating') add('manner', `manner:${cust.id}`, [step(seat.id, 'manner_warn')]);
       // 鼻をほじる客（じろ7 6-5）: 何度かほじったら声をかける（一度だけ）
       if (cust && cust.nosepick && cust.nosepick.count >= 2 && !cust.nosepick.warned) add('manner', `nose:${cust.id}`, [step(seat.id, 'nose_warn')]);
+      // 客どうしの口論（じろ7 Phase 7）: 何度か言い合ったら仲裁しに行く（言い出した側の席へ）
+      if (cust && cust.quarrel?.lead && cust.quarrel.count >= 3 && !cust.quarrel.calmed && cust.quarrel.count < 8) add('manner', `quarrel:${cust.id}`, [step(seat.id, 'quarrel_calm')]);
       // 居座り: 待っている客がいて、しばらく経ったら退店を促す（混雑の説明から）
       if (cust && cust.group?.leader) {
         const lg = cust.group.linger;

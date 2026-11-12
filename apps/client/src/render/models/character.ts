@@ -19,7 +19,7 @@ export type { HeldKind };
  * dance = 横に弾む踊り（座っていれば上半身で）、imitate = つられて少し踊る、nose = 鼻をほじる、
  * surprise / laugh / scared / film / annoyed / tell = まわりの客の反応、fly = 空を飛ぶ（体を前に倒す）
  */
-export type CharacterAct = 'dance' | 'imitate' | 'nose' | 'surprise' | 'laugh' | 'scared' | 'film' | 'annoyed' | 'tell' | 'fly';
+export type CharacterAct = 'dance' | 'imitate' | 'nose' | 'surprise' | 'laugh' | 'scared' | 'film' | 'annoyed' | 'tell' | 'fly' | 'argue';
 
 /** 見た目の演出（金色覚醒の光と逆立つ髪。0..1） */
 export interface CharacterFx {
@@ -1088,6 +1088,18 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
         setRot(target, B.armR, -0.7, 0, 0.55);
         setRot(target, B.foreR, -1.9, 0, 0.4);
         break;
+      case 'argue': {
+        // 口論（じろ7 Phase 7）: となりの方へ身を乗り出し、手を振って言い返す
+        const g = Math.sin(t * 7 + sd) * 0.5 + 0.5;
+        const side = sd % 2 === 0 ? 1 : -1;
+        setRot(target, B.spine, 0.12, side * 0.35, 0);
+        setRot(target, B.head, 0.05 + g * 0.08, side * 0.55, 0);
+        setRot(target, B.armR, -0.9 - g * 0.6, 0, 0.25 + g * 0.2);
+        setRot(target, B.foreR, -1.1 + g * 0.5, 0, 0);
+        setRot(target, B.armL, -0.4, 0, -0.15);
+        setRot(target, B.foreL, -1.2, 0, 0);
+        break;
+      }
       case 'tell':
         // 手を挙げて店員を呼ぶ
         setRot(target, B.armR, -2.75, 0, -0.15);

@@ -12,6 +12,7 @@ import { forceAccident } from './accident';
 import { emit, notify, type SimCtx } from './notices';
 import { buzzBoostFactor, drawMediaPlans, forceMedia, onDayStartMedia } from './media';
 import { endChaosDay, forceChaos, planChaos } from './chaos';
+import { onDayStartFame, topicBuzzFactor } from './fame';
 
 const E = BALANCE.events;
 
@@ -39,6 +40,8 @@ export function onDayStartEvents(s: GameState, ctx: SimCtx): void {
   for (const r of ev.critics) if (!r.published && r.publishDay <= s.day) publishCritic(s, ctx, r);
   ev.critics = ev.critics.slice(-10);
   onDayStartMedia(s, ctx);
+  // 知名度・話題性・SNS のまとめと、動画の投稿（じろ7 Phase 7）
+  onDayStartFame(s, ctx);
 }
 
 /** 閉店の精算のとき: 当日だけのイベントを終える */
@@ -70,7 +73,8 @@ export function buzzChance(s: GameState): number {
   const repF = Math.pow(clamp(s.reputation, 1, 5) / 3, b.reputationExponent);
   const recentF = clamp(recentStars(s) / 3.5, 0.4, 1.5);
   // 許可した YouTuber の撮影の効果（3日間。重ねられる）
-  return b.chancePerCheck * repF * recentF * buzzBoostFactor(s);
+  // 話題性が高いほどバズりやすい（じろ7 Phase 7）
+  return b.chancePerCheck * repF * recentF * buzzBoostFactor(s) * topicBuzzFactor(s);
 }
 
 function updateBuzz(s: GameState, ctx: SimCtx): void {
@@ -365,6 +369,7 @@ export function forceEvent(s: GameState, ctx: SimCtx, kind: EventKind): { ok: bo
     case 'bounce':
     case 'nosepick':
     case 'bear':
+    case 'quarrel':
       return forceChaos(s, kind);
     default:
       return { ok: false, reason: '不明なイベントです' };

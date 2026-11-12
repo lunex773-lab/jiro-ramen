@@ -689,6 +689,26 @@ export interface Customer {
   react?: CustomerReaction | null;
   /** 鼻をほじる迷惑客 */
   nosepick?: NosepickState | null;
+  /** 口論している客（じろ7 Phase 7） */
+  quarrel?: QuarrelState | null;
+  /** 見た珍事（撮影したか）。帰ったあとの SNS の投稿に使う */
+  saw?: { kind: string; filmed: boolean }[];
+}
+
+/** 客どうしの口論（じろ7 Phase 7・オーナーの判断 Q8） */
+export interface QuarrelState {
+  /** 口論の相手 */
+  with: Id;
+  /** 先に言い出した側（セリフの順番・記録はこちらが持つ） */
+  lead: boolean;
+  /** 次に言い返すまでの秒 */
+  next: number;
+  /** 言い合った回数 */
+  count: number;
+  /** 店員が仲裁した */
+  calmed: boolean;
+  /** 言っている（見た目）時刻の終わり */
+  argueUntil?: number;
 }
 
 /** 珍客イベントへのまわりの客の反応 */
@@ -791,7 +811,8 @@ export type SpecialKind =
   | 'golden'
   | 'dancer'
   | 'nosepicker'
-  | 'bear';
+  | 'bear'
+  | 'quarreler';
 
 export interface CustomerSpecial {
   kind: SpecialKind;
@@ -1100,7 +1121,7 @@ export type EventKind =
   | ChaosKind;
 
 /** 珍客・特殊イベントの種類（じろ7 6-5） */
-export type ChaosKind = 'ufo' | 'golden' | 'bounce' | 'nosepick' | 'bear';
+export type ChaosKind = 'ufo' | 'golden' | 'bounce' | 'nosepick' | 'bear' | 'quarrel';
 
 /** イベントの記録（じろ2: 改修設計書05。ID・日時・会社・店・確率・状態・結果・復元の記録） */
 export interface EventRecord {
@@ -1198,7 +1219,161 @@ export interface FilmState {
   troubleId: Id;
   /** 次に撮影のセリフを言う時刻 */
   talkAt: number;
+  // 以下はじろ7 Phase 7（続く YouTuber・企画・5段の許可・動画）。古いセーブにはない
+  /** YouTuber（FameState.creators の ID） */
+  creatorId?: Id;
+  /** 企画 */
+  plan?: VideoPlan;
+  /** ホストが答えた撮影の許可（5段）。答えていなければない */
+  level?: FilmLevel;
+  /** 撮影中に起きた珍事（動画に映る） */
+  featured?: string[];
 }
+
+/** 撮影の許可（5段。設計書 7-4）: 全部・店内だけ・厨房以外・この企画だけ・断る */
+export type FilmLevel = 'full' | 'dining' | 'noKitchen' | 'planOnly' | 'deny';
+
+/** 動画の企画（設計書 7-3）。plain = 許可の範囲で撮れなかったときのふつうの食レポ */
+export type VideoPlan = 'bigEat' | 'kitchen' | 'spicyBig' | 'live' | 'crazy' | 'interview' | 'plain';
+
+/** 動画の結果（設計書 7-6）: 普通・小さな成功・大ヒット・大バズ・炎上・あとで評価が下がる */
+export type VideoOutcome = 'normal' | 'small' | 'hit' | 'viral' | 'flame' | 'sour';
+
+/** YouTuber（一度来ても消えずに残る。設計書 7-1。すべて架空の人物・チャンネル） */
+export interface Creator {
+  id: Id;
+  name: string;
+  channel: string;
+  /** 登録者数 */
+  subs: number;
+  /** 人気（0..1） */
+  popularity: number;
+  genre: 'gourmet' | 'challenge' | 'variety' | 'vlog' | 'review';
+  personality: 'polite' | 'loud' | 'reckless' | 'calm';
+  style: 'handheld' | 'tripod' | 'live';
+  /** 動画の品質・炎上しやすさ・店への興味（0..1） */
+  quality: number;
+  flameRisk: number;
+  interest: number;
+  /** 店との関係（-1..1。よい撮影で上がり、断られる・揉めると下がる） */
+  relation: number;
+  visits: number;
+  lastVisitDay: number;
+  /** 投稿した動画（Video.id） */
+  videos: Id[];
+  /** ほかの YouTuber の動画を見て来た（その動画の ID） */
+  discoveredFrom?: Id | null;
+}
+
+/** 動画（設計書 7-5） */
+export interface Video {
+  id: Id;
+  creatorId: Id;
+  title: string;
+  /** 撮った日・投稿する日 */
+  day: number;
+  postDay: number;
+  posted: boolean;
+  plan: VideoPlan;
+  level: FilmLevel | 'none';
+  /** 品質・面白さ・珍しさ（0..1） */
+  quality: number;
+  fun: number;
+  rarity: number;
+  /** 映った珍事 */
+  featured: string[];
+  /** 許可なく撮った */
+  sneaky: boolean;
+  views: number;
+  likes: number;
+  comments: number;
+  /** 広がり方（0..1） */
+  spread: number;
+  outcome: VideoOutcome | null;
+  /** 店への影響（知名度・話題性・評判の変化） */
+  effect: { awareness: number; topic: number; reputation: number };
+}
+
+/** SNS の投稿の種類（設計書 8） */
+export type SnsKind = 'photo' | 'review' | 'ufo' | 'golden' | 'dance' | 'rare' | 'staff' | 'nuisance' | 'quarrel' | 'share';
+
+/** 一般の客の SNS の投稿（設計書 8） */
+export interface SnsPost {
+  id: Id;
+  day: number;
+  t: number;
+  /** 投稿者（ハンドルネーム。実在の人物ではない） */
+  author: string;
+  kind: SnsKind;
+  text: string;
+  /** 話題性・信ぴょう性（0..1）・好意（-1..1）・拡散力（0..1）・反応の数 */
+  topic: number;
+  credibility: number;
+  favor: number;
+  reach: number;
+  reactions: number;
+  /** 関係する動画・イベントの記録 */
+  ref?: Id | null;
+}
+
+/** 店の伝説のランク（設計書 9-4）: 通常・希少・激レア・伝説・神話級 */
+export type LegendRank = 'normal' | 'rare' | 'epic' | 'legend' | 'myth';
+
+/** 店の伝説・珍事件の記録（設計書 9） */
+export interface Legend {
+  id: Id;
+  /** 何の伝説か（珍客イベントの種類・viral・sns・tv・chain） */
+  kind: string;
+  title: string;
+  day: number;
+  t: number;
+  storeId: Id;
+  storeName: string;
+  summary: string;
+  /** 関係者（YouTuber・芸能人・珍客の呼び名） */
+  people: string[];
+  /** 関連するイベントの記録・動画の ID */
+  related: Id[];
+  /** SNS の投稿の数・動画の再生数・来客への影響（増えた割合の見込み） */
+  sns: number;
+  views: number;
+  customers: number;
+  /** 珍しさ・大事さ（0..1）と合計の点数 */
+  rarity: number;
+  importance: number;
+  score: number;
+  rank: LegendRank;
+  /** 棚に飾る物 */
+  display: 'photo' | 'sign' | 'plaque' | 'trophy' | 'video';
+  /** この伝説で得た称号 */
+  earnedTitle?: string;
+}
+
+/** 知名度・話題性・SNS・YouTuber・店の伝説（じろ7 Phase 7。店ごと） */
+export interface FameState {
+  /** 専用の乱数（ほかの乱数の並びを変えない） */
+  rng: number;
+  /** 知名度（0..100。店を知っている人の多さ。ゆっくり上がり、ゆっくり下がる） */
+  awareness: number;
+  /** 話題性（0..100。今の話題の強さ。毎日薄れる） */
+  topic: number;
+  /** 日ごとの記録（新しいものが後ろ。30日分） */
+  history: { day: number; awareness: number; topic: number; reputation: number }[];
+  /** SNS の投稿（新しいものが後ろ） */
+  posts: SnsPost[];
+  /** 今日の投稿の数と話題（翌朝にまとめて話題性・知名度へ） */
+  today: { day: number; posts: number; topic: number; favor: number; awareness: number };
+  creators: Creator[];
+  videos: Video[];
+  /** ほかの YouTuber が動画を見て来やすくなる（倍率と日数） */
+  ytBoosts: { untilDay: number; mult: number; from: Id }[];
+  legends: Legend[];
+  /** 得た称号（古い順） */
+  titles: string[];
+  /** SNS の大拡散を伝説にした最後の日（何度も同じことを記録しない） */
+  lastExplosionDay: number;
+}
+
 
 /** ホストに判断を求める確認（撮影の許可・テレビ取材） */
 export interface HostRequest {
@@ -1514,6 +1689,8 @@ export interface GameState {
   tutorial?: TutorialState | null;
   /** 営業中のイベント（古いセーブにはない。sim/events.ts の ensureEvents で補う） */
   events?: ShopEvents;
+  /** 知名度・話題性・SNS・YouTuber・店の伝説（じろ7 Phase 7。店ごと。古いセーブにはない。sim/fame.ts の ensureFame で補う） */
+  fame?: FameState;
   /** その日の仕込み開始時点の控え（爆発事故のリセット用。共同経営では配信しない） */
   prepSnapshot?: PrepSnapshot | null;
   /**
@@ -1569,7 +1746,8 @@ export type StoreKey =
   | 'prepPlan'
   | 'prepSchedule'
   | 'autoOrderOff'
-  | 'purchaseLog';
+  | 'purchaseLog'
+  | 'fame';
 
 
 /** プレイヤーがいない店の中身（店の段階 = 席の数の段階も店ごと） */

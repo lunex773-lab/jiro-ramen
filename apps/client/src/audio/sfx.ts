@@ -412,6 +412,17 @@ export class Sfx {
         case 'chaosFx':
           this.chaosSound(ev.text ?? '');
           break;
+        case 'legend':
+          // 店の伝説（じろ7 Phase 7）: ランクが高いほど華やかなファンファーレ
+          if (this.throttle('legend', 1)) {
+            const notes = ev.text === 'myth' || ev.text === 'legend' ? [523, 659, 784, 1046, 1318] : [523, 659, 784];
+            notes.forEach((f, i) => this.tone(f, 0.28, 'triangle', 0.07, 0, i * 0.12));
+          }
+          break;
+        case 'videoPosted':
+          if (ev.text === 'flame') this.tone(220, 0.5, 'sawtooth', 0.05, -80);
+          else if (ev.text === 'viral' || ev.text === 'hit') [880, 1175, 1568].forEach((f, i) => this.tone(f, 0.16, 'sine', 0.06, 0, i * 0.08));
+          break;
         case 'chaosReact':
           // まわりの客の反応: 撮影はシャッターの音、驚きは短い高い音（立て続けには鳴らさない）
           if (ev.text === 'film' && this.throttle('shutter', 0.6)) this.noise(0.05, 4000, 2, 0.08, 'bandpass');

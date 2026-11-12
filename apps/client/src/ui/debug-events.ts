@@ -19,6 +19,7 @@ const LABELS: Record<EventKind, string> = {
   bounce: '💃 横バウンスの客（次の新規客）',
   nosepick: '👃 鼻をほじる客（次の新規客）',
   bear: '🧸 クマ「みつぐま」の来店（次の新規客）',
+  quarrel: '💢 客どうしの口論（次の新規客が席でとなりの客と）',
 };
 
 export function debugEventsEnabled(): boolean {

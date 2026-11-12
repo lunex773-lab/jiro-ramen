@@ -7,7 +7,7 @@ import { BOWL_PACK, EQUIPMENT, SEAT_PRICE } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
 import { MENU } from '../data/menu';
 import { moveWithCollision, stageOf } from '../geometry';
-import type { CompanyPolicy, EmployeeRole, EventKind, GameState, Id, Rot, ShiftDay, StorePolicy, Vec2, StoreHours } from '../types';
+import type { CompanyPolicy, EmployeeRole, EventKind, FilmLevel, GameState, Id, Rot, ShiftDay, StorePolicy, Vec2, StoreHours } from '../types';
 import { dist, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipment';
@@ -26,6 +26,7 @@ import { promote, promoteLeader, setDateShift, setRestDays, setShift, type DateS
 import { autoShifts } from './shift-plan';
 import { appointDeputy } from './deputy';
 import { answerRequest } from './media';
+import { FILM_LEVELS } from '../data/fame';
 import { setCompanyPolicy } from './company';
 import { assignManager, enterStore, openStore, renameShop, renameStore, setStoreHours, setStoreLocation, setStorePolicy, transferEmployee } from './stores';
 
@@ -77,7 +78,7 @@ export type Action =
   /** 仕込みの量を時間帯・曜日で変える倍率 */
   | { type: 'setPrepSchedule'; weekday?: number[]; hours?: number[] }
   /** ホストへの確認（YouTuber の撮影の許可・テレビ取材）に答える */
-  | { type: 'answerRequest'; requestId: Id; accept: boolean }
+  | { type: 'answerRequest'; requestId: Id; accept: boolean; level?: FilmLevel }
   | { type: 'expand' }
   | { type: 'setPrice'; menuId: string; price: number }
   | { type: 'pauseMenu'; menuId: string; paused: boolean }
@@ -328,7 +329,7 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
     case 'setPrepSchedule':
       return setPrepSchedule(s, { weekday: a.weekday, hours: a.hours });
     case 'answerRequest':
-      return answerRequest(s, ctx, a.requestId, a.accept === true);
+      return answerRequest(s, ctx, a.requestId, a.accept === true, a.level && FILM_LEVELS.includes(a.level) ? a.level : undefined);
     case 'expand':
       return expand(s, ctx);
     case 'openStore':

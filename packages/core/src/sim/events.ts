@@ -11,7 +11,7 @@ import { hashString, newId, rand } from '../util';
 import { BALANCE } from '../data/balance';
 
 /** イベントの種類（設定値・記録・強制発生のキー） */
-export const EVENT_KINDS: readonly EventKind[] = ['sns_buzz', 'critic', 'rare_couple', 'rare_lover', 'complaint_unreasonable', 'explosion', 'youtuber', 'tv', 'ufo', 'golden', 'bounce', 'nosepick', 'bear'];
+export const EVENT_KINDS: readonly EventKind[] = ['sns_buzz', 'critic', 'rare_couple', 'rare_lover', 'complaint_unreasonable', 'explosion', 'youtuber', 'tv', 'ufo', 'golden', 'bounce', 'nosepick', 'bear', 'quarrel'];
 
 export function newEvents(seed: number): ShopEvents {
   return {

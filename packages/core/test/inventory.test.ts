@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addLot, applyAction, autoOrderTarget, BALANCE, consume, expireLots, fridgeCapacity, fridgeUsage, nextDay, pendingOf, placeOrder, receiveDeliveries, runAutoOrder, stockOf } from '../src';
+import { addLot, applyAction, autoOrderTarget, BALANCE, CHAOS, CHAOS_KINDS, consume, expireLots, fridgeCapacity, fridgeUsage, nextDay, pendingOf, placeOrder, receiveDeliveries, runAutoOrder, stockOf } from '../src';
 import { addBot, addSoloBot, eqByType, newGame, run, runDay, standAt } from './helpers';
 
 describe('在庫', () => {
@@ -99,6 +99,9 @@ describe('自動発注と冷蔵庫の容量（統合進化設計書 v2.1 の測�
   });
 
   it('自動発注を3倍にしても店は回り続ける（以前は止まった）。ただし廃棄が増えて損をする', { timeout: 60_000 }, () => {
+    // 発注量だけを比べるため、偶然の珍客イベント（じろ7。話題性で来客が変わる）は止めて、2つの営業の条件をそろえる
+    const saved = CHAOS_KINDS.map((k) => CHAOS[k].dayChance);
+    for (const k of CHAOS_KINDS) (CHAOS[k] as { dayChance: number }).dayChance = 0;
     const play = (mult: number) => {
       const { s, ctx } = newGame(42);
       addSoloBot(s);
@@ -114,6 +117,7 @@ describe('自動発注と冷蔵庫の容量（統合進化設計書 v2.1 の測�
     const over = play(3);
     const served = (h: typeof base) => h.slice(3).reduce((a, r) => a + r.served, 0) / (h.length - 3);
     const waste = (h: typeof base) => h.reduce((a, r) => a + r.waste, 0);
+    CHAOS_KINDS.forEach((k, i) => ((CHAOS[k] as { dayChance: number }).dayChance = saved[i]!));
     expect(served(over)).toBeGreaterThan(20);
     expect(waste(over)).toBeGreaterThan(waste(base));
   });

@@ -25,6 +25,7 @@ import {
   buildVegBoiler,
 } from './equip-kitchen';
 import { buildCoatRack, buildPlant, buildTicketMachine, buildWaterServer } from './equip-dining';
+import { buildLegendShelf } from './equip-legend';
 
 export interface EquipmentModel extends Disposable {
   group: THREE.Group;
@@ -63,6 +64,7 @@ const BUILDERS: Record<string, (c: EqCtx) => void> = {
   water_server: buildWaterServer,
   plant: buildPlant,
   coat_rack: buildCoatRack,
+  legend_shelf: buildLegendShelf,
 };
 
 /** 設備モデルを作る。w=0 の種類（換気・看板・椅子の交換）は空の group を返す */

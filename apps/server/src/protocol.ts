@@ -179,7 +179,7 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
     weekday: (v: unknown) => v === undefined || (Array.isArray(v) && v.length === 7 && v.every((x) => isNum(x) && (x as number) >= 0.5 && (x as number) <= 2)),
     hours: (v: unknown) => v === undefined || (Array.isArray(v) && v.length <= 24 && v.every((x) => isNum(x) && (x as number) >= 0.5 && (x as number) <= 2)),
   },
-  answerRequest: { requestId: isId, accept: isBool },
+  answerRequest: { requestId: isId, accept: isBool, level: (v: unknown) => v === undefined || v === 'full' || v === 'dining' || v === 'noKitchen' || v === 'planOnly' || v === 'deny' },
   expand: {},
   setPrice: { menuId: isId, price: isNum },
   pauseMenu: { menuId: isId, paused: isBool },

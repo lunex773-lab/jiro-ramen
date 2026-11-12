@@ -6,7 +6,7 @@
 // - 今までのイベント（バズ・調査員・YouTuber・テレビなど）は動きを変えず、同時に起きているイベントのつながり（related）だけ共通に記録する
 // - まわりの客の反応（驚く・笑う・怖がる・撮影する・まねする・嫌がる・店員に知らせる）は、主役の近くの客だけ（全員に重い計算をしない）
 
-import { CHAOS, CHAOS_KINDS, CHAOS_RULES as R, REACT_LINES } from '../data/chaos';
+import { CHAOS, CHAOS_KINDS, CHAOS_RULES as R, QUARREL_CALMED, QUARREL_REPLIES, REACT_LINES } from '../data/chaos';
 import type { ChaosKind, ChaosRun, ChaosState, Customer, GameState, Id, ReactKind, Vec2 } from '../types';
 import { clamp01, dist, hashString, newId, rand } from '../util';
 import { sayEvent } from './customers';
@@ -14,6 +14,8 @@ import { addDaily, cooledDown, dailyCount, ensureEvents, eventsAllowed, finishEv
 import { emit, notify, type SimCtx } from './notices';
 import { gameClockMinute, lightPollution, nightness } from './sky';
 import { openDurationOf } from './hours';
+import { addLegend, noteFeatured, noteSaw } from './fame';
+import { LEGEND_KINDS } from '../data/fame';
 import { stageOf } from '../geometry';
 
 /** 店の中・外にいる客（帰った・帰る途中は除く） */
@@ -133,17 +135,20 @@ function startChaos(s: GameState, ctx: SimCtx, kind: ChaosKind, c: Customer, o: 
   };
   ch.active.push(run);
   c.special = { kind: SPECIAL_OF[kind], eventId: rec.id, spoken: false };
+  // 撮影中の YouTuber の動画に映る（じろ7 Phase 7）
+  noteFeatured(s, kind);
   HANDLERS[kind].start(s, ctx, run, c);
   emit(ctx, { type: 'chaos', targetId: c.id, text: kind });
   return run;
 }
 
-const SPECIAL_OF: Record<ChaosKind, 'alien' | 'golden' | 'dancer' | 'nosepicker' | 'bear'> = {
+const SPECIAL_OF: Record<ChaosKind, 'alien' | 'golden' | 'dancer' | 'nosepicker' | 'bear' | 'quarreler'> = {
   ufo: 'alien',
   golden: 'golden',
   bounce: 'dancer',
   nosepick: 'nosepicker',
   bear: 'bear',
+  quarrel: 'quarreler',
 };
 
 /** 主役（最初の客） */
@@ -170,6 +175,8 @@ export function spectate(s: GameState, run: ChaosRun, center: Vec2, radius: numb
     x.react = { kind, until: s.t + R.reactSecFrom + (R.reactSecTo - R.reactSecFrom) * chaosRand(s), eventId: run.recordId };
     sayEvent(x, s, pick(s, REACT_LINES[kind]), 2.6);
     emit(ctx, { type: 'chaosReact', targetId: x.id, text: kind });
+    // 見た珍事を覚えておく（帰ったあとの SNS の投稿。じろ7 Phase 7）
+    noteSaw(x, run.kind, kind === 'film');
     // よい珍事は少しうれしく、迷惑は不快に（満足度の「居心地」）
     const mood = kind === 'annoyed' || kind === 'scared' ? -Math.abs(d.reactMood) : kind === 'tell' ? -Math.abs(d.reactMood) * 0.5 : d.reactMood;
     x.sat.comfort = clamp01(x.sat.comfort + mood);
@@ -260,6 +267,21 @@ function finishChaos(s: GameState, ctx: SimCtx, run: ChaosRun): void {
     rec.witnesses = run.witnesses;
     rec.films = run.films;
     if (run.cause) rec.cause = run.cause;
+  }
+  // 店の伝説（じろ7 Phase 7）: 記録する種類（UFO・覚醒・クマ・ダンス）と、連鎖で起きたもの
+  const lk = LEGEND_KINDS[run.kind];
+  if (lk && (lk.record || run.depth >= 1) && run.witnesses + run.films > 0) {
+    const chained = run.depth >= 1;
+    addLegend(s, ctx, chained ? 'chain' : run.kind, {
+      title: chained ? `${lk.name}（珍事の連鎖）` : lk.name,
+      summary: `${d.label}。見た客 ${run.witnesses}人・撮影 ${run.films}人${run.related.length > 0 ? '・ほかのイベントと同時' : ''}${run.note ? `・${run.note}` : ''}`,
+      people: [d.kind === 'bear' ? 'みつぐま' : d.kind === 'ufo' ? '宇宙人' : 'お客さん'],
+      related: [run.recordId, ...run.related, ...(run.cause ? [run.cause] : [])],
+      witnesses: run.witnesses,
+      films: run.films,
+      depth: run.depth,
+      bonus: chained ? lk.base * 0.3 : 0,
+    });
   }
   if (run.depth >= R.maxDepth) return;
   for (const l of d.links) {
@@ -416,7 +438,102 @@ const HANDLERS: Record<ChaosKind, ChaosHandler> = {
       return false;
     },
   },
+  // 客どうしの口論（オーナーの判断 Q8）: 主役が席に着くと、となりの客と言い合いになる。言い合うたびに近くの客が嫌がる。
+  // 仲裁すると収まる（従業員も何度か言い合ったら仲裁しに行く）。仲裁しないままだと、2人とも満足度が下がって言い合いは止む
+  quarrel: {
+    start() {
+      // 席に着くまで待つ
+    },
+    update(s, dt, ctx, run, c) {
+      if (gone(c)) {
+        const other = run.customerIds[1] ? s.customers.find((x) => x.id === run.customerIds[1]) : null;
+        if (other?.quarrel) other.quarrel = null;
+        return true;
+      }
+      if (!c) return false;
+      const seated = c.state === 'seated' || c.state === 'eating';
+      if (run.step === 0) {
+        if (!seated) return false;
+        const n = quarrelPartner(s, c);
+        if (!n) return c.state === 'eating' && c.eatLeft < (c.eatTotal ?? 1) * 0.3;
+        run.step = 1;
+        run.customerIds.push(n.id);
+        c.quarrel = { with: n.id, lead: true, next: 1.5, count: 0, calmed: false };
+        n.quarrel = { with: c.id, lead: false, next: 1e9, count: 0, calmed: false };
+        return false;
+      }
+      const q = c.quarrel;
+      const other = s.customers.find((x) => x.id === run.customerIds[1]);
+      if (!q || q.calmed || run.step >= 2) return false;
+      // 相手が帰った・席を離れた
+      if (!other || !other.quarrel || (other.state !== 'seated' && other.state !== 'eating')) {
+        run.step = 2;
+        if (other?.quarrel) other.quarrel = null;
+        c.quarrel = null;
+        return false;
+      }
+      q.next -= dt;
+      if (q.next > 0) return false;
+      q.next = 4 + 3 * chaosRand(s);
+      const speaker = q.count % 2 === 0 ? c : other;
+      sayEvent(speaker, s, pick(s, q.count % 2 === 0 ? CHAOS.quarrel.lines : QUARREL_REPLIES), 3);
+      for (const x of [c, other]) if (x.quarrel) x.quarrel.argueUntil = s.t + 3;
+      q.count += 1;
+      other.quarrel.count = q.count;
+      spectate(s, run, c.pos, CHAOS.quarrel.reactRadius, ctx);
+      if (q.count === 2) {
+        const seat = s.seats.find((x) => x.id === c.seatId);
+        notify(s, ctx, `chaos:${run.id}`, 'warn', `${(seat?.index ?? 0) + 1}番席のあたりで、お客さんどうしが口論しています（席を見て「仲裁する」）`);
+      }
+      // 仲裁しないまま言い合いが続いた: 2人とも不満を抱えたまま黙る
+      if (q.count >= 8) {
+        run.step = 2;
+        for (const x of [c, other]) {
+          x.sat.comfort = clamp01(x.sat.comfort - 0.2);
+          x.sat.service = clamp01(x.sat.service - 0.1);
+          if (x.quarrel) x.quarrel.argueUntil = 0;
+        }
+        run.note = '仲裁しないまま、2人とも不満を抱えた';
+      }
+      return false;
+    },
+  },
 };
+
+/** 口論の相手になれる、となりの席の客（主役と同じ団体でない・ほかの珍しい客でない） */
+function quarrelPartner(s: GameState, c: Customer): Customer | null {
+  const seat = s.seats.find((x) => x.id === c.seatId);
+  if (!seat) return null;
+  for (const d of [1, -1]) {
+    const ns = s.seats.find((x) => x.installed && x.index === seat.index + d);
+    const n = ns && s.customers.find((x) => x.id === ns.customerId);
+    if (!n || n.special || n.quarrel || (c.group && n.group?.id === c.group.id)) continue;
+    if (n.state === 'seated' || n.state === 'eating') return n;
+  }
+  return null;
+}
+
+/** 口論を仲裁する（店員・プレイヤーの「仲裁する」から）。両方が落ち着き、嫌がっていた客の不快が少し戻る */
+export function calmQuarrel(s: GameState, c: Customer): boolean {
+  const q = c.quarrel;
+  if (!q || q.calmed) return false;
+  const other = s.customers.find((x) => x.id === q.with);
+  for (const x of [c, other]) {
+    if (!x?.quarrel) continue;
+    x.quarrel.calmed = true;
+    x.quarrel.argueUntil = 0;
+  }
+  sayEvent(c, s, pick(s, QUARREL_CALMED), 2.6);
+  const run = activeChaos(s).find((r) => r.customerIds.includes(c.id));
+  if (run) {
+    for (const id of run.reacted) {
+      const x = s.customers.find((y) => y.id === id);
+      if (x) x.sat.comfort = clamp01(x.sat.comfort + Math.abs(CHAOS.quarrel.reactMood) * 0.6);
+    }
+    run.note = run.note ? `${run.note}・あとで仲裁した` : '仲裁して収めた';
+  }
+  return true;
+}
 
 /** 店員・プレイヤーが鼻をほじる客に声をかけた（manners の「注意する」から） */
 export function warnNosepicker(s: GameState, c: Customer): boolean {

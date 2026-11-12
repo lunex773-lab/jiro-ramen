@@ -1188,10 +1188,15 @@ test('YouTuber が撮影の許可を求めると、ホストに確認の画面�
   const t0 = await page.evaluate(() => (window as unknown as AnyApp).__jiro.host.state.t);
   await page.waitForTimeout(800);
   expect(await page.evaluate(() => (window as unknown as AnyApp).__jiro.host.state.t)).toBe(t0);
-  await press(prompt.getByRole('button', { name: '撮影を許可する' }));
+  // 撮影の許可は5段（じろ7 Phase 7）。「全面許可」で答える
+  await expect(prompt.locator('[data-film-level]')).toHaveCount(5);
+  await press(prompt.locator('[data-film-level="full"]'));
   await expect(prompt).toBeHidden();
-  const perm = await page.evaluate(() => (window as unknown as AnyApp).__jiro.host.state.customers.find((x: any) => x.special?.kind === 'youtuber')?.special.film.permission);
-  expect(perm).toBe('permitted');
+  const film = await page.evaluate(() => (window as unknown as AnyApp).__jiro.host.state.customers.find((x: any) => x.special?.kind === 'youtuber')?.special.film);
+  expect(film.permission).toBe('permitted');
+  expect(film.level).toBe('full');
+  // 来た YouTuber は名簿に残る
+  expect(await page.evaluate(() => (window as unknown as AnyApp).__jiro.host.state.fame?.creators.length ?? 0)).toBeGreaterThan(0);
 });
 
 test('テレビ取材: 確認の画面で受けると8人のチームが来ていて、サインは店の壁に飾られる', async ({ page }) => {
@@ -1889,4 +1894,61 @@ test('珍客イベント: UFO が店の前に降りて宇宙人が来店し、�
   expect(bearPos.z).toBeLessThan(0);
   await page.waitForTimeout(800);
   await shot(page, 'chaos-bear');
+});
+
+test('話題・伝説: 撮影の許可は5段で答えられ、知名度・評判・話題性・伝説・YouTuber・SNS が見られ、記念品の棚に伝説が飾られる（じろ7 Phase 7）', async ({ page }) => {
+  await startNewGame(page);
+  type St = Record<string, unknown> & { t: number; day: number; events?: { requests?: unknown[] }; fame?: unknown; equipment: { id: string; type: string }[] };
+  type App = { __jiro: { host: { state: St; act(a: unknown): Promise<{ ok: boolean; data?: unknown }> }; world: { scene: { getObjectByName(n: string): { children: unknown[] } | undefined } }; debugFace(id: string): boolean } };
+  // 撮影の許可の確認（5段）
+  await page.evaluate(() => {
+    const s = (window as unknown as App).__jiro.host.state;
+    const ev = (s.events ??= {} as St['events'])!;
+    (ev.requests ??= []).push({ id: 'rq-e2e', kind: 'filming', subjectId: 'nobody', text: 'すすり太郎（ズルズルチャンネル・登録者 12,000人・中規模）: 「大食いチャレンジ」の撮影をしてもいいですか？', askedAt: s.t, timeoutAt: s.t + 999 });
+  });
+  const prompt = page.locator('.request-prompt');
+  await expect(prompt).toBeVisible();
+  await expect(prompt.locator('[data-film-level]')).toHaveCount(5);
+  await expect(prompt).toContainText('厨房以外を許可');
+  await shot(page, 'film-levels');
+  await press(prompt.locator('[data-film-level="dining"]'));
+  await expect(prompt).toHaveCount(0);
+  // 知名度・伝説などの状態を入れる（core の単体テストで作り方は確かめている）
+  await page.evaluate(() => {
+    const s = (window as unknown as App).__jiro.host.state;
+    s.fame = {
+      rng: 1, awareness: 23.4, topic: 41.2, lastExplosionDay: -1e9, ytBoosts: [],
+      history: [{ day: s.day - 1, awareness: 20, topic: 60, reputation: 3 }, { day: s.day, awareness: 23.4, topic: 41.2, reputation: 3 }],
+      today: { day: s.day, posts: 0, topic: 0, favor: 0, awareness: 0 },
+      titles: ['UFO が来た店'],
+      posts: [{ id: 'p1', day: s.day, t: 0, author: '@ramen_lover12', kind: 'ufo', text: '【速報】テスト亭の前にUFOが降りてきた', topic: 0.95, credibility: 0.9, favor: 0.6, reach: 0.8, reactions: 321 }],
+      creators: [{ id: 'yt1', name: 'すすり太郎', channel: 'ズルズルチャンネル', subs: 12000, popularity: 0.5, genre: 'challenge', personality: 'loud', style: 'handheld', quality: 0.7, flameRisk: 0.2, interest: 0.8, relation: 0.3, visits: 1, lastVisitDay: s.day, videos: ['v1'] }],
+      videos: [{ id: 'v1', creatorId: 'yt1', title: '【大食い】テスト亭の大ラーメンを完食できるか！？', day: s.day - 1, postDay: s.day, posted: true, plan: 'bigEat', level: 'full', quality: 0.8, fun: 0.7, rarity: 0.2, featured: [], sneaky: false, views: 54321, likes: 2100, comments: 220, spread: 0.6, outcome: 'hit', effect: { awareness: 3.5, topic: 15, reputation: 0 } }],
+      legends: [
+        { id: 'lg1', kind: 'ufo', title: 'UFO 来店事件', day: s.day, t: 0, storeId: 'store1', storeName: 'テスト亭', summary: 'UFO・宇宙人の来店', people: ['宇宙人'], related: [], sns: 3, views: 0, customers: 10, rarity: 0.62, importance: 0.5, score: 0.91, rank: 'myth', display: 'trophy', earnedTitle: 'UFO が来た店' },
+        { id: 'lg2', kind: 'hit', title: '動画の大ヒット', day: s.day, t: 0, storeId: 'store1', storeName: 'テスト亭', summary: '動画が大ヒット', people: ['すすり太郎'], related: ['v1'], sns: 2, views: 54321, customers: 6, rarity: 0.38, importance: 0.5, score: 0.5, rank: 'rare', display: 'video' },
+      ],
+    };
+  });
+  await press(page.locator('.chip.menu'));
+  await press(page.locator('.manage .tab[data-tab="fame"]'));
+  const body = page.locator('.manage-body');
+  await expect(body.locator('[data-fame-kpi="awareness"]')).toContainText('23.4');
+  await expect(body.locator('[data-fame-kpi="topic"]')).toContainText('41.2');
+  await expect(body.locator('[data-fame-title]')).toContainText('UFO が来た店');
+  await expect(body.locator('[data-legend]')).toHaveCount(2);
+  await expect(body.locator('[data-creator]')).toContainText('ズルズルチャンネル');
+  await expect(body.locator('[data-video]')).toContainText('大ヒット');
+  await expect(body.locator('[data-post]')).toContainText('UFO');
+  await shot(page, 'fame-tab');
+  await press(page.locator('.manage .close, .manage [data-close]').first());
+  // 記念品の棚を買って置くと、ランクの高い伝説から飾られる
+  const r = await page.evaluate(() => (window as unknown as App).__jiro.host.act({ type: 'buyEquipment', equipType: 'legend_shelf', autoPlace: true }));
+  expect(r.ok).toBe(true);
+  const shelfId = await page.evaluate(() => (window as unknown as App).__jiro.host.state.equipment.find((e) => e.type === 'legend_shelf')?.id ?? null);
+  expect(shelfId).not.toBeNull();
+  await expect.poll(() => page.evaluate(() => (window as unknown as App).__jiro.world.scene.getObjectByName('legend-items')?.children.length ?? 0)).toBe(2);
+  expect(await page.evaluate((id) => (window as unknown as App).__jiro.debugFace(id), shelfId!)).toBe(true);
+  await page.waitForTimeout(600);
+  await shot(page, 'legend-shelf');
 });
