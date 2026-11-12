@@ -136,6 +136,7 @@ import { openStoreMap } from './store-map';
 import { hoursDialog, hoursSummary } from './hours-dialog';
 import { loanControl, loanSummary } from './loan';
 import { forecastLines } from './site-lines';
+import { storeDaysCard } from './store-days';
 import { alertBox, cardHead, delta, flowBar, kpi, kpiRow, meterBar, profitBars, yenSigned } from './kit';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
 import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
@@ -823,7 +824,7 @@ export class ManageMenu {
           )
         : null;
     const sales = c.stores.length > 1 ? h('section', { class: 'card wide', 'data-company-store-sales': '' }, cardHead('店舗ごとの売上', '店ごとの売上（純売上）・営業利益・杯数です。左は最後にそろった日、右は直近7日の合計と、全店の売上に占める割合。運営は、その日に誰が店を回したか（あなた・店長・店長代理・休業）です。'), this.storeSalesTable(s)) : null;
-    return h('div', { class: 'grid2' }, sales, finance, this.marketCredit(), ...storeCards, openCard, moveCard);
+    return h('div', { class: 'grid2' }, sales, storeDaysCard(s), finance, this.marketCredit(), ...storeCards, openCard, moveCard);
   }
 
   // ───────────────── 営業時間（じろ1 5.1） ─────────────────

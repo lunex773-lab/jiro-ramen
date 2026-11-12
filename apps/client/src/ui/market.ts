@@ -53,6 +53,7 @@ import { cardHead, kpi, kpiRow, meterBar, yenSigned } from './kit';
 import { loanControl, loanSummary } from './loan';
 import { creditCard } from './market-credit';
 import { forecastLines } from './site-lines';
+import { storeDaysCard } from './store-days';
 
 /** 市場の画面の上の数字のカード（値の要素に data 属性を付ける。E2E が読む） */
 function stat(label: string, attrs: Record<string, string>, value: string, tone = ''): HTMLElement {
@@ -786,7 +787,7 @@ export class MarketScreen {
       !bankrupt ? loanControl(this.root, s, (amount) => this.act({ type: 'takeLoan', amount }, '融資を受けました')) : null,
     );
     const stores = s.company.stores.map((entry) => this.storeCard(s, entry, v.mine!.progress.lastProcessedGameDate));
-    return [finance, this.autoPolicy(s), ...stores];
+    return [finance, storeDaysCard(s), this.autoPolicy(s), ...stores];
   }
 
   /** 設定: この市場の決まり・設定の変更の記録・市場の設定を変える／消す（作った人）・市場を抜ける（危ない操作は奥に） */

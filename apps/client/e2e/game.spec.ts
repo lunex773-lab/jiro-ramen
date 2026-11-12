@@ -1674,3 +1674,52 @@ test('会社: 12席・評判★4.0以上の店になると「会社」の画面�
   expect(after.homeSnap).toBe(true);
   await expect(body.locator(`.store-card[data-store="${st.branch}"]`)).toContainText('いまここ');
 });
+
+test('複数店舗: 日ごとの店舗別の売上（日 × 店の表と積み上げの棒）の数字は、会社の日報の店ごとの行と同じ（オーナーの指示 2026-11-12）', async ({ page }) => {
+  test.setTimeout(180_000);
+  await startNewGame(page);
+  const ok = await page.evaluate(async () => {
+    const app = (window as unknown as { __jiro: { host: { state: any; act(a: unknown): Promise<{ ok: boolean }>; tick(dt: number): void } } }).__jiro;
+    const s = app.host.state;
+    s.money = 3_000_000;
+    const out: boolean[] = [];
+    for (const c of s.candidates.slice(0, 2)) out.push((await app.host.act({ type: 'hire', candidateId: c.id })).ok);
+    for (const e of s.employees) {
+      e.availableFrom = undefined;
+      e.profile.employment = 'full';
+      delete e.shifts;
+    }
+    await app.host.act({ type: 'openShop' });
+    for (let i = 0; i < 20000 && app.host.state.phase !== 'closed'; i++) app.host.tick(0.5);
+    app.host.state.career.stage = 1;
+    app.host.state.reputation = 4.3;
+    const [m1, m2] = app.host.state.employees;
+    out.push((await app.host.act({ type: 'openStore', propertyId: 'residential', managerId: m1.id })).ok);
+    out.push((await app.host.act({ type: 'openStore', propertyId: 'station', managerId: m2.id })).ok);
+    for (let d = 0; d < 3; d++) {
+      await app.host.act({ type: 'nextDay' });
+      await app.host.act({ type: 'openShop' });
+      for (let i = 0; i < 20000 && app.host.state.phase !== 'closed'; i++) app.host.tick(0.5);
+    }
+    await app.host.act({ type: 'nextDay' });
+    return out;
+  });
+  expect(ok.every(Boolean)).toBe(true);
+  await page.locator('.chip.menu').click();
+  await page.locator('.manage .tabs .tab[data-tab="company"]').click();
+  const card = page.locator('.manage [data-store-days]');
+  await expect(card).toBeVisible();
+  await expect(card.locator('.sd-legend span')).toHaveCount(3);
+  const lines = await page.evaluate(() => {
+    const s = (window as unknown as { __jiro: { host: { state: any } } }).__jiro.host.state;
+    return s.company.history.flatMap((r: { day: number; stores: { storeId: string; netSales: number }[] }) => r.stores.map((l) => ({ key: `${r.day}:${l.storeId}`, sales: l.netSales })));
+  });
+  expect(lines.length).toBeGreaterThanOrEqual(9);
+  for (const l of lines) {
+    const cell = card.locator(`[data-store-day-cell="${l.key}"]`);
+    const txt = (await cell.textContent()) ?? '';
+    if (txt.startsWith('休')) expect(l.sales).toBe(0);
+    else expect(txt).toContain(`¥${l.sales.toLocaleString('ja-JP')}`);
+  }
+  await shot(page, '51-store-days');
+});

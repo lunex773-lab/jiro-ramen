@@ -1602,3 +1602,29 @@ details.help:not([open]) > .help-body { display: none; }
 .store-line-head .dot { visibility: hidden; }
 .store-line > b { min-width: 6em; text-align: right; font-variant-numeric: tabular-nums; }
 .dash-stores { margin-bottom: 10px; }
+/* 日ごとの店舗別の売上: 積み上げの棒（色が店）と、日 × 店の表（店が多いときは横に動かせる。日の列は止める） */
+.sd-bars { display: flex; align-items: flex-end; gap: 3px; height: 96px; padding: 4px 0 0; border-bottom: 1px solid var(--line2); }
+.sd-col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; position: relative; }
+.sd-stack { display: flex; flex-direction: column-reverse; border-radius: 3px 3px 0 0; overflow: hidden; min-height: 1px; }
+.sd-seg { width: 100%; }
+.sd-day { position: absolute; bottom: -16px; left: 0; right: 0; text-align: center; font-size: 9.5px; color: var(--dim); }
+.sd-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 22px 0 6px; font-size: 12px; color: var(--muted); }
+.sd-legend span, .sd-store { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.sd-legend i, .sd-store i { display: inline-block; flex: 0 0 auto; width: 10px; height: 10px; border-radius: 3px; }
+.sd-note { margin: 2px 0 6px; font-size: 11.5px; }
+.sd-table { overflow-x: auto; max-height: 360px; overflow-y: auto; touch-action: pan-x pan-y; }
+.sd-row { display: grid; align-items: center; column-gap: 8px; min-height: 40px; border-bottom: 1px solid var(--line); font-size: 13px; min-width: max-content; }
+.sd-row > * { min-width: 0; }
+.sd-head { position: sticky; top: 0; z-index: 1; min-height: 28px; background: var(--s1); font-size: 11px; color: var(--muted); font-weight: 800; }
+.sd-head .sd-store { justify-content: flex-end; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-date { position: sticky; left: 0; background: var(--s1); font-weight: 700; white-space: nowrap; }
+.sd-head > span:first-child { position: sticky; left: 0; background: var(--s1); }
+.sd-date small { color: var(--muted); font-weight: 400; margin-left: 2px; }
+.sd-cell { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.sd-cell b { font-size: 13px; }
+.sd-cell small { font-size: 11px; color: var(--muted); }
+.sd-cell small.tone-bad { color: var(--bad); }
+.sd-cell small.tone-good { color: var(--good); }
+.sd-cell.closed b { color: var(--warn); }
+.sd-cell.none { color: var(--dim); align-items: flex-end; }
+.sd-cell.total b { color: var(--text); }
