@@ -1491,14 +1491,21 @@ export class ManageMenu {
         'section',
         { class: 'card wide' },
         cardHead('所有している設備', `状態が下がると故障しやすくなります。自動メンテをONにすると、状態が${MAINTENANCE_THRESHOLD}%を下回った日の閉店後にメンテ（状態+40%）を行います。売ると買値の一部が戻ります。`),
-        owned.map((e) => {
+        h('div', { class: 'table equip-table' }, owned.map((e) => {
           const def = EQUIPMENT[e.type]!;
           const cond = Math.round(e.condition);
+          // じろ6: 1台1行（名前と状態・状態の棒・操作）。自動メンテの1回の費用は名前の下の小さい文字に
+          const stTone = e.status === 'broken' ? 'bad' : e.status === 'faulty' || cond < 40 ? 'warn' : 'good';
           return h(
             'div',
-            { class: `trow ${e.status === 'broken' ? 'bad' : e.status === 'faulty' ? 'warn' : ''}` },
-            h('div', { class: 'tname' }, def.name, h('small', null, `${STATUS_LABEL[e.status]}・状態${cond}%${def.w > 0 && !e.placed ? '・倉庫（未配置）' : ''}・維持費${yenStr(def.upkeep)}/日`)),
-            h('div', { class: 'meter small' }, h('div', { class: 'meter-fill', style: { width: `${cond}%`, background: cond < 30 ? '#e74c3c' : cond < 60 ? '#f39c12' : '#2ecc71' } })),
+            { class: `trow equip-row ${e.status === 'broken' ? 'bad' : e.status === 'faulty' ? 'warn' : ''}`, 'data-equip-row': e.id },
+            h(
+              'div',
+              { class: 'tname' },
+              h('span', null, def.name, ' ', stTone !== 'good' || e.status !== 'normal' ? h('span', { class: `chip-st ${stTone === 'good' ? 'info' : stTone}` }, STATUS_LABEL[e.status]) : null),
+              h('small', null, `${def.w > 0 && !e.placed ? '倉庫（未配置）・' : ''}維持費${yenStr(def.upkeep)}/日${def.repairCost > 0 ? `・メンテ1回${yenStr(maintenanceCost(e))}` : ''}`),
+            ),
+            h('div', { class: 'equip-cond' }, h('div', { class: 'meter small' }, h('div', { class: 'meter-fill', style: { width: `${cond}%`, background: cond < 30 ? '#e74c3c' : cond < 60 ? '#f39c12' : '#2ecc71' } })), h('small', null, `${cond}%`)),
             h(
               'div',
               { class: 'tbtns' },
@@ -1506,7 +1513,7 @@ export class ManageMenu {
                 ? h('button', { class: `mini ${e.status === 'broken' ? 'danger' : ''}`, disabled: e.status === 'repairing', onclick: () => this.act({ type: 'repair', equipmentId: e.id }, '修理を依頼しました') }, e.status === 'repairing' ? '修理中' : `修理 ${yenStr(e.status === 'broken' ? def.repairCost : Math.round(def.repairCost * 0.5))}`)
                 : null,
               def.repairCost > 0
-                ? h('button', { class: `mini ${e.maintenanceBooked ? 'on' : 'ghost'}`, title: `ONにすると、状態が${MAINTENANCE_THRESHOLD}%を下回った日の閉店後にメンテ（状態+40%）を行います`, onclick: () => this.act({ type: 'maintenance', equipmentId: e.id, on: !e.maintenanceBooked }) }, `自動メンテ${e.maintenanceBooked ? 'ON' : 'OFF'}（1回${yenStr(maintenanceCost(e))}）`)
+                ? h('button', { class: `mini ${e.maintenanceBooked ? 'on' : 'ghost'}`, title: `ONにすると、状態が${MAINTENANCE_THRESHOLD}%を下回った日の閉店後にメンテ（状態+40%）を行います`, onclick: () => this.act({ type: 'maintenance', equipmentId: e.id, on: !e.maintenanceBooked }) }, `自動メンテ ${e.maintenanceBooked ? 'ON' : 'OFF'}`)
                 : null,
               this.host.isHost
                 ? h(
@@ -1522,7 +1529,7 @@ export class ManageMenu {
                 : null,
             ),
           );
-        }),
+        })),
       ),
       h(
         'section',
@@ -2530,7 +2537,7 @@ export class ManageMenu {
         'section',
         { class: 'card wide' },
         h('h4', null, 'キャリア目標'),
-        GOALS.map((g) => {
+        h('div', { class: 'goals' }, GOALS.map((g) => {
           const done = s.career.goalsDone.includes(g.id);
           const p = done ? 1 : g.progress(s);
           return h(
@@ -2539,7 +2546,7 @@ export class ManageMenu {
             h('div', { class: 'tname' }, `${done ? '✅' : '⬜'} ${g.name}`, h('small', null, `${g.description}${g.unlocks.length ? ` → ${g.unlocks.map((u) => UNLOCK_NAMES[u] ?? u).join('・')}` : ''}`)),
             h('div', { class: 'meter small' }, h('div', { class: 'meter-fill', style: { width: `${Math.round(p * 100)}%` } })),
           );
-        }),
+        })),
       ),
       h(
         'section',

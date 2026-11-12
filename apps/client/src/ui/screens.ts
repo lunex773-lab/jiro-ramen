@@ -15,6 +15,7 @@ import {
 import type { Settings } from '../game/settings';
 import { serverUrlCard } from './server-url';
 import { confirmDialog, h, promptDialog, stars, yenStr } from './dom';
+import { kpi, kpiRow, yenSigned } from './kit';
 
 export const GAME_TITLE = '次郎系ラーメン屋 経営シミュレーター';
 
@@ -144,7 +145,18 @@ export function resultScreen(s: GameState, r: DayReport, isHost: boolean, cb: Re
   const row = (k: string, v: string, cls = '') => h('div', { class: `kv ${cls}` }, h('span', null, k), h('b', null, v));
   return screen(
     'results',
-    h('h2', null, `${r.day}日目 営業終了`),
+    h('h2', null, `${r.day}日目 営業終了`, h('span', { class: 'kpi-tag actual' }, '今日の実績')),
+    // じろ6: 先頭に大事な数字（売上・営業利益・最終利益・来客と提供・資金の増減）
+    kpiRow(
+      [
+        kpi('売上', yenStr(r.sales - r.refunds), `${r.served}杯`),
+        kpi('営業利益', yenSigned(r.operatingProfit, true), r.sales > 0 ? `利益率 ${Math.round((r.operatingProfit / Math.max(1, r.sales - r.refunds)) * 100)}%` : null, r.operatingProfit < 0 ? 'bad' : r.operatingProfit > 0 ? 'good' : ''),
+        kpi('最終利益', yenSigned(reportFinalProfit(r), true), r.interest ? `利息 −${yenStr(r.interest)}` : '利息なし', reportFinalProfit(r) < 0 ? 'bad' : reportFinalProfit(r) > 0 ? 'good' : ''),
+        kpi('来客', `${r.customers}人`, r.lost > 0 ? `帰った客 ${r.lost}人` : '帰った客なし', '', r.lost > 0 ? 'warn' : ''),
+        kpi('資金', yenStr(r.cashEnd), `今日 ${yenSigned(r.cashEnd - r.cashStart, true)}`, '', r.cashEnd - r.cashStart < 0 ? 'bad' : 'good'),
+      ],
+      'result-kpis',
+    ),
     h(
       'div',
       { class: 'grid2' },

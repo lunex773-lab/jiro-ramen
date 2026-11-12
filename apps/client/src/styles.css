@@ -1540,3 +1540,31 @@ details.help:not([open]) > .help-body { display: none; }
   .market-status .kpi-label { font-size: 9.5px; }
   .market-status .kpi-value.small { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
+/* 設備: 1台1行（名前と状態の札・状態の棒・操作）。PC では列をそろえる */
+.equip-row { padding: 5px 0; }
+.equip-row .tname { flex: 1 1 200px; }
+.equip-row .tname > span { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.equip-cond { display: flex; align-items: center; gap: 6px; flex: 0 1 140px; min-width: 100px; }
+.equip-cond .meter { flex: 1; }
+.equip-cond small { width: 3em; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.manage .equip-row .tbtns button.on { background: rgba(46, 204, 113, 0.14); color: var(--good); border-color: rgba(46, 204, 113, 0.45); }
+.equip-row .tbtns { flex: 0 0 auto; justify-content: flex-end; }
+.equip-table { container-type: inline-size; }
+@container (min-width: 620px) {
+  .equip-row { display: grid; grid-template-columns: minmax(12em, 1fr) 10em minmax(16em, auto); column-gap: 12px; }
+}
+/* キャリア目標: 広い画面では2〜3列に並べる。進み具合の棒は青（黄色を使いすぎない）。済んだ目標は緑 */
+.goals { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); column-gap: 16px; }
+.goal { padding: 6px 0; }
+.goal .meter-fill { background: var(--info); }
+.goal.done .meter-fill { background: var(--good); }
+.goal .tname { font-size: 13.5px; }
+/* 日報: 見出しの札・先頭の数字・カードの題名は白（黄色は「翌日の仕込みへ」だけ） */
+.screen.results h2 .kpi-tag { font-size: 11px; vertical-align: 4px; margin-left: 8px; }
+.screen.results .card h4, .screen.settings .card h4, .screen.help .card h4 { color: var(--text); }
+.screen.results .card { background: var(--s1); border: 1px solid var(--line); }
+.result-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@container app (max-width: 560px) {
+  .result-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.result-kpis .kpi-value { font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

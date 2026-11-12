@@ -623,7 +623,7 @@ test.describe('チュートリアル', () => {
     await page.waitForTimeout(600);
     await shot(page, '11-tutorial-prep');
     // 長押しで豚を切ると、経営メニューの手順へ
-    const slice = page.locator('.act[aria-label="豚を切る"]');
+    const slice = page.locator('.act[aria-label^="豚を切る"]');
     await expect(slice).toBeVisible();
     const box = (await slice.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
