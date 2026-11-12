@@ -328,3 +328,39 @@ describe('端末で営業中でも貸し借りの操作ができる（オーナ�
     expect(offer(m).ok).toBe(true);
   });
 });
+
+describe('借りるのは同時に1社まで・貸すのは何社にでも（オーナーの指示 2026-11-12）', () => {
+  it('ほかの会社から借りている最中は、別の会社の申し込みを承認できず、別の会社は申し込めない。返し終われば借りられる', () => {
+    const m = withBorrower();
+    expect(joinMarket(m, 'u3', '三番亭', T0).ok).toBe(true);
+    const third = playerCompany(m, 'u3')!;
+    // u3 の申し込みを先に受け取っておく（返事待ち）
+    const o3 = marketCredit(m, 'u3', { op: 'offer', borrowerId: borrower(m).id, amount: 50_000, days: 3, dailyRate: 0 }, T0);
+    expect(o3.ok).toBe(true);
+    // u1 から借りる
+    const o1 = offer(m);
+    const id1 = o1.ok ? o1.credit.id : '';
+    expect(marketCredit(m, 'u2', { op: 'accept', creditId: id1 }, T0).ok).toBe(true);
+    // 別の会社（u3）の申し込みは承認できない・新しく申し込めない
+    const a3 = marketCredit(m, 'u2', { op: 'accept', creditId: o3.ok ? o3.credit.id : '' }, T0);
+    expect(a3.ok).toBe(false);
+    if (!a3.ok) expect(a3.reason).toContain('同時に1社まで');
+    const again = marketCredit(m, 'u3', { op: 'offer', borrowerId: borrower(m).id, amount: 50_000, days: 3, dailyRate: 0 }, T0);
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.reason).toContain('同時に1社まで');
+    // 同じ相手（u1）からはもう一度借りられる。貸す側（u1）はほかの会社（u3）にも貸せる
+    const more = offer(m, 50_000);
+    expect(more.ok).toBe(true);
+    expect(marketCredit(m, 'u2', { op: 'accept', creditId: more.ok ? more.credit.id : '' }, T0).ok).toBe(true);
+    const toThird = marketCredit(m, 'u1', { op: 'offer', borrowerId: third.id, amount: 50_000, days: 3, dailyRate: 0 }, T0);
+    expect(toThird.ok).toBe(true);
+    expect(marketCredit(m, 'u3', { op: 'accept', creditId: toThird.ok ? toThird.credit.id : '' }, T0).ok).toBe(true);
+    // u1 への借りを全部返すと、u3 から借りられる
+    for (const cr of m.credits!.filter((x) => x.borrowerId === borrower(m).id && x.status === 'active')) {
+      expect(marketCredit(m, 'u2', { op: 'repay', creditId: cr.id }, T0).ok).toBe(true);
+    }
+    const after = marketCredit(m, 'u3', { op: 'offer', borrowerId: borrower(m).id, amount: 50_000, days: 3, dailyRate: 0 }, T0);
+    expect(after.ok).toBe(true);
+    expect(marketCredit(m, 'u2', { op: 'accept', creditId: after.ok ? after.credit.id : '' }, T0).ok).toBe(true);
+  });
+});

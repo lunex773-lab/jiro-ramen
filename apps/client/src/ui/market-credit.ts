@@ -77,6 +77,8 @@ export function creditCard(root: HTMLElement, v: MarketView, handlers: CreditHan
       '貸し出しを申し込む',
     ),
   );
+  // 借りられるのは同時に1社まで（オーナーの指示 2026-11-12）。今借りている相手
+  const borrowingFrom = list.find((x) => x.borrowerId === me && (x.status === 'active' || x.status === 'overdue' || x.status === 'defaulted')) ?? null;
   const row = (cr: CompanyCredit) => {
     const lending = cr.lenderId === me;
     const other = lending ? cr.borrowerName : cr.lenderName;
@@ -90,7 +92,8 @@ export function creditCard(root: HTMLElement, v: MarketView, handlers: CreditHan
           {
             class: 'mini',
             'data-credit-accept': cr.id,
-            disabled: !!blocked,
+            disabled: !!blocked || (!!borrowingFrom && borrowingFrom.lenderId !== cr.lenderId),
+            title: borrowingFrom && borrowingFrom.lenderId !== cr.lenderId ? `借りられるのは同時に1社までです（今は${borrowingFrom.lenderName}から借りています）` : '',
             onclick: async () => {
               const ok = await confirmDialog(
                 root,
@@ -152,10 +155,11 @@ export function creditCard(root: HTMLElement, v: MarketView, handlers: CreditHan
     { class: 'card market-credit', 'data-market-credit': '' },
     cardHead(
       '企業間の貸し借り',
-      `ほかのプレイヤーの会社にお金を貸せます（相手の承認でお金が動く）。日数は市場の日付（全社がそろった日付）で数え、利息は0時の同期で足します。期限の日に借り手の現金から自動で返し、足りなければ延滞（利息に日${(C.overdueRate * 100).toFixed(1)}%を上乗せし毎日回収）、期限から${C.defaultAfterDays}日で債務不履行（新しく借りられない・評判 −${C.defaultReputation}）。借り手はいつでも前倒しで全部返せます（利息はその日まで）。借り手が抜けた・破産した・市場が終わったときは、返せるだけ返して残りは貸し手の損。`,
+      `ほかのプレイヤーの会社にお金を貸せます（相手の承認でお金が動く）。日数は市場の日付（全社がそろった日付）で数え、利息は0時の同期で足します。期限の日に借り手の現金から自動で返し、足りなければ延滞（利息に日${(C.overdueRate * 100).toFixed(1)}%を上乗せし毎日回収）、期限から${C.defaultAfterDays}日で債務不履行（新しく借りられない・評判 −${C.defaultReputation}）。借り手はいつでも前倒しで全部返せます（利息はその日まで）。貸すのは何社にでもできますが、借りられるのは同時に1社まで（返し終わればほかの会社から借りられます）。借り手が抜けた・破産した・市場が終わったときは、返せるだけ返して残りは貸し手の損。`,
     ),
     book ? h('p', { class: 'note', 'data-credit-book': '' }, `借りている ${yenStr(book.owed)}・貸している ${yenStr(book.lent)}（企業価値では、貸しているお金は資産・借りているお金は負債）`) : null,
     blocked ? h('p', { class: 'note bad' }, blocked) : null,
+    borrowingFrom ? h('p', { class: 'note', 'data-credit-borrowing': '' }, `今は${borrowingFrom.lenderName}から借りています。借りられるのは同時に1社までなので、返し終わるまでほかの会社の申し込みは承認できません`) : null,
     offerForm,
     list.length === 0 ? h('p', { class: 'note' }, 'まだ契約はありません') : h('div', { class: 'credit-list' }, list.map(row)),
   );

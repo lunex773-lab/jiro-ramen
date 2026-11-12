@@ -102,6 +102,15 @@ export function creditOpen(c: CompanyCredit): boolean {
   return OPEN.includes(c.status);
 }
 
+/**
+ * その会社が今借りている相手（返している最中の契約の貸し手）。借りられるのは同時に1社まで（オーナーの指示 2026-11-12。
+ * 貸すのは何社にでもできる）。同じ相手からはもう一度借りられる
+ */
+export function currentLenderOf(m: MarketState, companyId: Id): { id: Id; name: string } | null {
+  const cr = creditsOf(m).find((x) => x.borrowerId === companyId && creditOpen(x));
+  return cr ? { id: cr.lenderId, name: cr.lenderName } : null;
+}
+
 /** 今返すと払う額（元本の残り＋その日までの利息） */
 export function creditOwed(c: CompanyCredit): number {
   return c.remaining + c.interestDue;
@@ -286,6 +295,8 @@ export function creditOp(m: MarketState, env: CreditEnv, op: CreditOp): CreditRe
     if (!to || to.id === me.id) return { ok: false, reason: '貸す相手を選んでください' };
     if (to.kind !== 'player' || to.status !== 'active') return { ok: false, reason: '貸せるのは、この市場で営業しているプレイヤーの会社だけです' };
     if (to.state.creditBlocked) return { ok: false, reason: '相手は債務不履行のため、新しく借りられません' };
+    const toLender = currentLenderOf(m, to.id);
+    if (toLender && toLender.id !== me.id) return { ok: false, reason: `相手は${toLender.name}から借りて返している最中です（借りられるのは同時に1社まで。返し終わってから申し込んでください）` };
     const amt = op.amount;
     if (!Number.isInteger(amt) || amt < C().minAmount || amt > C().maxAmount || amt % C().step !== 0) {
       return { ok: false, reason: `金額は ${yen(C().minAmount)}〜${yen(C().maxAmount)}（${yen(C().step)}刻み）です` };
@@ -341,6 +352,8 @@ export function creditOp(m: MarketState, env: CreditEnv, op: CreditOp): CreditRe
     }
     if (env.ended) return { ok: false, reason: 'この市場の競争期間は終わっています' };
     if (me.state.creditBlocked) return { ok: false, reason: me.state.creditBlocked };
+    const cur = currentLenderOf(m, me.id);
+    if (cur && cur.id !== cr.lenderId) return { ok: false, reason: `借りられるのは同時に1社までです（今は${cur.name}から借りています。返し終わってから承認してください）` };
     const lender = byId(m, cr.lenderId);
     if (!lender || lender.status !== 'active') {
       cr.status = 'cancelled';

@@ -67,12 +67,12 @@ export function explosionUnavailable(s: GameState): string | null {
 }
 
 /**
- * その日の爆発の確率。オンライン市場の会社（marketDemand がある）で、まだ一度も爆発が起きていなければ初回の確率（0.1%）、
- * それ以外（ひとりの経営・一度起きたあと）は通常の確率
+ * その日の爆発の確率。まだ一度も爆発が起きていなければ初回の確率（1.0%）、一度起きたあとは通常の確率（0.001%）。
+ * ひとりの経営・共同経営・オンライン市場で同じ（オーナーの指示 2026-11-12）
  */
 export function accidentChance(s: GameState): number {
-  const firstInMarket = !!s.marketDemand && !((s.events?.stats.explosion?.fired ?? 0) > 0);
-  return firstInMarket ? X.marketFirstChancePerDay : X.chancePerDay;
+  const first = !((s.events?.stats.explosion?.fired ?? 0) > 0);
+  return first ? X.firstChancePerDay : X.chancePerDay;
 }
 
 /** 開店の操作の中で1日1回だけ呼ぶ */

@@ -1,6 +1,6 @@
 // コミュニティ（公開の一覧・育てた会社の持ち込み・終わったあとの営業・引退）の画面（オーナーの判断 15〜18）。
 // サーバーを偽物に差し替え、core の市場の規則（joinMarket・exportCompany・importCompany・retireCompany・marketView）で答える。
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import {
   createMarket,
   exportCompany,

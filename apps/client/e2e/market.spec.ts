@@ -1,7 +1,7 @@
 // 共通市場の画面と、端末での営業（docs/MARKET_RANKING_PLAN.md）。
 // サーバーを偽物に差し替え、core の市場の規則（createMarket・marketView・startDay・commitDay・runSync）で答える。
 // 端末で1日を営業して「翌日の仕込みへ」で送ると、サーバーの確かめ方（verify）を通って受け取られることまで確かめる。
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import {
   addDays,
   commitDay,

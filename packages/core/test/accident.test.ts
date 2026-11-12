@@ -77,8 +77,25 @@ describe('爆発事故の抽選', () => {
     }
   });
 
+  it('出荷の初回の確率（1日1.0%）で、まだ起きていない店は2000日でおよそ20回当たる（オーナーの指示 2026-11-12）', () => {
+    setBal(X, 'firstChancePerDay', Number(process.env.JIRO_EXPLOSION_FIRST));
+    expect((X as { firstChancePerDay: number }).firstChancePerDay).toBe(0.01);
+    const { s } = day2(83);
+    let fired = 0;
+    for (let d = 0; d < 2000; d++) {
+      s.day += 1;
+      s.prepSnapshot!.day = s.day;
+      drawAccident(s);
+      if (s.events!.accidentPlan) fired++;
+    }
+    expect(fired).toBeGreaterThanOrEqual(8);
+    expect(fired).toBeLessThanOrEqual(36);
+  });
+
   it('設定どおりの頻度で起きる（実測できるよう抽選と発生を数えている）', () => {
     setBal(X, 'chancePerDay', 0.3);
+    // 一度も起きていない間は初回の確率を使う（ここでは予約だけで起こさないので、ずっと初回の確率）
+    setBal(X, 'firstChancePerDay', 0.3);
     const { s } = day2(82);
     const draws0 = s.events!.stats.explosion?.draws ?? 0;
     let fired = 0;
@@ -328,6 +345,7 @@ describe('イベントの記録（じろ2: 改修設計書05。ID・日時・会
   it('抽選で起きた爆発は、その日の確率も記録する', () => {
     const { s, ctx } = day2(4712);
     setBal(X, 'chancePerDay', 1);
+    setBal(X, 'firstChancePerDay', 1);
     applyAction(s, 'p1', { type: 'openShop' }, ctx);
     for (let i = 0; i < 4000 && !s.events?.accident; i++) step(s, 0.1, ctx);
     const rec = s.events!.log!.find((r) => r.kind === 'explosion')!;

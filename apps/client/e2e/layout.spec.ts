@@ -3,7 +3,7 @@
 // iPhone のホーム画面から開いたとき（Safari のバーがない）を、画面の大きさと安全領域（CSS の変数）で再現する。
 // LAYOUT_DUMP=フォルダ を付けると、見つけた問題（JSON）と画面の写真を書き出す（測定用）。
 // ふだん（CI）は代表の画面（いちばん小さい横向き・縦向きで回した表示・PC）だけを調べる。LAYOUT_ALL=1 で全部の機種を調べる。
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import {
   createMarket,
   jstDateKey,
