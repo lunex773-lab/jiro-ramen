@@ -251,6 +251,12 @@ test('経営メニューとレイアウト編集が開ける', async ({ page }) 
   await shot(page, '06-manage');
   await page.getByRole('button', { name: '在庫・発注' }).click();
   await expect(page.locator('.manage')).toContainText('仕入れ');
+  // じろ6: 在庫・入荷予定・もつ日数を列で分ける。翌朝便で頼むと、何をいくらで・いつ届くか・入荷予定の前と後が出る
+  const row = page.locator('.manage [data-stock-row]').first();
+  await expect(row.locator('.sn.coming b')).toHaveText('—');
+  await row.getByRole('button', { name: '翌朝便' }).click();
+  await expect(page.locator('.toast').filter({ hasText: '入荷予定' }).last()).toContainText('翌朝便（あすの開店前に届く）で頼みました');
+  await expect(row.locator('.sn.coming b')).toHaveText(/^\+/);
   await page.getByRole('button', { name: '店舗' }).click();
   await page.getByRole('button', { name: 'レイアウト編集を開く' }).click();
   await expect(page.locator('.layout-editor')).toBeVisible();

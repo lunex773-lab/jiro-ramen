@@ -66,6 +66,7 @@ import {
   autoOrderEnabled,
   siteStats,
   isClosedDay,
+  inProcessOutput,
   type StoreHours,
   shelfLifeCap,
   prepPerBowl,
@@ -154,6 +155,26 @@ const TABS: [ManageTab, string, string, string][] = [
   ['career', 'キャリア', '記録', '🏆'],
   ['system', 'セーブ・設定', '設定', '⚙️'],
 ];
+
+/** 直近7営業日（売れた日）に使った量の1日の平均（在庫があと何日もつかの目安。営業した日がなければ 0） */
+function avgDailyUse(s: GameState, id: string): number {
+  let sum = 0;
+  let n = 0;
+  for (let i = s.history.length - 1; i >= 0 && n < 7; i--) {
+    const r = s.history[i]!;
+    if (r.served <= 0) continue;
+    n += 1;
+    sum += r.usedItems?.[id] ?? 0;
+  }
+  return n > 0 ? sum / n : 0;
+}
+
+/** あと何日の短い文 */
+function daysText(days: number | null): string {
+  if (days === null) return '—';
+  if (days >= 30) return '30日以上';
+  return `${days < 10 ? days.toFixed(1) : Math.round(days)}日`;
+}
 
 export interface ManageCallbacks {
   onClose(): void;
@@ -836,17 +857,7 @@ export class ManageMenu {
       );
     });
     // ── 在庫があと何日もつか（直近7営業日に使った量の平均から。届く予定を入れる） ──
-    const used = (id: string) => {
-      let sum = 0;
-      let n = 0;
-      for (let i = s.history.length - 1; i >= 0 && n < 7; i--) {
-        const r = s.history[i]!;
-        if (r.served <= 0) continue;
-        n += 1;
-        sum += r.usedItems?.[id] ?? 0;
-      }
-      return n > 0 ? sum / n : 0;
-    };
+    const used = (id: string) => avgDailyUse(s, id);
     const stockDays = Object.values(INGREDIENTS)
       .filter((x) => x.purchasable && isUnlocked(s, x.unlock))
       .map((x) => ({ x, per: used(x.id), have: stockOf(s, x.id), coming: pendingOf(s, x.id) }))
@@ -1013,21 +1024,43 @@ export class ManageMenu {
         this.managerOrderRow(s),
         h(
           'div',
-          { class: 'table' },
+          { class: 'table stock-table' },
           purch.map((d) => {
             // 店の場所の物価を入れた1パックの値段（じろ1 5.5）
             const pack = packPriceOf(s, d.id);
             const target = s.autoOrder[d.id] ?? 0;
+            const have = stockOf(s, d.id);
+            const coming = pendingOf(s, d.id);
+            const per = avgDailyUse(s, d.id);
+            const days = per > 0 ? (have + coming) / per : null;
+            const n = (v: number) => `${Math.floor(v).toLocaleString('ja-JP')}${d.unit}`;
+            // 発注の結果: 何を・いくらで・いつ届くかと、入荷予定の前と後（じろ6）
+            const order = async (express: boolean) => {
+              const before = pendingOf(this.host.state, d.id);
+              if (!(await this.act({ type: 'orderStock', itemId: d.id, packs: 1, express }))) return;
+              toast(
+                this.root,
+                `${d.name} 1パック（${d.packQty.toLocaleString('ja-JP')}${d.unit}・${yenStr(express ? Math.round(pack * 1.3) : pack)}）を${express ? '当日便（約60秒で届く）' : '翌朝便（あすの開店前に届く）'}で頼みました。入荷予定 ${n(before)} → ${n(pendingOf(this.host.state, d.id))}`,
+                'good',
+                2600,
+              );
+            };
             return h(
               'div',
-              { class: 'trow' },
-              h('div', { class: 'tname' }, d.name, h('small', null, `在庫 ${Math.floor(stockOf(s, d.id)).toLocaleString('ja-JP')}${d.unit}${pendingOf(s, d.id) > 0 ? `（入荷予定 +${pendingOf(s, d.id).toLocaleString('ja-JP')}）` : ''}`)),
-              h('div', { class: 'tsub' }, `${d.packQty.toLocaleString('ja-JP')}${d.unit} / ${yenStr(pack)}`),
+              { class: 'trow stock-row', 'data-stock-row': d.id },
+              h('div', { class: 'tname' }, d.name, h('small', null, `1パック ${d.packQty.toLocaleString('ja-JP')}${d.unit} / ${yenStr(pack)}`)),
+              h(
+                'div',
+                { class: 'stock-nums' },
+                h('span', { class: 'sn' }, h('small', null, '在庫'), h('b', { 'data-stock-have': d.id }, n(have))),
+                h('span', { class: `sn coming${coming > 0 ? ' on' : ''}` }, h('small', null, '入荷予定'), h('b', null, coming > 0 ? `+${n(coming)}` : '—')),
+                h('span', { class: `sn days${days !== null && days < 1 ? ' bad' : days !== null && days < 3 ? ' warn' : ''}`, title: '在庫と入荷予定が、直近7営業日の1日の平均で何日もつか' }, h('small', null, 'もつ日数'), h('b', null, daysText(days))),
+              ),
               h(
                 'div',
                 { class: 'tbtns' },
-                h('button', { class: 'mini', onclick: () => this.act({ type: 'orderStock', itemId: d.id, packs: 1, express: false }, `${d.name}を発注（翌朝便）`) }, '翌朝便'),
-                h('button', { class: 'mini warn', onclick: () => this.act({ type: 'orderStock', itemId: d.id, packs: 1, express: true }, `${d.name}を発注（当日便）`) }, '当日便'),
+                h('button', { class: 'mini', onclick: () => void order(false) }, '翌朝便'),
+                h('button', { class: 'mini warn', onclick: () => void order(true) }, '当日便'),
               ),
               h(
                 'div',
@@ -1058,7 +1091,27 @@ export class ManageMenu {
         { class: 'card wide' },
         cardHead('仕込み品（店内で作る）', '仕込み: 豚を煮込む→（煮豚・タレ）→ 仕込み台で豚を切る / 野菜ゆで釜でヤサイ / 仕込み台でニンニクを刻む / 煮込み鍋で背脂を炊く / 寸胴でスープを炊く。'),
         h('div', { class: 'row wrap' }, h('span', { class: 'note' }, '仕込みの目安・開店前の計画・時間帯と曜日の調整は「仕込み」のタブで決めます'), h('button', { class: 'mini', 'data-guest-ok': '1', onclick: () => { this.tab = 'prep'; this.render(); this.body.scrollTop = 0; } }, '仕込みのタブへ')),
-        h('div', { class: 'table' }, prepared.map((d) => h('div', { class: 'trow' }, h('div', { class: 'tname' }, d.name), h('div', { class: 'tsub' }, `${Math.floor(stockOf(s, d.id)).toLocaleString('ja-JP')}${d.unit}`), h('div', { class: 'tsub' }, d.shelfLifeDays === 0 ? '当日限り' : `${d.shelfLifeDays}日もつ`)))),
+        h(
+          'div',
+          { class: 'table stock-table' },
+          prepared.map((d) => {
+            const making = inProcessOutput(s, d.id);
+            const plan = (s.prepPlan && s.prepPlan.day === s.day ? s.prepPlan.items[d.id] : undefined) ?? null;
+            const fmtQ = (v: number) => `${Math.floor(v).toLocaleString('ja-JP')}${d.unit}`;
+            return h(
+              'div',
+              { class: 'trow stock-row', 'data-prepared-row': d.id },
+              h('div', { class: 'tname' }, d.name, h('small', null, d.shelfLifeDays === 0 ? '当日限り' : `${d.shelfLifeDays}日もつ`)),
+              h(
+                'div',
+                { class: 'stock-nums' },
+                h('span', { class: 'sn' }, h('small', null, '在庫'), h('b', null, fmtQ(stockOf(s, d.id)))),
+                h('span', { class: `sn coming${making > 0 ? ' on' : ''}` }, h('small', null, '仕込み中'), h('b', null, making > 0 ? `+${fmtQ(making)}` : '—')),
+                h('span', { class: `sn plan${plan ? ' on' : ''}` }, h('small', null, '今日の計画'), h('b', null, plan ? fmtQ(plan) : '—')),
+              ),
+            );
+          }),
+        ),
       ),
     );
   }

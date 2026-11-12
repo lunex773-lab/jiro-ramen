@@ -106,7 +106,7 @@ function canReplenish(s: GameState, itemId: string): boolean {
 const BUTA_PER_BLOCK = PREP_RECIPES.slice_pork?.outputs[0]?.qty ?? 18;
 
 /** 鍋・釜で工程中の、その物の出来上がりの量 */
-function inProcessOutput(s: GameState, itemId: string): number {
+export function inProcessOutput(s: GameState, itemId: string): number {
   let n = 0;
   for (const e of s.equipment) {
     const pr = e.process ? PREP_RECIPES[e.process.recipeId] : undefined;

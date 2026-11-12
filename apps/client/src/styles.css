@@ -1463,3 +1463,23 @@ details.help:not([open]) > .help-body { display: none; }
 /* 操作を送っている間（ネットの市場など）は、少しだけ薄くして待っていることを示す */
 .manage-body.busy { cursor: progress; }
 .manage-body.busy button:focus { opacity: 0.6; }
+/* 在庫・仕入れ: 在庫・入荷予定・もつ日数（仕込み品は 在庫・仕込み中・今日の計画）を列に分けて、違いが一目で分かるように */
+.stock-row .tname { flex: 1 1 150px; }
+.stock-nums { display: grid; grid-template-columns: repeat(3, minmax(4.6em, 1fr)); gap: 6px; flex: 2 1 240px; min-width: 0; }
+.sn { display: flex; flex-direction: column; min-width: 0; }
+.sn small { font-size: 10.5px; color: var(--dim); font-weight: 700; }
+.sn b { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sn.coming.on b { color: var(--info); }
+.sn.plan.on b { color: var(--yellow); }
+.sn.days.warn b { color: var(--warn); }
+.sn.days.bad b { color: var(--bad); }
+.stock-table { container-type: inline-size; }
+@container (min-width: 860px) {
+  .stock-row { display: grid; grid-template-columns: minmax(11em, 1.1fr) minmax(16em, 1.6fr) auto minmax(20em, auto); column-gap: 12px; }
+  .stock-row .tauto { justify-self: start; }
+}
+/* 自動の仕入れの ON は「状態」なので緑の札の色（黄色は選んでいるタブといちばん押してほしいボタンだけ） */
+.manage .tauto button.on { background: rgba(46, 204, 113, 0.14); color: var(--good); border-color: rgba(46, 204, 113, 0.45); }
+@container (min-width: 860px) {
+  .stock-row { grid-template-columns: minmax(11em, 1fr) minmax(16em, 1.4fr) 10.5em 25em; }
+}
