@@ -214,7 +214,9 @@ export function payDue(e: Employee, s: GameState): number {
     // 社員は休まなければ日給（遅刻しても減らさない）。このバージョンより前の状態（出勤の記録がない）は出勤していれば払う
     if (!a || a.day !== s.day) return e.presentToday ? fullTimeDayPay(e, s) : 0;
     // 休みの曜日（今日の予定がない日）は日給なし。工事の休業日は出勤するので払う。休みの日に呼び出したら払う
-    if (a.status !== 'closed' && !a.calledIn && a.shift === null) return 0;
+    // 工事・準備の休業日は給与なし（オーナーの指示 2026-11-12。前は社員の日給を払っていた）
+    if (a.status === 'closed') return 0;
+    if (!a.calledIn && a.shift === null) return 0;
     return a.absent ? 0 : fullTimeDayPay(e, s);
   }
   if (!a || a.day !== s.day) return 0;
@@ -523,11 +525,10 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
     e.att = a;
     e.conduct = { nextCheck: ST.conduct.checkEvery * (0.5 + evRand(s)), until: -1, kind: null, lastAt: -1e9, today: 0, day: s.day };
     if (construction) {
-      // 工事の休業日: アルバイトは来ない。社員は今までどおり（給与あり）
+      // 工事（拡張）・出店の準備の休業日: 社員もアルバイトも来ない。給与は払わない（オーナーの指示 2026-11-12）
       a.status = 'closed';
       e.presentToday = false;
       e.ai.state = 'off';
-      if (!isPartTime(e)) arriveFloor(s, e, 'arrive', order++);
       continue;
     }
     if (!sh) {
@@ -859,9 +860,9 @@ export function closeStaffDay(s: GameState): void {
   for (const e of s.employees) {
     recordAttendance(s, e);
     const a = e.att;
-    const worked = a && a.day === s.day ? !a.absent && (a.workedSec > 0 || a.prepWorked || (a.status === 'closed' && !isPartTime(e))) : e.presentToday;
+    const worked = a && a.day === s.day ? !a.absent && a.status !== 'closed' && (a.workedSec > 0 || a.prepWorked) : e.presentToday;
     const share = a && a.day === s.day ? clamp01((a.workedSec + (a.prepWorked ? openDurationOf(s) * 0.1 : 0)) / openDurationOf(s)) : worked ? 1 : 0;
-    endOfDayWellbeing(s, e, worked, a?.status === 'closed' ? 1 : share);
+    endOfDayWellbeing(s, e, worked, share);
     if (!worked) continue;
     ensureRecord(e).daysWorked += 1;
     e.profile.experience = Math.min(1, e.profile.experience + ST.experiencePerDay);
@@ -918,6 +919,8 @@ export function wagesDueToday(s: GameState): number {
 
 /** 当日（または翌日）の給与の見込み */
 export function expectedWages(s: GameState, day: number): number {
+  // 工事・準備の休業日は給与なし（翌日が休業なら、閉店後の見込みも0）
+  if ((day === s.day && s.closedForConstruction > 0 && s.phase !== 'closed') || (day === s.day + 1 && s.phase === 'closed' && s.closedForConstruction > 0)) return 0;
   // 今日の分は今日の営業時間、明日からの分は店の設定の営業時間
   const hours = day === s.day ? todayHours(s) : storeHours(s);
   return s.employees.reduce((sum, e) => sum + expectedPay(e, day, hours), 0);

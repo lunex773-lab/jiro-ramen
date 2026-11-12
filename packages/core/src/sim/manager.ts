@@ -243,10 +243,12 @@ function runInStore(s: GameState, entry: StoreEntry, day: number, ctx: SimCtx, o
     t.utilities = Math.round(utilitiesBaseOf(hours, true) + m.utilitiesPerBowl * served);
     t.wages = s.employees.reduce((a, e) => a + expectedPay(e, day, hours), 0) + temps * Math.round(tempHourly() * (openMinutesOf(hours) / 60 + BALANCE.staff.employment.prepPaidHours));
   } else {
-    if (s.closedForConstruction > 0) s.closedForConstruction -= 1;
+    const construction = s.closedForConstruction > 0;
+    if (construction) s.closedForConstruction -= 1;
     t.utilities = utilitiesBaseOf(hours, false);
-    // 休みでも社員の日給はかかる（アルバイトは来ない。社員の休みの曜日・定休日はかからない）
-    t.wages = s.employees.reduce((a, e) => a + (e.profile.employment === 'full' ? expectedPay(e, day, hours) : 0), 0);
+    // 工事（拡張）・出店の準備の休業日は給与なし（オーナーの指示 2026-11-12）。
+    // ほかの休み（店長がいない日など）は社員の日給はかかる（アルバイトは来ない。社員の休みの曜日・定休日はかからない）
+    t.wages = construction ? 0 : s.employees.reduce((a, e) => a + (e.profile.employment === 'full' ? expectedPay(e, day, hours) : 0), 0);
   }
   t.rent = Math.round(st.rent * storeRentMult(entry));
   t.upkeep = upkeepTotal(s);
