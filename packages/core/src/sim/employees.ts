@@ -3,6 +3,7 @@
 // 同じ仕事は予約（taskId）で一人だけが担当する。担当者が離脱した仕事は予約が外れ、他の人が引き継げる。
 
 import { openDurationOf } from './hours';
+import { actingManager } from './store-manager';
 import { BALANCE } from '../data/balance';
 import { EQUIPMENT } from '../data/equipment';
 import { GIVEN_NAMES, SURNAMES } from '../data/names';
@@ -773,6 +774,7 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
   if (s.employees.length === 0) return;
   let tasks: Task[] | null = null;
   const busyTargets = playerBusyTargets(s);
+  const actingId = actingManager(s)?.e.id ?? null;
   for (const e of s.employees) {
     // 出勤前・休憩中・退勤後・欠勤（状態は staff.ts の出勤の処理が決める）
     if (!e.presentToday) continue;
@@ -887,7 +889,8 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
     e.ai.cooldown -= dt;
     if (e.ai.cooldown > 0) continue;
     tasks = tasks ?? buildTasks(s);
-    const isManager = !!s.company && activeStore(s).managerId === e.id;
+    // 店長（店長がいないとき・休みのときは店にいるシフトリーダー＝店長代理）は、急ぎの仕込みを先にする
+    const isManager = actingId === e.id;
     let best: Task | null = null;
     let bestScore = -Infinity;
     for (const t of tasks) {

@@ -11,6 +11,8 @@ import {
   INGREDIENTS,
   managerExpressCheck,
   managerOrderTarget,
+  managerOrders,
+  actingManager,
   rawOnHand,
   runAutoOrder,
   shortageBeforeClose,
@@ -177,4 +179,74 @@ describe('店長の当日便', () => {
     expect(b.s.today.managerExpress).toBeUndefined();
     expect(stockOf(b.s, 'moyashi')).toBe(1000);
   });
+});
+
+// シフトリーダーを店長代理に（オーナーの指示 2026-11-12）: 店長がいない店・店長が休み・休憩のとき、店にいるシフトリーダーが
+// 急ぎの仕込み・当日便・翌日の仕入れをする
+describe('シフトリーダーは店長代理', () => {
+  function leaderStore(withManager: boolean) {
+    const { s, ctx } = newGame(41);
+    s.career.unlocked.push('hiring');
+    s.money = 1_000_000;
+    activeStore(s).hours = LUNCH;
+    s.todayHours = LUNCH;
+    const m = withManager ? addBot(s, 'cook', 0.7, 7000) : null;
+    if (m) {
+      m.id = 'mgr';
+      expect(applyAction(s, 'p1', { type: 'assignManager', storeId: activeStore(s).id, employeeId: m.id }, ctx).ok).toBe(true);
+      m.presentToday = true;
+      m.commute = null;
+    }
+    const l = addBot(s, 'server', 0.7, 8000);
+    l.id = 'leader';
+    l.profile.role = 'leader';
+    l.presentToday = true;
+    l.commute = null;
+    history(s, 5);
+    s.day = 6;
+    s.phase = 'open';
+    s.openT = 0.3 * 240 * 2.25;
+    s.t = s.openT + 100;
+    s.inventory = s.inventory.filter((x) => x.itemId !== 'moyashi' && x.itemId !== 'yasai');
+    addLot(s, 'moyashi', 1000, 0.12);
+    s.today.usedItems = { moyashi: 3000 };
+    return { s, ctx, m, l };
+  }
+
+  it('店長がいない店でも、店にいるシフトリーダーが当日便で先に仕入れる（「店長代理」と知らせる）', () => {
+    const { s, ctx } = leaderStore(false);
+    expect(actingManager(s)?.deputy).toBe(true);
+    managerExpressCheck(s, 10, ctx);
+    expect(s.today.managerExpress?.items.moyashi ?? 0).toBeGreaterThan(0);
+    expect(s.notices.find((n) => n.code === 'mgrExpress:moyashi')?.text).toContain('店長代理');
+  });
+
+  it('店長が休憩中・休みのときはシフトリーダーが代わりにする。店長が店にいれば店長がする', () => {
+    const a = leaderStore(true);
+    expect(actingManager(a.s)?.e.id).toBe('mgr');
+    a.m!.presentToday = false;
+    expect(actingManager(a.s)).toEqual({ e: a.l, deputy: true });
+    managerExpressCheck(a.s, 10, a.ctx);
+    expect(a.s.today.managerExpress?.items.moyashi ?? 0).toBeGreaterThan(0);
+  });
+
+  it('「自分の設定で」にした店では、店長代理も仕入れない。シフトリーダーがいなければ誰もしない', () => {
+    const a = leaderStore(false);
+    activeStore(a.s).policy.orderBy = 'self';
+    managerExpressCheck(a.s, 10, a.ctx);
+    expect(a.s.today.managerExpress).toBeUndefined();
+    const b = leaderStore(false);
+    b.l.presentToday = false;
+    managerExpressCheck(b.s, 10, b.ctx);
+    expect(b.s.today.managerExpress).toBeUndefined();
+  });
+
+  it('閉店後の翌朝便も、店長がいない店ではシフトリーダーが予測して頼む', () => {
+    const { s, ctx } = leaderStore(false);
+    expect(managerOrders(s)).toBe(true);
+    s.phase = 'closed';
+    runAutoOrder(s, ctx);
+    expect(s.today.managerOrder).toBeDefined();
+  });
+
 });

@@ -16,6 +16,8 @@ import {
   expansionInfo,
   fixedCosts,
   forecastText,
+  actingManager,
+  managerTitle,
   fridgeCapacity,
   fridgeUsage,
   GOALS,
@@ -957,9 +959,13 @@ export class ManageMenu {
     if (!s.company) return null;
     const st = activeStore(s);
     const mgr = st.managerId ? s.employees.find((e) => e.id === st.managerId) : null;
-    if (!mgr) return null;
+    // 店長がいなくても、シフトリーダーがいれば店長代理として発注する（オーナーの指示 2026-11-12）
+    const leaders = s.employees.filter((e) => e.profile.role === 'leader' && e.id !== mgr?.id);
+    if (!mgr && leaders.length === 0) return null;
     const byMgr = st.policy.orderBy !== 'self';
     const last = s.history.at(-1)?.managerOrder;
+    const who = mgr ? `店長（${mgr.profile.name}さん）` : `店長代理（シフトリーダーの${leaders.map((e) => e.profile.name).join('・')}さん）`;
+    const act = actingManager(s);
     const set = (orderBy: 'manager' | 'self', msg: string) => this.act({ type: 'setStorePolicy', storeId: st.id, policy: { orderBy } }, msg);
     return h(
       'div',
@@ -967,18 +973,19 @@ export class ManageMenu {
       h(
         'div',
         { class: 'row wrap' },
-        h('span', null, '翌朝便の発注:'),
-        h('button', { class: `mini ${byMgr ? 'on' : 'ghost'}`, onclick: () => set('manager', `店長（${mgr.profile.name}さん）に発注を任せました`) }, `🧑‍🍳 店長に任せる`),
-        h('button', { class: `mini ${!byMgr ? 'on' : 'ghost'}`, onclick: () => set('self', '発注を自分の設定にしました') }, '自分の設定で'),
+        h('span', null, '仕入れ:'),
+        h('button', { class: `mini ${byMgr ? 'on' : 'ghost'}`, 'data-order-by': 'manager', onclick: () => set('manager', `${who}に仕入れを任せました`) }, mgr ? '🧑‍🍳 店長に任せる' : '🧑‍🍳 店長代理に任せる'),
+        h('button', { class: `mini ${!byMgr ? 'on' : 'ghost'}`, 'data-order-by': 'self', onclick: () => set('self', '仕入れを自分の設定にしました') }, '自分の設定で'),
       ),
       h(
         'p',
         { class: 'note' },
         byMgr
-          ? `店長の${mgr.profile.name}さんが、営業中は閉店までに足りなくなりそうな材料を当日便で先に仕入れ、閉店後はその日の売れ行き・あすの曜日と営業時間・定休日から来客を予測して翌朝便を発注します。仕込み品が切れそうなときは先に仕込みます（下の「自動」の目安が0の食材は発注しません。手元に翌日の固定費の2日分を残します）。${last ? `前回: ${yenStr(last.spent)}・${last.packs}パック${last.skipped > 0 ? `（資金が少なく${last.skipped}パック減らした）` : ''}` : ''}`
+          ? `${who}が、営業中は閉店までに足りなくなりそうな材料を当日便で先に仕入れ、閉店後はその日の売れ行き・あすの曜日と営業時間・定休日から来客を予測して翌朝便を発注します。仕込み品が切れそうなときは先に仕込みます。${mgr && leaders.length > 0 ? '店長が休み・休憩のときは、店にいるシフトリーダーが店長代理としてします。' : ''}（下の「自動」の目安が0の食材は発注しません。手元に翌日の固定費の2日分を残します）。${last ? `前回: ${yenStr(last.spent)}・${last.packs}パック${last.skipped > 0 ? `（資金が少なく${last.skipped}パック減らした）` : ''}` : ''}`
           : '下の自動発注の設定のとおりに発注します（当日便も自分で頼みます）。',
       ),
-      byMgr && last?.forecast ? h('p', { class: 'note', 'data-manager-forecast': '1' }, `店長のあすの予測: ${forecastText(last.forecast)}`) : null,
+      byMgr && act && (s.phase === 'open' || s.phase === 'prep') ? h('p', { class: 'note', 'data-acting-manager': act.deputy ? 'deputy' : 'manager' }, `今、店にいる${act.deputy ? '店長代理' : '店長'}: ${act.e.profile.name}さん`) : null,
+      byMgr && last?.forecast ? h('p', { class: 'note', 'data-manager-forecast': '1' }, `${managerTitle(s)}のあすの予測: ${forecastText(last.forecast)}`) : null,
       byMgr && s.today.managerExpress ? h('p', { class: 'note warn' }, `今日の当日便: ${s.today.managerExpress.packs}パック ${yenStr(s.today.managerExpress.spent)}`) : null,
     );
   }
@@ -1982,7 +1989,7 @@ export class ManageMenu {
       'div',
       { class: 'promote' },
       h('p', null, `${e.profile.name}さん（${ROLE_LABEL[e.profile.role]}・社員 日給${yenStr(e.profile.wage)}）をシフトリーダーにします。`),
-      h('p', null, `シフトリーダーは仕入れ・仕込み・調理・接客・清掃を全部する上位の役職です。日給は ${yenStr(leaderWageFor(e))} になります。`),
+      h('p', null, `シフトリーダーは仕入れ・仕込み・調理・接客・清掃を全部する上位の役職です。店長がいない・休みのときは店長代理として、急ぎの仕込み・当日便・翌日の仕入れをします。日給は ${yenStr(leaderWageFor(e))} になります。`),
       problem ? h('p', { class: 'note bad' }, problem) : null,
     );
     if (!(await confirmNode(this.root, 'シフトリーダーにする', body, 'シフトリーダーにする'))) return;

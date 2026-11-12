@@ -166,8 +166,15 @@ export function autoOrderTarget(s: GameState, itemId: string): number {
 export function managerOrders(s: GameState): boolean {
   if (!s.company) return false;
   const st = activeStore(s);
-  if (!st.managerId || st.policy.orderBy === 'self') return false;
-  return s.employees.some((e) => e.id === st.managerId);
+  if (st.policy.orderBy === 'self') return false;
+  // 店長がいる店。店長がいなくても、シフトリーダー（店長代理）がいる店は代わりに発注する（オーナーの指示 2026-11-12）
+  return (!!st.managerId && s.employees.some((e) => e.id === st.managerId)) || s.employees.some((e) => e.profile.role === 'leader');
+}
+
+/** 発注・当日便をしている人の呼び名（店長がいれば「店長」、いなければ「店長代理」） */
+export function managerTitle(s: GameState): string {
+  const id = s.company ? activeStore(s).managerId : null;
+  return id && s.employees.some((e) => e.id === id) ? '店長' : '店長代理';
 }
 
 /** 予測に使う、最近の営業した日（1杯以上出した日。新しい順に最大 recentDays 日） */
@@ -513,9 +520,9 @@ export function runAutoOrder(s: GameState, ctx: SimCtx): void {
     s.today.managerOrder = summary;
     const last = s.history.at(-1);
     if (last && last.day === s.day) last.managerOrder = { ...summary, ...(forecast ? { forecast: { ...forecast } } : {}) };
-    if (forecast?.closed) notify(s, ctx, 'mgrForecast', 'info', `店長: あす（${forecast.day}日目）は定休日なので、翌朝便は頼みません（定休日の夜に次の営業日の分を頼みます）`);
+    if (forecast?.closed) notify(s, ctx, 'mgrForecast', 'info', `${managerTitle(s)}: あす（${forecast.day}日目）は定休日なので、翌朝便は頼みません（定休日の夜に次の営業日の分を頼みます）`);
     else clearNotice(s, 'mgrForecast');
-    if (summary.skipped > 0) notify(s, ctx, 'autoorder:budget', 'warn', `店長: 資金が少ないため、翌朝便を${summary.skipped}パック減らしました（手元に翌日の固定費の2日分を残す）`);
+    if (summary.skipped > 0) notify(s, ctx, 'autoorder:budget', 'warn', `${managerTitle(s)}: 資金が少ないため、翌朝便を${summary.skipped}パック減らしました（手元に翌日の固定費の2日分を残す）`);
     else clearNotice(s, 'autoorder:budget');
   }
   if (shelfCut.length > 0) notify(s, ctx, 'autoorder:shelf', 'info', `保存期間のうちに使い切れない分は頼みませんでした（${shelfCut.map((id) => INGREDIENTS[id]?.name ?? id).join('・')}）`);
