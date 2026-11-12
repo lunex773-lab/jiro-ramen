@@ -298,7 +298,7 @@ export function resetAccident(s: GameState, actorId: Id, accidentId: unknown, ct
     rng: s.rng,
     paused: s.paused,
   };
-  const kept = { rng: ev.rng, stats: ev.stats, resets: ev.resets + 1, log: ev.log };
+  const kept = { rng: ev.rng, stats: ev.stats, resets: ev.resets + 1, log: ev.log, chaosRng: ev.chaos?.rng };
   if (acc.eventId) restoreEvent(s, acc.eventId, s.day, s.t);
   const restored = clone(snap.state) as Partial<GameState>;
   for (const k of Object.keys(s) as (keyof GameState)[]) {
@@ -310,6 +310,8 @@ export function resetAccident(s: GameState, actorId: Id, accidentId: unknown, ct
   nev.stats = kept.stats;
   nev.resets = kept.resets;
   if (kept.log) nev.log = kept.log;
+  // 珍客イベントの乱数も戻さない（じろ7 6）
+  if (nev.chaos && kept.chaosRng !== undefined) nev.chaos.rng = kept.chaosRng;
   // 同じ日に二度抽選しない（控えは抽選の前の状態なので、ここで記録し直す）
   nev.accidentDrawDay = s.day;
   nev.accidentPlan = null;

@@ -981,6 +981,8 @@ export class App {
         if (Math.hypot(me.pos.x - this.localPos.x, me.pos.z - this.localPos.z) > 1.5) this.localPos = { ...me.pos };
       }
     }
+    // 横バウンスの客が店にいる間は、オリジナルのダンス曲を流す（じろ7 6-5）
+    this.guard('dance', () => this.sfx.setDance(s.phase !== 'closed' && s.customers.some((x) => x.special?.kind === 'dancer' && x.state !== 'leaving' && x.state !== 'left' && x.state !== 'abandoned')));
     world.setAccident(acc);
     world.setCameraFx(av.shake, av.eyeY, av.roll);
     world.setCamera(this.localPos.x, this.localPos.z, c.yaw, c.pitch, moving, dt);

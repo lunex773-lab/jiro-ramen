@@ -22,6 +22,7 @@ import { updateTutorial } from './tutorial';
 import { accidentHalted } from './events';
 import { stepHalted, updateAccident } from './accident';
 import { updateVisitors } from './visitors';
+import { updateChaos } from './chaos';
 import { updateManners } from './manners';
 import { updateMedia } from './media';
 
@@ -85,6 +86,8 @@ function stepOnce(s: GameState, dt: number, ctx: SimCtx): void {
   // YouTuber の撮影・テレビ取材・ホストへの確認
   updateMedia(s, dt, ctx);
   updateVisitors(s, ctx);
+  // 珍客イベントの進行・まわりの客の反応・UFO（じろ7 6-5）
+  if (s.phase === 'open' || s.phase === 'closing') updateChaos(s, dt, ctx);
   housekeeping(s, dt, ctx);
   updateAccident(s, dt, ctx);
   if (accidentHalted(s)) {

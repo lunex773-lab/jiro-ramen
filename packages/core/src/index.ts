@@ -35,6 +35,8 @@ export * from './sim/employees';
 export * from './sim/staff';
 export * from './sim/deputy';
 export * from './sim/sky';
+export * from './sim/chaos';
+export * from './data/chaos';
 export * from './sim/hours';
 export * from './sim/wages';
 export * from './sim/calendar';

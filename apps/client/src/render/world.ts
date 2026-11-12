@@ -12,6 +12,7 @@ import { layoutBubbles, type BubbleBox } from '../ui/bubble-layout';
 import { createAutographs } from './autograph';
 import { signSlots } from './sign-slots';
 import { lookSeedOf } from './staff-look';
+import { createUfo, type UfoModel } from './models/chaos-fx';
 
 import {
   activeStore,
@@ -47,6 +48,7 @@ import {
   createStool,
   tickModels,
   type BowlModel,
+  type CharacterAct,
   type CharacterModel,
   type CharacterPose,
   type EquipmentModel,
@@ -73,6 +75,10 @@ interface CharEntry {
   kind: 'customer' | 'employee' | 'player';
   /** タバコの煙（店の前の喫煙客） */
   smoke?: THREE.Object3D | null;
+  /** 見た目の指定・姿勢に重ねる動き・金色覚醒（調べる用に覚えておく） */
+  look?: string | null;
+  act?: CharacterAct | null;
+  golden?: boolean;
 }
 
 interface Bubble {
@@ -138,6 +144,8 @@ export class World {
   private sky: Sky;
   /** 夜に光を強める材質（建物の窓・看板・自販機など。元の強さは userData.baseEmissive） */
   private nightMats: THREE.MeshStandardMaterial[] = [];
+  /** 店の前に降りてくる UFO（じろ7 6-5） */
+  private ufo: UfoModel | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -185,6 +193,19 @@ export class World {
     this.scene.add(this.sky.dome);
     this.scene.add(this.sky.street);
     this.resize();
+  }
+
+  /** 調べる用: 珍客イベントの見た目（UFO の高さ・客の見た目の指定・重ねている動き・金色覚醒） */
+  chaosInfo(): { ufoY: number | null; looks: Record<string, string>; acts: Record<string, string>; golden: string[] } {
+    const looks: Record<string, string> = {};
+    const acts: Record<string, string> = {};
+    const golden: string[] = [];
+    for (const [id, c] of this.chars) {
+      if (c.look) looks[id] = c.look;
+      if (c.act) acts[id] = c.act;
+      if (c.golden) golden.push(id);
+    }
+    return { ufoY: this.ufo ? this.ufo.group.position.y : null, looks, acts, golden };
   }
 
   /** 調べる用: 今の空（時刻・夜の度合い・星の見え方・光害） */
@@ -490,7 +511,7 @@ export class World {
     let c = this.chars.get(id);
     if (!c) {
       const model = createCharacter({ kind, seed, color, look });
-      c = { model, shown: new THREE.Vector3(), lastTarget: new THREE.Vector3(Number.NaN, 0, 0), moving: 0, yaw: 0, kind };
+      c = { model, shown: new THREE.Vector3(), lastTarget: new THREE.Vector3(Number.NaN, 0, 0), moving: 0, yaw: 0, kind, look: look ?? null };
       this.chars.set(id, c);
       this.scene.add(model.group);
     }
@@ -577,6 +598,7 @@ export class World {
         smoking ? 'cigarette'
         : cu.state === 'crew' && cu.special?.kind === 'tv_camera' ? 'tvcamera'
         : cu.fromBuzz && (cu.state === 'arriving' || cu.state === 'queue' || cu.state === 'waitingSeat') ? 'phone'
+        : cu.react && cu.react.kind === 'film' && cu.react.until > s.t ? 'phone'
         : null;
       c.model.setHeld(held);
       this.setSmoke(c, smoking);
@@ -600,7 +622,24 @@ export class World {
       }
       const groupChat = cu.state === 'afterMeal' && !!cu.group && cu.group.size > 1;
       const pose: CharacterPose = cu.state === 'eating' ? 'eat' : groupChat ? 'chat' : seated ? 'sit' : c.moving > 0 ? 'walk' : 'stand';
+      // 珍客イベント（じろ7 6-5）: 空を飛ぶ・鼻をほじる・まわりの客の反応・横に弾む踊り・金色覚醒の光
+      const sp = cu.special;
+      const flyFor = sp?.kind === 'golden' && sp.flyAt !== undefined ? s.t - sp.flyAt : -1;
+      const act: CharacterAct | null =
+        flyFor >= 0 ? 'fly'
+        : cu.nosepick && (cu.nosepick.pickUntil ?? -1) > s.t ? 'nose'
+        : cu.react && cu.react.until > s.t ? cu.react.kind
+        : sp?.kind === 'dancer' && cu.state !== 'eating' && cu.state !== 'ticket' ? 'dance'
+        : null;
+      c.model.setAct(act);
+      c.act = act;
+      c.golden = sp?.kind === 'golden' && sp.awakenedAt !== undefined;
+      c.model.setFx(c.golden ? { golden: 1 } : null);
+      // UFO が降りてくる間、宇宙人はまだ乗っている
+      const u = s.events?.chaos?.ufo;
+      c.model.group.visible = !(u && u.alienId === cu.id && u.phase === 'descend');
       c.model.update(pose, t, dt);
+      if (flyFor >= 0) c.model.group.position.y += Math.min(60, flyFor * flyFor * 0.9 + flyFor * 1.4);
     }
     for (const e of s.employees) {
       if (!e.presentToday) continue;
@@ -859,6 +898,7 @@ export class World {
     this.syncStools(s);
     this.tipStools();
     this.syncCharacters(s, myId, t, dt, smooth);
+    this.syncUfo(s, t);
     this.syncBowls(s, myId);
     this.syncDirtAndLost(s);
     this.syncViewModel(s, s.players.find((p) => p.id === myId), t);
@@ -1040,7 +1080,25 @@ export class World {
     this.renderer.render(this.scene, this.camera);
   }
 
+  /** UFO（降りる・浮かぶ・飛び立つ。sim の状態の時間で動かす） */
+  private syncUfo(s: GameState, t: number): void {
+    const u = s.events?.chaos?.ufo ?? null;
+    if (!u) {
+      this.ufo?.dispose();
+      this.ufo = null;
+      return;
+    }
+    if (!this.ufo) {
+      this.ufo = createUfo();
+      this.scene.add(this.ufo.group);
+    }
+    this.ufo.group.position.x = u.x;
+    this.ufo.group.position.z = u.z;
+    this.ufo.update(u.phase, u.t, t);
+  }
+
   dispose(): void {
+    this.ufo?.dispose();
     this.after.dispose();
     for (const e of this.equip.values()) e.model.dispose();
     for (const c of this.chars.values()) c.model.dispose();

@@ -50,6 +50,7 @@ import { planComplaintResponse, respondToComplaint } from './complaints';
 import { askToLeave, lingerBlocked, mannerBlocked, respondManner, smokeBlocked, warnSmoker } from './manners';
 import { FILM_RESPONSE_LABEL, LINGER_RESPONSE_LABEL, MANNER_RESPONSE_LABEL } from '../data/events';
 import { filmBlocked, respondFilm } from './media';
+import { warnNosepicker } from './chaos';
 import { accidentHalted } from './events';
 
 export type Actor = Player | Employee;
@@ -969,6 +970,24 @@ const VERBS: VerbDef[] = [
   filmVerb('stop'),
   filmVerb('rules'),
   filmVerb('leave'),
+  // じろ7 6-5: 鼻をほじる客に声をかける
+  {
+    id: 'nose_warn',
+    match: (t) => t.kind === 'seat',
+    phases: ['open', 'closing'],
+    skill: 'service',
+    plan: (s, _a, t) => {
+      const label = MANNER_RESPONSE_LABEL.nose;
+      const c = s.customers.find((x) => x.id === seatOf(t).customerId);
+      if (!c?.nosepick || c.nosepick.count === 0) return no(label, '鼻をほじっているお客さんはいません');
+      if (c.nosepick.warned) return no(label, 'もう注意しました');
+      return ok(label, 1.5, 1);
+    },
+    applyUnit: (s, _a, t) => {
+      const c = s.customers.find((x) => x.id === seatOf(t).customerId);
+      if (c) warnNosepicker(s, c);
+    },
+  },
   {
     id: 'smoke_warn',
     match: (t) => t.kind === 'customer' && t.c.state === 'smoking',

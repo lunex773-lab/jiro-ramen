@@ -365,7 +365,7 @@ export class Hud {
     // （空いた席を見ただけで「下げる丼がありません」などが出ると邪魔なため）
     // クレームの対応（最大5つ）は先に出す
     // お客さんへの対応（クレーム・居座り・食べ方・喫煙）は先に出す
-    const urgent = (v: string) => Number(/^(complaint_|linger_|manner_|smoke_|film_)/.test(v));
+    const urgent = (v: string) => Number(/^(complaint_|linger_|manner_|smoke_|film_|nose_)/.test(v));
     // 武器の棚の「持つ・買う・弾を買う」は棚の一覧で選ぶ（ボタンに入りきらないため）
     const inPanel = (v: string) => /^(weapon:|buy_weapon:|buy_ammo:)/.test(v);
     const enabled = this.verbs.filter((v) => v.enabled && !inPanel(v.verb)).sort((a, b) => urgent(b.verb) - urgent(a.verb));

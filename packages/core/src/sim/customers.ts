@@ -34,6 +34,7 @@ import { hasRolled, markRolled, onCustomerArrive, onVisitEnd } from './visitors'
 import { COMPLAINT_TEXT, UNREASONABLE_TEXT } from '../data/events';
 import { drawGroupSize, findGroupSeats, groupMembers, holdAfterMeal, leaveAfterMeal, meanGroupSize, messyLeaveDirt, rollMessy } from './manners';
 import { maybeYoutuber, onMealFinished } from './media';
+import { onChaosArrival } from './chaos';
 import { activeStore } from './company';
 import { priceFeelOf, storeDemandMult, type PriceFeel } from './location';
 
@@ -359,6 +360,8 @@ export function updateArrivals(s: GameState, dt: number, ctx: SimCtx): void {
     const partner = onCustomerArrive(s, c, ctx);
     // YouTuber（予定の日・時刻を過ぎて最初に来た新規の一人客）
     if (!partner) maybeYoutuber(s, c, ctx);
+    // 珍客イベント（じろ7 6-5。UFO・金色覚醒・横バウンス・鼻をほじる客・クマ）の主役
+    if (!partner) onChaosArrival(s, c, ctx);
     const members: Customer[] = [c];
     if (partner) {
       s.customers.push(partner);

@@ -603,6 +603,8 @@ export function buildTasks(s: GameState): Task[] {
       }
       // 食べ方の汚い客: 何度か汚したら注意する（一度だけ）
       if (cust && cust.messy && cust.messy.count >= 2 && !cust.messy.calmed && cust.messy.warned === 0 && cust.state === 'eating') add('manner', `manner:${cust.id}`, [step(seat.id, 'manner_warn')]);
+      // 鼻をほじる客（じろ7 6-5）: 何度かほじったら声をかける（一度だけ）
+      if (cust && cust.nosepick && cust.nosepick.count >= 2 && !cust.nosepick.warned) add('manner', `nose:${cust.id}`, [step(seat.id, 'nose_warn')]);
       // 居座り: 待っている客がいて、しばらく経ったら退店を促す（混雑の説明から）
       if (cust && cust.group?.leader) {
         const lg = cust.group.linger;

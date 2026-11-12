@@ -38,6 +38,7 @@ const FACES: Record<string, [icon: string, short: string]> = {
   manner_move: ['💺', '席移動'],
   manner_leave: ['🚪', '退店'],
   smoke_warn: ['🚭', '禁煙'],
+  nose_warn: ['👃', '注意'],
   film_stop: ['📵', '撮影NG'],
   film_rules: ['📋', 'ルール'],
   film_leave: ['🚪', '退店'],

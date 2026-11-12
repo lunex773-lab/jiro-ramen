@@ -229,6 +229,11 @@ const EVENT_LOG_LABEL: Record<string, string> = {
   youtuber: '🎥 YouTuber',
   tv: '📺 テレビ取材',
   incident: '🚨 客を襲った事件',
+  ufo: '🛸 UFO・宇宙人',
+  golden: '✨ 金色覚醒',
+  bounce: '💃 横バウンス',
+  nosepick: '👃 鼻をほじる客',
+  bear: '🧸 クマ「みつぐま」',
 };
 
 export class ManageMenu {
@@ -2763,7 +2768,7 @@ export class ManageMenu {
               'div',
               { class: 'kv', 'data-event': r.kind },
               h('span', null, `${r.day}日目 ${EVENT_LOG_LABEL[r.kind] ?? r.kind}${r.chance !== null ? `（確率 ${(r.chance * 100).toFixed(r.chance < 0.01 ? 2 : 1)}%）` : ''}${r.forced ? '（テスト）' : ''}`),
-              h('b', null, `${stateText[r.state]}${r.result ? `・${r.result}` : ''}${r.restores?.length ? `・戻した${r.restores.length}回` : ''}`),
+              h('b', null, `${stateText[r.state]}${r.result ? `・${r.result}` : ''}${r.restores?.length ? `・戻した${r.restores.length}回` : ''}${r.cause ? '・前のイベントからの連鎖' : ''}`),
             ),
           ),
     );

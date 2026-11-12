@@ -14,6 +14,11 @@ const LABELS: Record<EventKind, string> = {
   explosion: '💥 爆発事故（2日目以降・営業中ならすぐ）',
   youtuber: '🎥 YouTuber が来る（次の一人客）',
   tv: '📺 テレビ取材が来る（営業中ならすぐ）',
+  ufo: '🛸 UFO・宇宙人の来店（次の新規客）',
+  golden: '✨ 金色覚醒（次の新規客）',
+  bounce: '💃 横バウンスの客（次の新規客）',
+  nosepick: '👃 鼻をほじる客（次の新規客）',
+  bear: '🧸 クマ「みつぐま」の来店（次の新規客）',
 };
 
 export function debugEventsEnabled(): boolean {

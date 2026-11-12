@@ -570,6 +570,19 @@ export interface CustomerTraits {
   complaintPropensity: number;
   manners: number;
   appetite: number;
+  // 以下はじろ7 6-4（珍客イベントへの反応）。古いセーブ・常連にはないので任意（ないときは客の ID から決まる値。sim/chaos.ts の traitOf）
+  /** 好奇心（珍しいことに反応する） */
+  curiosity?: number;
+  /** 人と話す・笑う */
+  sociability?: number;
+  /** 流行に乗る（まねする） */
+  trend?: number;
+  /** 撮影する */
+  filming?: number;
+  /** SNS に投稿する */
+  sns?: number;
+  /** 迷惑への我慢強さ */
+  tolerance?: number;
 }
 
 export type CustomerState =
@@ -671,6 +684,34 @@ export interface Customer {
   botheredBy?: Id[];
   /** イベントの吹き出し（第2版 13: 団体の会話・クレーム・トラブル・珍しい客・取材など。少し長く、縁を変える） */
   sayEvent?: boolean;
+  // 以下はじろ7 6-5（sim/chaos.ts）。古いセーブにはないので任意の項目
+  /** 珍客イベントへの反応（驚く・笑う・撮影するなど。until まで） */
+  react?: CustomerReaction | null;
+  /** 鼻をほじる迷惑客 */
+  nosepick?: NosepickState | null;
+}
+
+/** 珍客イベントへのまわりの客の反応 */
+export type ReactKind = 'surprise' | 'laugh' | 'scared' | 'film' | 'imitate' | 'annoyed' | 'tell';
+
+export interface CustomerReaction {
+  kind: ReactKind;
+  /** この時刻（その日の t）まで続く */
+  until: number;
+  /** 反応したイベントの記録の ID */
+  eventId: Id;
+}
+
+/** 鼻をほじる客の状態 */
+export interface NosepickState {
+  /** 次にほじるまでの秒 */
+  next: number;
+  /** ほじった回数 */
+  count: number;
+  /** 注意された（やめた） */
+  warned: boolean;
+  /** ほじっている（見た目）時刻の終わり */
+  pickUntil?: number;
 }
 
 /** 団体客 */
@@ -736,7 +777,21 @@ export interface CustomerComplaint {
   tried: ComplaintResponse[];
 }
 
-export type SpecialKind = 'critic' | 'couple_her' | 'couple_him' | 'ramen_lover' | 'youtuber' | 'tv_performer' | 'tv_camera' | 'tv_staff';
+export type SpecialKind =
+  | 'critic'
+  | 'couple_her'
+  | 'couple_him'
+  | 'ramen_lover'
+  | 'youtuber'
+  | 'tv_performer'
+  | 'tv_camera'
+  | 'tv_staff'
+  // じろ7 6-5: 珍客イベントの主役（宇宙人・金色覚醒・横バウンス・鼻をほじる客・クマ）
+  | 'alien'
+  | 'golden'
+  | 'dancer'
+  | 'nosepicker'
+  | 'bear';
 
 export interface CustomerSpecial {
   kind: SpecialKind;
@@ -749,9 +804,12 @@ export interface CustomerSpecial {
   ate?: boolean;
   /** セリフを言い終えた（一度の来店で一度だけ） */
   spoken: boolean;
+  /** 金色覚醒: 覚醒した時刻・空へ飛び立った時刻（その日の t） */
+  awakenedAt?: number;
+  flyAt?: number;
 }
 
-export type CustomerLook = 'blonde_woman' | 'boyfriend';
+export type CustomerLook = 'blonde_woman' | 'boyfriend' | 'alien' | 'bear';
 
 export type OrderStatus = 'waiting' | 'served' | 'cancelled' | 'refunded';
 
@@ -1029,7 +1087,20 @@ export interface TutorialState {
 // ───────────────────────── 営業中のイベント ─────────────────────────
 
 /** イベントの種類（安定した ID。設定値・記録・強制発生のキー） */
-export type EventKind = 'sns_buzz' | 'critic' | 'rare_couple' | 'rare_lover' | 'complaint_unreasonable' | 'explosion' | 'youtuber' | 'tv';
+export type EventKind =
+  | 'sns_buzz'
+  | 'critic'
+  | 'rare_couple'
+  | 'rare_lover'
+  | 'complaint_unreasonable'
+  | 'explosion'
+  | 'youtuber'
+  | 'tv'
+  // じろ7 6-5: 珍客イベント（data/chaos.ts の表）
+  | ChaosKind;
+
+/** 珍客・特殊イベントの種類（じろ7 6-5） */
+export type ChaosKind = 'ufo' | 'golden' | 'bounce' | 'nosepick' | 'bear';
 
 /** イベントの記録（じろ2: 改修設計書05。ID・日時・会社・店・確率・状態・結果・復元の記録） */
 export interface EventRecord {
@@ -1051,6 +1122,14 @@ export interface EventRecord {
   result?: string;
   /** 仕込み開始時点に戻した記録 */
   restores?: { day: number; t: number }[];
+  // 以下はじろ7 6（独立したイベントの基盤）。古い記録にはない
+  /** 同時に起きていたイベントの記録の ID */
+  related?: Id[];
+  /** 見た客・撮影した客の数 */
+  witnesses?: number;
+  films?: number;
+  /** 連鎖のもとになったイベントの記録の ID */
+  cause?: Id;
 }
 
 export interface EventStat {
@@ -1228,6 +1307,84 @@ export interface ShopEvents {
   signs?: CelebritySign[];
   /** イベントの記録（新しいものが後ろ。じろ2。古いセーブにはない） */
   log?: EventRecord[];
+  /** 珍客イベント（じろ7 6。古いセーブにはない） */
+  chaos?: ChaosState;
+}
+
+/** 珍客イベントの状態（sim/chaos.ts） */
+export interface ChaosState {
+  /** 珍客イベント専用の乱数（events.rng・s.rng の並びを変えない） */
+  rng: number;
+  /** 開店のときの抽選で当たった予定（その日の、ある時刻のあとに来た新規の客が主役になる） */
+  plans: ChaosPlan[];
+  /** 起きているイベント（主役が店にいる間） */
+  active: ChaosRun[];
+  /** 連鎖: 別のイベントの起こりやすさの倍率（日数つき） */
+  boosts: ChaosBoost[];
+  /** 店の前の UFO（降りる・着陸・飛び立つ） */
+  ufo: UfoState | null;
+}
+
+export interface ChaosPlan {
+  kind: ChaosKind;
+  day: number;
+  /** 営業の経過秒（openT）がこれを過ぎたら */
+  afterOpenT: number;
+  /** 連鎖の深さ（0 = 自然に起きた） */
+  depth: number;
+  /** 連鎖のもとのイベントの記録の ID */
+  cause: Id | null;
+  chance?: number | null;
+  /** テスト用の強制発生 */
+  forced?: boolean;
+}
+
+export interface ChaosRun {
+  id: Id;
+  /** イベントの記録（EventRecord）の ID */
+  recordId: Id;
+  kind: ChaosKind;
+  day: number;
+  t: number;
+  /** 主役の客（最初が主役） */
+  customerIds: Id[];
+  depth: number;
+  cause: Id | null;
+  /** 同時に起きていたイベントの記録の ID */
+  related: Id[];
+  /** 撮影した客・見た客の数 */
+  films: number;
+  witnesses: number;
+  /** 反応した客（同じイベントに一度だけ） */
+  reacted: Id[];
+  /** イベントごとの進み具合 */
+  step: number;
+  acc?: number;
+  /** 記録に足す結果の一言 */
+  note?: string;
+}
+
+export interface ChaosBoost {
+  kind: ChaosKind;
+  mult: number;
+  /** この日まで */
+  untilDay: number;
+  /** もとのイベントの記録の ID */
+  cause: Id;
+  /** 連鎖の深さ（上限まで） */
+  depth: number;
+}
+
+export interface UfoState {
+  /** イベントの ID（ChaosRun.id） */
+  id: Id;
+  phase: 'descend' | 'landed' | 'ascend';
+  /** その段階の経過秒 */
+  t: number;
+  x: number;
+  z: number;
+  /** 乗ってきた宇宙人の客 */
+  alienId: Id;
 }
 
 /** 仕込み開始時点の状態の控え。日報・口コミ（営業中は変わらない）と、プレイヤー（接続で変わる）は入れない */

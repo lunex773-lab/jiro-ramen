@@ -2,6 +2,7 @@
 // コール（「ニンニク入れますか？」など）は端末の音声合成（日本語）で読み上げる。
 
 import type { GameEvent } from '@jiro/core';
+import { DanceMusic } from './dance';
 
 export class Sfx {
   private ctx: AudioContext | null = null;
@@ -13,6 +14,8 @@ export class Sfx {
   voice = true;
   volume = 0.7;
   private lastPlay = new Map<string, number>();
+  /** 横バウンスの客が店にいる間のダンス曲（じろ7 6-5） */
+  private dance: DanceMusic | null = null;
 
   /** ユーザー操作の中で呼ぶ（iOS の自動再生制限のため） */
   unlock(): void {
@@ -110,6 +113,64 @@ export class Sfx {
     this.ambience?.src.stop();
     this.ambience = null;
     this.stopEerie();
+    this.setDance(false);
+  }
+
+  /** ダンス曲を流す・止める（踊る客が店にいる間。効果音が切ってあれば流さない） */
+  setDance(on: boolean): void {
+    if (on && (!this.ctx || !this.master || !this.enabled)) return;
+    if (on) {
+      this.dance ??= new DanceMusic(this.ctx!, this.master!);
+      this.dance.start();
+    } else this.dance?.stop();
+  }
+
+  /** 珍客イベントの音（じろ7 6-5。すべて合成のオリジナル） */
+  private chaosSound(kind: string): void {
+    switch (kind) {
+      case 'ufo':
+        // 不思議なうなり（ゆれながら下がる音）
+        for (let i = 0; i < 6; i++) this.tone(900 - i * 90, 0.45, 'sine', 0.06, i % 2 ? 120 : -120, i * 0.32);
+        this.tone(110, 2.6, 'triangle', 0.05, -30);
+        break;
+      case 'ufoLand':
+        this.noise(1.2, 400, 0.6, 0.12, 'lowpass');
+        this.tone(220, 0.8, 'sine', 0.06, -80);
+        break;
+      case 'ufoAscend':
+        this.tone(160, 2.2, 'sawtooth', 0.04, 1400);
+        this.tone(320, 2.0, 'sine', 0.05, 2400, 0.1);
+        break;
+      case 'golden':
+        // 食べる前は静かに（覚醒のときに鳴らす）
+        break;
+      case 'awaken':
+        // 力がみなぎる: 低いうなり→上がっていく和音→きらめき
+        this.noise(1.6, 300, 0.5, 0.18, 'lowpass');
+        [262, 330, 392, 523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.5, 'sawtooth', 0.045, 0, 0.25 + i * 0.09));
+        for (let i = 0; i < 10; i++) this.tone(2000 + Math.random() * 2200, 0.12, 'sine', 0.03, 0, 0.9 + i * 0.07);
+        break;
+      case 'fly':
+        // 空へ飛び立つ（風を切る音）
+        this.noise(1.8, 900, 0.7, 0.2, 'bandpass');
+        this.tone(300, 1.4, 'sine', 0.05, 900);
+        break;
+      case 'bounce':
+        // 弾む音
+        this.tone(260, 0.16, 'sine', 0.09, 260);
+        this.tone(330, 0.16, 'sine', 0.08, 300, 0.2);
+        break;
+      case 'nosepick':
+        break;
+      case 'bear':
+        // ぽん、ぽん、と、ゆったりした音
+        this.tone(196, 0.3, 'triangle', 0.1, -20);
+        this.tone(247, 0.3, 'triangle', 0.09, -20, 0.32);
+        this.tone(294, 0.45, 'triangle', 0.08, -10, 0.64);
+        break;
+      default:
+        break;
+    }
   }
 
   /** 焼け跡の環境音に切り替える（店内の環境音は止める） */
@@ -346,6 +407,15 @@ export class Sfx {
           // 止まって扉を開ける
           this.tone(180, 0.12, 'square', 0.05, 90);
           this.tone(150, 0.1, 'square', 0.04, 80, 0.25);
+          break;
+        case 'chaos':
+        case 'chaosFx':
+          this.chaosSound(ev.text ?? '');
+          break;
+        case 'chaosReact':
+          // まわりの客の反応: 撮影はシャッターの音、驚きは短い高い音（立て続けには鳴らさない）
+          if (ev.text === 'film' && this.throttle('shutter', 0.6)) this.noise(0.05, 4000, 2, 0.08, 'bandpass');
+          else if (ev.text === 'surprise' && this.throttle('surprise', 1.2)) this.tone(720, 0.18, 'sine', 0.05, 240);
           break;
         case 'accidentReset':
           this.stopEerie(true);

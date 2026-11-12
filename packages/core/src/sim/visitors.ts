@@ -11,6 +11,7 @@ import { addDaily, cooledDown, dailyCount, ensureEvents, eventsAllowed, evRand, 
 import { forceAccident } from './accident';
 import { emit, notify, type SimCtx } from './notices';
 import { buzzBoostFactor, drawMediaPlans, forceMedia, onDayStartMedia } from './media';
+import { endChaosDay, forceChaos, planChaos } from './chaos';
 
 const E = BALANCE.events;
 
@@ -24,6 +25,8 @@ export function onOpenShopEvents(s: GameState): void {
   drawCritic(s);
   // YouTuber・テレビ取材（media.ts）
   drawMediaPlans(s);
+  // 珍客イベント（じろ7 6。chaos.ts。専用の乱数で引く）
+  planChaos(s);
 }
 
 /** 翌日の朝（nextDay から。仕込み開始時点の控えを作る前）: 覆面調査員の記事の公開、期限の切れた効果の整理 */
@@ -49,6 +52,7 @@ export function onDayEndEvents(s: GameState): void {
   ev.requests = [];
   ev.youtuberPlan = null;
   ev.tvPlan = null;
+  endChaosDay(s);
 }
 
 // ───────────────────────── SNS でバズる ─────────────────────────
@@ -356,6 +360,12 @@ export function forceEvent(s: GameState, ctx: SimCtx, kind: EventKind): { ok: bo
     case 'youtuber':
     case 'tv':
       return forceMedia(s, kind);
+    case 'ufo':
+    case 'golden':
+    case 'bounce':
+    case 'nosepick':
+    case 'bear':
+      return forceChaos(s, kind);
     default:
       return { ok: false, reason: '不明なイベントです' };
   }

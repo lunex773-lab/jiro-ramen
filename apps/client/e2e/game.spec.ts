@@ -1821,3 +1821,72 @@ test('昼夜と星空: ゲーム内の時刻で空が変わり、夜は星が出
   expect(country.starsVisible).toBeGreaterThan(city.starsVisible * 2);
   await shot(page, 'sky-rural-night');
 });
+
+test('珍客イベント: UFO が店の前に降りて宇宙人が来店し、クマ「みつぐま」も並ぶ（じろ7 6-5）', async ({ page }) => {
+  await startNewGame(page, '/?debug=1');
+  type Info = { ufoY: number | null; looks: Record<string, string>; acts: Record<string, string>; golden: string[] };
+  type CS = { day: number; phase: string; customers: { id: string; look?: string | null; state: string; special?: { kind: string } | null }[]; events?: { chaos?: { ufo: { phase: string } | null; active: { kind: string }[] }; log?: { kind: string; state: string; result?: string }[] } };
+  type App = { __jiro: { host: { state: CS; tick(dt: number): void }; world: { chaosInfo(): Info }; localPos: { x: number; z: number }; controls: { yaw: number; pitch: number } } };
+  const info = () => page.evaluate(() => (window as unknown as App).__jiro.world.chaosInfo());
+  // 4日目から起きるイベント: 6日目にしてから、テスト用のボタンで次の新規客に起こす
+  await page.evaluate(() => {
+    (window as unknown as App).__jiro.host.state.day = 6;
+  });
+  await forceEvent(page, 'ufo');
+  await forceEvent(page, 'bear');
+  await page.getByRole('button', { name: /開店する/ }).click();
+  await expect.poll(async () => page.evaluate(() => (window as unknown as App).__jiro.host.state.phase), { timeout: 10_000 }).toBe('open');
+  // 最初の新規の客が来て UFO が降りきるまで、ゲーム内の時間を進める
+  const landed = await page.evaluate(() => {
+    const app = (window as unknown as App).__jiro;
+    for (let i = 0; i < 3000; i++) {
+      if (app.host.state.events?.chaos?.ufo?.phase === 'landed') return true;
+      app.host.tick(0.1);
+    }
+    return false;
+  });
+  expect(landed).toBe(true);
+  // 店の入口の前の歩道から、道路に降りた UFO を見上げる
+  await page.evaluate(() => {
+    const app = (window as unknown as App).__jiro;
+    const u = (app.host.state.events?.chaos?.ufo ?? { x: 1.4 }) as { x: number };
+    app.localPos = { x: u.x - 1.3, z: -2.4 };
+    app.controls.yaw = Math.PI;
+    app.controls.pitch = 0.22;
+  });
+  await expect.poll(async () => (await info()).ufoY ?? 0).toBeGreaterThan(1.5);
+  const alien = (await page.evaluate(() => (window as unknown as App).__jiro.host.state.customers)).find((c) => c.special?.kind === 'alien')!;
+  expect(alien.look).toBe('alien');
+  await expect.poll(async () => (await info()).looks[alien.id]).toBe('alien');
+  await page.waitForTimeout(600);
+  await shot(page, 'chaos-ufo');
+  // 2つ目のイベント（クマ）も、次に来た新規の客で起きる（同時に2つまで）
+  const bear = await page.evaluate(() => {
+    const app = (window as unknown as App).__jiro;
+    for (let i = 0; i < 3000; i++) {
+      const b = app.host.state.customers.find((c) => c.special?.kind === 'bear');
+      if (b) return b.id;
+      app.host.tick(0.1);
+    }
+    return null;
+  });
+  expect(bear).not.toBeNull();
+  await expect.poll(async () => (await info()).looks[bear!]).toBe('bear');
+  const log = (await page.evaluate(() => (window as unknown as App).__jiro.host.state.events?.log ?? [])).map((r) => r.kind);
+  expect(log).toContain('ufo');
+  expect(log).toContain('bear');
+  // クマの方を向いて写す
+  const bearPos = await page.evaluate((id) => {
+    const app = (window as unknown as App).__jiro;
+    const b = app.host.state.customers.find((c) => c.id === id) as unknown as { pos: { x: number; z: number } };
+    // 道路側の斜め前から、クマを見る
+    app.localPos = { x: b.pos.x + 1.8, z: Math.max(-4.0, b.pos.z - 1.2) };
+    app.controls.yaw = Math.atan2(b.pos.x - app.localPos.x, b.pos.z - app.localPos.z);
+    app.controls.pitch = -0.02;
+    (app.host as unknown as { move(x: number, z: number, yaw: number): void }).move(app.localPos.x, app.localPos.z, app.controls.yaw);
+    return b.pos;
+  }, bear!);
+  expect(bearPos.z).toBeLessThan(0);
+  await page.waitForTimeout(800);
+  await shot(page, 'chaos-bear');
+});
