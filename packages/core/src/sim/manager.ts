@@ -20,6 +20,7 @@ import { addLot, consume, expireLots, fridgeCapacity, packPriceOf, stockOf } fro
 import { makeCtx, type SimCtx } from './notices';
 import { payAds, withPlannedAds } from './ads';
 import { attendanceChances, checkQuits, endOfDayWellbeing, expectedPay, fatigueSpeed, isPartTime, shiftFor, weekdayOf } from './staff';
+import { deputyOn } from './deputy';
 import { autoShifts } from './shift-plan';
 import { tempHourly } from './employees';
 
@@ -109,6 +110,9 @@ export function storeCapacity(s: GameState, lead: { id: string | null; skill: nu
 export function storeLead(s: GameState, entry: StoreEntry): { id: string | null; skill: number; owner: boolean } | null {
   const mgr = entry.managerId ? s.employees.find((e) => e.id === entry.managerId) : undefined;
   if (mgr && shiftFor(mgr, s.day) !== null) return { id: mgr.id, skill: avgSkill(mgr), owner: false };
+  // 店長が休みの日に任命した店長代理（その日だけ。じろ7 2-3）
+  const ap = deputyOn(entry, s.employees, s.day);
+  if (ap) return { id: ap.id, skill: avgSkill(ap), owner: false };
   // 店長がいない・休みの日は、その日に勤務のあるシフトリーダーが店長代理として回す（オーナーの判断 2026-11-12「店長代理」）。
   // いなければ休業（店主が自分で回す店は店主）
   const deputy = s.employees.filter((e) => e.id !== mgr?.id && e.profile.role === 'leader' && shiftFor(e, s.day) !== null).sort((a, b) => avgSkill(b) - avgSkill(a))[0];

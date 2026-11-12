@@ -4,6 +4,7 @@
 
 import { DEFAULT_HOURS, hoursProblem } from './hours';
 import { remapShiftsForHours, storeEmployees } from './shift-plan';
+import { keepTodayPlan, shiftFor } from './staff';
 import type { StoreHours } from '../types';
 import { BALANCE } from '../data/balance';
 import { INGREDIENTS } from '../data/ingredients';
@@ -375,8 +376,13 @@ export function setStoreHours(s: GameState, storeId: Id, hours: StoreHours, ctx?
   if (bad) return { ok: false, reason: bad };
   const before = entry.hours ?? DEFAULT_HOURS;
   entry.hours = { sessions: hours.sessions.map((x) => ({ open: x.open, close: x.close })), closedDays: [...hours.closedDays].sort((a, b) => a - b) };
-  // アルバイトのシフトを新しい営業時間に合わせる（同じ時刻に働く。オーナーの指示 2026-11-11）
-  const changed = remapShiftsForHours(storeEmployees(s, entry), before, entry.hours, s.day);
+  // アルバイトのシフトを新しい営業時間に合わせる（同じ時刻に働く。オーナーの指示 2026-11-11）。
+  // 今日の営業時間は朝に決まっていて変わらないので、今いる店の人の今日の予定は前のまま残す（あすから。じろ7 B2・B3）
+  const staff = storeEmployees(s, entry);
+  const active = entry.id === s.company.activeStoreId;
+  const todayPlans = active ? new Map(staff.map((e) => [e.id, shiftFor(e, s.day)])) : null;
+  const changed = remapShiftsForHours(staff, before, entry.hours, s.day);
+  if (todayPlans) for (const e of staff) keepTodayPlan(s, e, todayPlans.get(e.id) ?? null, '営業時間の変更');
   if (changed.length > 0 && ctx) notify(s, ctx, `hoursShifts:${entry.id}`, 'info', `新しい営業時間に合わせて、アルバイトのシフトを直しました（${changed.map((n) => `${n}さん`).join('・')}。あすから）`);
   return { ok: true };
 }

@@ -24,6 +24,7 @@ import { isArrested } from './armory';
 import { forceEvent } from './visitors';
 import { promote, promoteLeader, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
 import { autoShifts } from './shift-plan';
+import { appointDeputy } from './deputy';
 import { answerRequest } from './media';
 import { setCompanyPolicy } from './company';
 import { assignManager, enterStore, openStore, renameShop, renameStore, setStoreHours, setStoreLocation, setStorePolicy, transferEmployee } from './stores';
@@ -60,7 +61,9 @@ export type Action =
   /** 自動発注のしかた（manual: 目安の量まで / sales: 売れ行きに合わせる） */
   | { type: 'setAutoOrderMode'; mode: 'manual' | 'sales' }
   /** カレンダーで日にちを選んでシフトを決める（once: その日だけ / weekly: 毎週くりかえす / reset: くりかえしに戻す） */
-  | { type: 'setDateShift'; employeeId: Id; days: number[]; shift: ShiftDay | null; mode: DateShiftMode }
+  | { type: 'setDateShift'; employeeId: Id; days: number[]; shift: ShiftDay | null; mode: DateShiftMode; baseRev?: number }
+  /** その日の店長代理を任命する（employeeId が null なら取り消す。じろ7 2-3） */
+  | { type: 'appointDeputy'; day: number; employeeId: Id | null }
   /** アルバイトを社員にする */
   | { type: 'promote'; employeeId: Id }
   /** 社員をシフトリーダーにする（じろ1 5.8） */
@@ -295,19 +298,21 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
     case 'setPriority':
       return setPriority(s, a.employeeId, a.kind, a.value) ? { ok: true } : fail('変更できません');
     case 'setShift':
-      return setShift(s, ctx, a.employeeId, a.weekday, a.shift);
+      return setShift(s, ctx, a.employeeId, a.weekday, a.shift, player.name);
     case 'setCompanyPolicy':
       return setCompanyPolicy(s, a.policy && typeof a.policy === 'object' ? a.policy : {});
     case 'hireTemp':
       return hireTemp(s, ctx, a.role);
     case 'setRestDays':
-      return setRestDays(s, ctx, a.employeeId, a.days);
+      return setRestDays(s, ctx, a.employeeId, a.days, player.name);
     case 'setAutoOrderMode':
       if (a.mode !== 'manual' && a.mode !== 'sales') return fail('不正な値');
       s.autoOrderMode = a.mode;
       return { ok: true };
     case 'setDateShift':
-      return setDateShift(s, ctx, a.employeeId, a.days, a.shift, a.mode);
+      return setDateShift(s, ctx, a.employeeId, a.days, a.shift, a.mode, player.name, typeof a.baseRev === 'number' ? a.baseRev : undefined);
+    case 'appointDeputy':
+      return appointDeputy(s, ctx, a.day, a.employeeId ?? null, player.name);
     case 'promote':
       return promote(s, ctx, a.employeeId);
     case 'promoteLeader':

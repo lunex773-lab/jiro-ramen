@@ -80,6 +80,7 @@ import {
   staffSummary,
   weekdayOf,
   activeStore,
+  isDeputyToday,
   enterStoreProblem,
   openStoreProblem,
   PROPERTIES,
@@ -1749,6 +1750,14 @@ export class ManageMenu {
           )
         : null,
       mgr ? h('p', { class: 'note' }, byMgr ? `店長の${mgr.profile.name}さんが、毎週日曜の閉店後に翌週のアルバイトのシフトを組み直します。` : 'アルバイトのシフトは自分で組みます（店長は組み直しません）。') : null,
+      // 店長代理の任命の一覧（じろ7 2-4「任命状況の確認」。任命・取り消しは従業員の勤務のカレンダーから）
+      h(
+        'p',
+        { class: 'note', 'data-deputy-list': '' },
+        (st?.deputies ?? []).length > 0
+          ? `店長代理: ${(st?.deputies ?? []).map((d) => `${d.day === s.day ? '今日' : `${d.day}日目`} ${nameOf(d.employeeId) || '（いない人）'}さん`).join('・')}（店長が休み・欠勤の日だけ店長の仕事をします）`
+          : '店長代理: まだ任命していません（社員の「シフト・勤務」のカレンダーで日を選んで任命できます）',
+      ),
       h(
         'div',
         { class: 'shift-table-wrap' },
@@ -1894,7 +1903,7 @@ export class ManageMenu {
           h('b', null, e.profile.name),
           h('span', { class: `emp-type ${employmentOf(e)}` }, EMPLOYMENT_LABEL[employmentOf(e)]),
         ),
-        h('span', { class: 'st-c st-c1' }, ROLE_LABEL[e.profile.role].replace('担当', '')),
+        h('span', { class: 'st-c st-c1' }, ROLE_LABEL[e.profile.role].replace('担当', ''), isDeputyToday(s, e) ? h('span', { class: 'chip-st info', 'data-deputy-today': e.id, title: '今日の店長代理（店長がいない間、店長の仕事をします）' }, '代理') : null),
         h('span', { class: 'st-c st-c2' }, h('span', { class: `chip-st ${tone}` }, label)),
         h('span', { class: 'st-c st-c3', title: '速さ・調理・接客・衛生・移動の平均（100が最高）' }, meterBar(avg / 100, avg >= 70 ? 'good' : avg >= 45 ? 'accent' : 'warn', `能力の平均 ${avg}`), h('small', null, String(avg))),
         h('span', { class: 'st-c st-c4' }, pay),
@@ -2261,8 +2270,10 @@ export class ManageMenu {
    * 日にちを押して選び（いくつでも）、時間を決めて「この日だけ」か「毎週くりかえす」で保存する。社員は毎日・全時間
    */
   private shiftPanel(s: GameState, e: Employee): HTMLElement {
-    if (!isPartTime(e)) {
-      // 社員: 休みの曜日を決める（疲れは休みの日に回復する。オーナーの判断 12）
+    const part = isPartTime(e);
+    let restBlock: HTMLElement | null = null;
+    if (!part) {
+      // 社員: 休みの曜日を決める（疲れは休みの日に回復する。オーナーの判断 12）。その日だけの出勤・休み・店長代理は下のカレンダーで（じろ7 2-2・2-3）
       const rest = new Set(restDaysOf(e));
       const toggleRest = (i: number) => {
         const next = new Set(rest);
@@ -2270,9 +2281,9 @@ export class ManageMenu {
         else next.add(i);
         void this.act({ type: 'setRestDays', employeeId: e.id, days: [...next].sort((a, b) => a - b) });
       };
-      return h(
+      restBlock = h(
         'div',
-        { class: 'prio' },
+        null,
         h('p', { class: 'note' }, `社員は出勤の日は仕込みから閉店まで勤務します（日給 ${yenStr(fullTimePayFor(e, storeHours(s)))}。営業時間に合わせて変わります）。休みの曜日は来ず、日給もかかりません。疲れは休みの日に回復します（週に1〜2日休ませると、ほぼ回復します）。`),
         h(
           'div',
@@ -2281,9 +2292,12 @@ export class ManageMenu {
             h('button', { class: `mini ${rest.has(i) ? 'ghost' : 'on'}`, 'data-rest-day': String(i), disabled: !this.host.isHost, onclick: () => toggleRest(i) }, `${w} ${rest.has(i) ? '休み' : '出勤'}`),
           ),
         ),
-        h('p', { class: 'note' }, `今: ${fatigueText(e)}（作業の速さ ${Math.round(fatigueSpeed(e) * 100)}%）`),
+        h('p', { class: 'note' }, `今: ${fatigueText(e)}（作業の速さ ${Math.round(fatigueSpeed(e) * 100)}%）。下のカレンダーで、休みの日にその日だけ出勤させる（単日出勤）・その日だけ休ませる・店長代理に任命することができます。`),
       );
     }
+    const store = this.host.state.company ? activeStore(this.host.state) : null;
+    const isMgr = store?.managerId === e.id;
+    const deputyDays = new Set((store?.deputies ?? []).filter((d) => d.employeeId === e.id).map((d) => d.day));
     const N = BALANCE.staff.calendarDays;
     const first = s.day - weekdayOf(s.day);
     const lastDay = s.day + N - 1;
@@ -2335,6 +2349,8 @@ export class ManageMenu {
           h('small', null, this.shiftText(sh)),
           !isWishDay(e, weekdayOf(d)) ? h('i', { class: 'cal-unwish', title: '希望していない曜日（入れると満足度が下がる）' }, '希望外') : null,
           own ? h('i', { class: 'cal-own', title: 'この日だけの予定' }, 'この日だけ') : null,
+          sh?.role && sh.role !== e.profile.role ? h('i', { class: 'cal-role', title: 'この日だけの担当' }, ROLE_LABEL[sh.role].replace('担当', '')) : null,
+          deputyDays.has(d) ? h('i', { class: 'cal-dep', 'data-cal-dep': String(d), title: 'この日の店長代理' }, '代理') : null,
         ),
       );
     }
@@ -2348,20 +2364,25 @@ export class ManageMenu {
     const wishNote = e.profile.wishDays
       ? h('p', { class: 'note cal-wish' }, `希望の曜日: ${WEEKDAY_LABEL.filter((_, i) => isWishDay(e, i)).join('・')}。希望していない曜日に入れることもできますが、満足度が下がり、遅刻・欠勤が増え、続くと辞めることがあります。`)
       : null;
-    const repeat = h(
-      'p',
-      { class: 'note cal-repeat' },
-      '毎週のくりかえし: ',
-      WEEKDAY_LABEL.map((w, i) => h('span', { class: week[i] ? '' : 'off' }, `${w} ${this.shiftText(week[i] ?? null)}`)),
-    );
+    const repeat = part
+      ? h(
+          'p',
+          { class: 'note cal-repeat' },
+          '毎週のくりかえし: ',
+          WEEKDAY_LABEL.map((w, i) => h('span', { class: week[i] ? '' : 'off' }, `${w} ${this.shiftText(week[i] ?? null)}`)),
+        )
+      : null;
     const picked = [...sel];
     let editor: HTMLElement;
     if (picked.length === 0) {
       editor = h('p', { class: 'note' }, '日にちを押して選びます（いくつでも選べます。曜日の見出しを押すとその曜日をまとめて選べます）。');
     } else {
       const step = BALANCE.staff.shiftStepMin;
-      // シフトの時刻は店の営業時間（じろ1 5.1）の中で決める（0 = その日の最初の開店。枠の間の中休みは飛ばして数える）
-      const hrs = storeHours(s);
+      // シフトの時刻は店の営業時間（じろ1 5.1）の中で決める（0 = その日の最初の開店。枠の間の中休みは飛ばして数える）。
+      // 今日は朝に決まった営業時間（営業時間を変えても今日は変わらない。じろ7 B3）
+      const todayOnly = picked.length === 1 && picked[0] === s.day && s.phase !== 'closed';
+      const hrs = todayOnly ? todayHours(s) : storeHours(s);
+      const mixedHours = !todayOnly && picked.includes(s.day) && s.phase !== 'closed' && JSON.stringify(todayHours(s).sessions) !== JSON.stringify(storeHours(s).sessions);
       const close = openMinutesOf(hrs);
       const base = shiftFor(e, picked[0]!);
       const draft: ShiftDay | null = ed && ed.draft !== undefined ? ed.draft : base;
@@ -2421,10 +2442,33 @@ export class ManageMenu {
               : null,
           ),
         );
+        // その日だけの担当（「この日だけ保存」のときだけ。じろ7 2-2）
+        const roleSel = h(
+          'select',
+          { class: 'select', 'data-day-role': '', onchange: (ev: Event) => { const v = (ev.target as HTMLSelectElement).value; setDraft({ ...draft, role: v ? (v as ShiftDay['role']) : undefined }); } },
+          h('option', { value: '', selected: !draft.role }, `いつもの担当（${ROLE_LABEL[e.profile.role]}）`),
+          (['cook', 'server', 'cleaner'] as const).filter((r) => r !== e.profile.role).map((r) => h('option', { value: r, selected: draft.role === r }, `この日だけ${ROLE_LABEL[r]}`)),
+        );
+        controls.push(h('div', { class: 'shift-row' }, h('label', null, '担当', roleSel)));
         problem = shiftProblem(draft, close);
         const hours = shiftPaidHours(draft, close);
-        summary = `${this.shiftText(draft)}・1日の給与の目安 ${yenStr(Math.round((hourlyOf(e) * hours) / 10) * 10)}（${hours}時間）`;
+        summary = part
+          ? `${this.shiftText(draft)}・1日の給与の目安 ${yenStr(Math.round((hourlyOf(e) * hours) / 10) * 10)}（${hours}時間）`
+          : `${this.shiftText(draft)}・社員は日給（時間に関係なく1日分 ${yenStr(fullTimePayFor(e, hrs))}）`;
       }
+      if (mixedHours) problem = '今日は朝に決まった営業時間なので、今日とほかの日は別々に保存してください';
+      // 社員の毎週のくりかえしは「仕込みから閉店まで」か「休み」だけ
+      const weeklyOk = part || !draft || (draft.fromPrep && draft.end >= close);
+      // 店長代理（社員・店長でない人。選んだ日が全部その人の任命なら「外す」）
+      const allDep = picked.every((d) => deputyDays.has(d));
+      const depBtn =
+        !part && !isMgr && store
+          ? h(
+              'button',
+              { class: 'mini ghost', 'data-deputy': allDep ? 'off' : 'on', onclick: () => void this.saveDeputy(e, picked, !allDep) },
+              allDep ? '店長代理を外す' : '🧑‍💼 この日の店長代理にする',
+            )
+          : null;
       editor = h(
         'div',
         { class: 'shift-edit' },
@@ -2438,7 +2482,8 @@ export class ManageMenu {
           'div',
           { class: 'tbtns' },
           h('button', { class: 'mini', 'data-save': 'once', disabled: !!problem, onclick: () => void this.saveDateShift(e, picked, draft, 'once') }, draft ? 'この日だけ保存' : 'この日だけ休みにする'),
-          h('button', { class: 'mini ghost', 'data-save': 'weekly', disabled: !!problem, onclick: () => void this.saveDateShift(e, picked, draft, 'weekly') }, `毎週くりかえす（${wds.map((w) => WEEKDAY_LABEL[w]).join('・')}）`),
+          h('button', { class: 'mini ghost', 'data-save': 'weekly', disabled: !!problem || !weeklyOk, title: weeklyOk ? undefined : '社員の毎週のくりかえしは「仕込みから閉店まで」か「休み」です', onclick: () => void this.saveDateShift(e, picked, draft, 'weekly') }, `毎週くりかえす（${wds.map((w) => WEEKDAY_LABEL[w]).join('・')}）`),
+          depBtn,
           anyOwn ? h('button', { class: 'mini ghost', 'data-save': 'reset', onclick: () => void this.saveDateShift(e, picked, null, 'reset') }, 'くりかえしに戻す') : null,
           h('button', { class: 'mini ghost', 'data-guest-ok': '1', onclick: () => setSel([]) }, '選ぶのをやめる'),
         ),
@@ -2449,16 +2494,49 @@ export class ManageMenu {
     return h(
       'div',
       { class: 'prio shift' },
+      restBlock,
       wishNote,
       cal,
       repeat,
       editor,
-      h('p', { class: 'note' }, `${N}日間の給与の目安 ${yenStr(total)}・今日の見込み ${yenStr(expectedPay(e, s.day, todayHours(s)))}。今日の予定を変えるとすぐに反映します（休みの人に勤務を入れると呼び出し、着くまで少しかかります）。`),
+      h('p', { class: 'note' }, `${N}日間の給与の目安 ${yenStr(total)}・今日の見込み ${yenStr(expectedPay(e, s.day, todayHours(s)))}。今日の予定を変えるとすぐに反映します（休みの人に勤務を入れると呼び出し、着くまで少しかかります。もう働いている人はそのまま働き、働いた分は消えません）。`),
+      this.shiftHistory(e),
     );
   }
 
+  /** シフトの変更の記録（新しい順に5件。じろ7 3-4） */
+  private shiftHistory(e: Employee): HTMLElement | null {
+    const log = e.shiftLog ?? [];
+    if (log.length === 0) return null;
+    const kind: Record<string, string> = { once: 'この日だけ', weekly: '毎週', reset: 'くりかえしに戻す', rest: '休みの曜日', auto: '自動で組んだ', hours: '営業時間に合わせた', keep: '今日はもとの予定のまま' };
+    const what = (c: (typeof log)[number]) => (c.target !== undefined ? `${c.target}日目` : c.weekday !== undefined ? `毎週${WEEKDAY_LABEL[c.weekday]}曜` : '');
+    return h(
+      'details',
+      { class: 'shift-log', 'data-shift-log': e.id },
+      h('summary', null, `予定の変更の記録（${log.length}件）`),
+      h(
+        'ul',
+        { class: 'emp-lines' },
+        [...log].reverse().slice(0, 8).map((c) => h('li', null, `${c.day}日目 ${c.by}・${kind[c.kind] ?? c.kind}: ${what(c)} ${this.shiftText(c.before)} → ${this.shiftText(c.after)}`)),
+      ),
+    );
+  }
+
+  /** 選んだ日の店長代理にする・外す（じろ7 2-3） */
+  private async saveDeputy(e: Employee, days: number[], on: boolean): Promise<void> {
+    let ok = 0;
+    for (const d of days) {
+      const r = await this.act({ type: 'appointDeputy', day: d, employeeId: on ? e.id : null });
+      if (r) ok += 1;
+      else break;
+    }
+    // 結果の知らせはゲームのお知らせ（core の appointDeputy）が出す
+    if (ok > 0) this.render();
+  }
+
   private async saveDateShift(e: Employee, days: number[], sh: ShiftDay | null, mode: 'once' | 'weekly' | 'reset'): Promise<void> {
-    const ok = await this.act({ type: 'setDateShift', employeeId: e.id, days, shift: sh, mode });
+    // 画面が見ていた予定の版を送る（ほかで変わっていたら断られる。じろ7 3-4）
+    const ok = await this.act({ type: 'setDateShift', employeeId: e.id, days, shift: sh, mode, baseRev: e.shiftRev ?? 0 });
     if (!ok) return;
     // 「1日」は日付と紛れるので、1日なら「N日目」、いくつもなら「N日分」と書く
     const which = days.length === 1 ? `${days[0]}日目` : `${days.length}日分`;

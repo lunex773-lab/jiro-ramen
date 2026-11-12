@@ -299,9 +299,10 @@ describe('カレンダーで日にちごとのシフト（オーナー回答「�
     s.phase = 'prep';
     rollCall(s, ctx);
     expect(Object.keys(e.dateShifts ?? {})).toEqual([String(5 + BALANCE.staff.calendarDays - 1)]);
-    // 社員は毎日・全時間（日にちごとの予定はない）
+    // 社員も日にちごとの予定（単日出勤）を入れられる（じろ7 2-2）。毎週のくりかえしは「仕込みから閉店まで」か「休み」だけ
     e.profile.employment = 'full';
-    expect(once(s, ctx, e.id, [8], wk).ok).toBe(false);
+    expect(once(s, ctx, e.id, [8], wk).ok).toBe(true);
+    expect(once(s, ctx, e.id, [9], wk, 'weekly').ok).toBe(false);
     // ホストだけの操作
     expect(isHostOnly('setDateShift')).toBe(true);
   });

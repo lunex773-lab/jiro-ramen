@@ -13,7 +13,7 @@ export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
-  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'setAutoOrderItem', 'promote', 'promoteLeader', 'setPrepTarget', 'setPrepPlan', 'setPrepSchedule', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
+  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'appointDeputy', 'setAutoOrderMode', 'setAutoOrderItem', 'promote', 'promoteLeader', 'setPrepTarget', 'setPrepPlan', 'setPrepSchedule', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
   'accidentReset', 'openStore', 'setStoreLocation', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setStoreHours', 'autoShifts', 'setCompanyPolicy',
 ] as const satisfies readonly ActionType[];
 
@@ -60,11 +60,17 @@ function isShift(v: unknown): boolean {
   if (v === null) return true;
   // 中休みは休む（midRest）は任意（営業の枠が2つ以上の店。オーナーの指示 2026-11-11）
   if (!isObj(v)) return false;
+  // 任意: 中休みは休む（midRest）・その日だけの担当（role。日にちごとの予定。じろ7 2-2）
   const keys = Object.keys(v);
-  if (keys.length < 5 || keys.length > 6 || (keys.length === 6 && !('midRest' in v))) return false;
+  const optional = ['midRest', 'role'];
+  const extra = keys.filter((k) => !['start', 'end', 'breakAt', 'breakLen', 'fromPrep'].includes(k));
+  if (keys.length - extra.length !== 5 || !extra.every((k) => optional.includes(k))) return false;
   // 開店からの分（営業時間が長い店・枠が2つ以上の店でも入るように。営業時間の上限は core の hoursProblem）
   const m = isIntIn(0, 3000);
-  return m(v.start) && m(v.end) && m(v.breakAt) && isIntIn(0, 60)(v.breakLen) && isBool(v.fromPrep) && (v.midRest === undefined || isBool(v.midRest));
+  return (
+    m(v.start) && m(v.end) && m(v.breakAt) && isIntIn(0, 60)(v.breakLen) && isBool(v.fromPrep) && (v.midRest === undefined || isBool(v.midRest)) &&
+    (v.role === undefined || v.role === 'cook' || v.role === 'server' || v.role === 'cleaner')
+  );
 }
 /** カレンダーで選んだ日にち（営業日の番号。28日分まで） */
 function isDayList(v: unknown): boolean {
@@ -156,7 +162,9 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   setRestDays: { employeeId: isId, days: (v: unknown) => Array.isArray(v) && v.length <= 6 && v.every((d) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6) },
   setAutoOrderMode: { mode: (v: unknown) => v === 'manual' || v === 'sales' },
   setAutoOrderItem: { itemId: isIngredient, enabled: isBool },
-  setDateShift: { employeeId: isId, days: isDayList, shift: isShift, mode: (v: unknown) => v === 'once' || v === 'weekly' || v === 'reset' },
+  setDateShift: { employeeId: isId, days: isDayList, shift: isShift, mode: (v: unknown) => v === 'once' || v === 'weekly' || v === 'reset', baseRev: (v: unknown) => v === undefined || isIntIn(0, 1_000_000_000)(v) },
+  // 店長代理の任命（null で取り消し。中身は core の appointDeputy。じろ7 2-3）
+  appointDeputy: { day: isIntIn(1, 1_000_000), employeeId: (v: unknown) => v === null || isId(v) },
   promote: { employeeId: isId },
   promoteLeader: { employeeId: isId },
   setPrepTarget: { itemId: isId, qty: (v: unknown) => v === null || (isNum(v) && (v as number) >= 0) },

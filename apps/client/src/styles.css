@@ -663,6 +663,11 @@ input, select { font: inherit; }
 .cal-day.on { background: #3a2f14; border-color: var(--yellow); box-shadow: 0 0 0 2px var(--yellow) inset; }
 .cal-day.past { opacity: 0.35; justify-content: center; }
 .cal-own { font-style: normal; font-size: 8.5px; font-weight: 700; color: #ffcf6a; }
+/* じろ7: その日だけの担当・店長代理の印、予定の変更の記録 */
+.cal-role { font-style: normal; font-size: 8.5px; font-weight: 700; color: #9fd0ff; }
+.cal-dep { font-style: normal; font-size: 8.5px; font-weight: 800; color: #111; background: #9fd0ff; border-radius: 4px; padding: 0 3px; }
+.shift-log { margin-top: 6px; }
+.shift-log summary { cursor: pointer; color: var(--muted); font-size: 12px; min-height: 32px; display: flex; align-items: center; }
 .cal-day.own { border-style: dashed; border-color: #c99a3a; }
 .cal-repeat span { display: inline-block; margin-right: 8px; white-space: nowrap; }
 .cal-repeat span.off { color: #7f756a; }

@@ -174,6 +174,43 @@ export interface ShiftDay {
    * ない・false なら中休みも店にいて仕込み・片付けをする（前と同じ）
    */
   midRest?: boolean;
+  /**
+   * その日だけの担当（日にちごとの予定にだけ使う。じろ7 2-2「担当業務」）。ない → いつもの担当。
+   * 例: いつもは調理担当の人を、この日だけ接客担当にする
+   */
+  role?: EmployeeRole;
+}
+
+/**
+ * シフトの変更の記録（じろ7 3-4「変更履歴」。新しいものが後ろ・従業員ごとに30件まで）。
+ * 勤怠の実績（出勤した・働いた時間）とは別に持つ。予定を変えても実績は消さない
+ */
+export interface ShiftChange {
+  /** 変えた日・時刻（ゲームの日・その日の秒） */
+  day: number;
+  t: number;
+  /** 変えた人（プレイヤーの名前・「店長」・「自動」） */
+  by: string;
+  /** 何を変えたか: once = その日だけ / weekly = 毎週 / reset = くりかえしに戻す / rest = 社員の休みの曜日 / auto = 自動で組んだ / hours = 営業時間に合わせて直した / keep = 今日の予定を残した */
+  kind: 'once' | 'weekly' | 'reset' | 'rest' | 'auto' | 'hours' | 'keep';
+  /** 対象の日にち（その日だけ・くりかえしに戻す）。曜日の変更は曜日（0〜6）を weekday に */
+  target?: number;
+  weekday?: number;
+  before: ShiftDay | null;
+  after: ShiftDay | null;
+}
+
+/**
+ * 店長代理の任命（じろ7 2-3。オーナーの判断: 日ごとの任命は「店長代理」と呼ぶ）。その日・その店だけ。
+ * 日が過ぎると消える（ほかの日には引き継がない）
+ */
+export interface DeputyAppointment {
+  day: number;
+  employeeId: Id;
+  /** 任命した人（プレイヤーの名前）と、任命した日・時刻 */
+  by: string;
+  atDay: number;
+  atT: number;
 }
 
 /** 勤務の出来事（実際に起きたことだけを記録する） */
@@ -248,6 +285,9 @@ export interface Attendance {
   calledIn: boolean;
   /** 遅刻・サボりの記録を一度だけ残すための印 */
   lateNoted: boolean;
+  /** 実際に店に着いた時刻（開店からの sim 秒。仕込みの時間に着いたら -1）と、最後に退勤した時刻（じろ7 13「actualStartTime / actualEndTime」） */
+  arrivedAt?: number;
+  leftAt?: number;
 }
 
 export interface EmployeeProfile {
@@ -332,6 +372,10 @@ export interface Employee extends ActorBase {
    * 過ぎた日は消す。古い状態にはない
    */
   dateShifts?: Record<string, ShiftDay | null>;
+  /** シフトの変更の記録（新しいものが後ろ・30件まで。じろ7） */
+  shiftLog?: ShiftChange[];
+  /** シフトの版（変えるたびに1増える。古い画面からの上書きを断るのに使う。じろ7 3-4） */
+  shiftRev?: number;
   /** その日の出勤の状況 */
   att?: Attendance;
   /** 過ぎた日の実際の勤務（新しいものが後ろ。35日分。古いセーブにはない） */
@@ -1425,6 +1469,8 @@ export interface StoreEntry {
   snapshot: StoreSnapshot | null;
   /** 営業時間（ない → 11:00〜15:00・定休日なし。じろ1 5.1） */
   hours?: StoreHours;
+  /** 日ごとの店長代理の任命（じろ7 2-3。過ぎた日は消す） */
+  deputies?: DeputyAppointment[];
 }
 
 /** 会社の日報の、店ごとの行 */

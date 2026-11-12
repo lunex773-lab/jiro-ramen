@@ -225,7 +225,7 @@ describe('シフトリーダーは店長代理', () => {
     const a = leaderStore(true);
     expect(actingManager(a.s)?.e.id).toBe('mgr');
     a.m!.presentToday = false;
-    expect(actingManager(a.s)).toEqual({ e: a.l, deputy: true });
+    expect(actingManager(a.s)).toEqual({ e: a.l, deputy: true, authority: 'leader' });
     managerExpressCheck(a.s, 10, a.ctx);
     expect(a.s.today.managerExpress?.items.moyashi ?? 0).toBeGreaterThan(0);
   });

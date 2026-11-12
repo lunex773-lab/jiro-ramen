@@ -1010,6 +1010,21 @@ test('従業員: アルバイトとして採用し、カレンダーで日にち
   await expect(card.locator('.emp-type')).toHaveText('社員');
   await expect(card).toContainText('日給');
   await expect(card.getByRole('button', { name: '社員にする' })).toHaveCount(0);
+  // じろ7: 社員もカレンダーでその日だけ休み・単日出勤・店長代理の任命ができ、予定の変更の記録が見られる
+  await card.getByRole('button', { name: '📅 シフト' }).click();
+  await expect(card.locator('[data-rest-days]')).toBeVisible();
+  await day(13).click();
+  await edit.getByRole('button', { name: '休みにする' }).click();
+  await edit.locator('[data-save="once"]').click();
+  await expect(day(13)).toContainText('休み');
+  await expect(day(13)).toContainText('この日だけ');
+  await day(9).click();
+  await edit.locator('[data-deputy="on"]').click();
+  await expect(day(9).locator('[data-cal-dep="9"]')).toHaveText('代理');
+  type D = { company: { stores: { deputies?: { day: number; employeeId: string }[] }[] } };
+  await expect.poll(async () => page.evaluate(() => ((window as unknown as { __jiro: { host: { state: D } } }).__jiro.host.state.company.stores[0]!.deputies ?? []).map((d) => d.day))).toEqual([9]);
+  await expect(card.locator('[data-shift-log]')).toContainText('予定の変更の記録');
+  await shot(page, '41b-staff-deputy');
 });
 
 test('従業員は店の外から歩いて入り、「おはようございます」とあいさつして手を洗ってから働き、「お疲れ様でした」と言って歩いて帰る', async ({ page }) => {

@@ -98,6 +98,14 @@ describe('メッセージ検証', () => {
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: null, mode: 'weekly' })).not.toBeNull();
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: null, mode: 'reset' })).not.toBeNull();
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [], shift: sh, mode: 'once' })).toBeNull();
+    // じろ7: その日だけの担当（role）・予定の版（baseRev）・店長代理の任命
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: { ...sh, role: 'server' }, mode: 'once', baseRev: 4 })).toEqual({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: { ...sh, role: 'server' }, mode: 'once', baseRev: 4 });
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: { ...sh, role: 'leader' }, mode: 'once' })).toBeNull();
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: { ...sh, evil: 1 }, mode: 'once' })).toBeNull();
+    expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [3], shift: sh, mode: 'once', baseRev: -1 })).toBeNull();
+    expect(parseAction({ type: 'appointDeputy', day: 5, employeeId: 'e1' })).toEqual({ type: 'appointDeputy', day: 5, employeeId: 'e1' });
+    expect(parseAction({ type: 'appointDeputy', day: 5, employeeId: null })).toEqual({ type: 'appointDeputy', day: 5, employeeId: null });
+    expect(parseAction({ type: 'appointDeputy', day: 0, employeeId: 'e1' })).toBeNull();
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: Array.from({ length: 29 }, (_, i) => i + 1), shift: sh, mode: 'once' })).toBeNull();
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: [1.5], shift: sh, mode: 'once' })).toBeNull();
     expect(parseAction({ type: 'setDateShift', employeeId: 'e1', days: ['3'], shift: sh, mode: 'once' })).toBeNull();

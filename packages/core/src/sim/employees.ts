@@ -5,6 +5,8 @@
 import { openDurationOf } from './hours';
 import { maxPossibleMult, prepPlanQty, prepScheduleMult, staffPrepMult } from './prep-control';
 import { actingManager } from './store-manager';
+import { authorityOf, noteManagerAbsence, pruneDeputies } from './deputy';
+import { hasDuty } from '../data/staff-roles';
 import { BALANCE } from '../data/balance';
 import { EQUIPMENT } from '../data/equipment';
 import { GIVEN_NAMES, SURNAMES } from '../data/names';
@@ -50,7 +52,7 @@ import { accidentPanic } from './accident';
 import { moveAlong, staffRoute, walkSpeed } from './walk';
 import { marketHourly, storeMinWage } from './wages';
 import { updateCommute } from './commute';
-import { attendHireDay, checkQuits, dailyWageOf, fullDayShift, initNewHire, isPartTime, isSlacking, rollCall, rollPostpone, wagesDueToday } from './staff';
+import { attendHireDay, checkQuits, dailyWageOf, fullDayShift, initNewHire, isPartTime, isSlacking, roleOn, rollCall, rollPostpone, wagesDueToday } from './staff';
 
 export const ROLE_LABEL: Record<EmployeeRole, string> = {
   cook: '調理担当',
@@ -495,7 +497,11 @@ export function setPriority(s: GameState, employeeId: string, kind: string, valu
 export function morningRollCall(s: GameState, ctx: SimCtx): void {
   // 不満がたまった人は、朝に辞めることがある（オーナーの判断 13）
   checkQuits(s, ctx);
+  // 過ぎた日の店長代理の任命を消す（その日だけの任命。じろ7 2-3）
+  for (const st of s.company?.stores ?? []) pruneDeputies(st, s.day);
   rollCall(s, ctx);
+  // 店長が欠勤したら、その日に店を回す人を知らせる（任命した店長代理 → シフトリーダー → いない）
+  noteManagerAbsence(s, ctx);
 }
 
 /**
@@ -693,15 +699,17 @@ function canTake(s: GameState, e: Employee, t: Task): boolean {
   if (!kind) return false;
   const override = e.priorities[t.kind];
   if (override !== undefined && override <= -100) return false;
-  // 店長は担当に関係なく店の仕事を何でもする（店長の営業の計算と同じ前提。Phase 2）。シフトリーダーも全部の仕事をする（じろ1 5.8）
-  if (s.company && activeStore(s).managerId === e.id) return true;
-  if (e.profile.role === 'leader') return true;
+  // 店長は担当に関係なく店の仕事を何でもする（店長の営業の計算と同じ前提。Phase 2）。シフトリーダー（じろ1 5.8）と、
+  // その日の店長代理（じろ7 2-3）も全部の仕事をする。何をするかは役目の表（data/staff-roles.ts）
+  if (hasDuty(authorityOf(s, e), 'allTasks')) return true;
   // 洗い物は、清掃担当が来ていない日は接客担当もする（丼が尽きて提供が止まらないように。じろ1 P5 の検証で、清掃担当のいない店が丼14個で止まっていた）
-  if (t.kind === 'wash' && e.profile.role === 'server' && !s.employees.some((x) => x.presentToday && !x.commute && x.profile.role === 'cleaner')) return true;
-  if (kind.roles.includes(e.profile.role)) {
+  // 担当は、その日だけの担当があればそれ（日にちごとの予定。じろ7 2-2）
+  const role = roleOn(e, s.day);
+  if (t.kind === 'wash' && role === 'server' && !s.employees.some((x) => x.presentToday && !x.commute && roleOn(x, s.day) === 'cleaner')) return true;
+  if (kind.roles.includes(role)) {
     // 調理担当の接客系は、接客担当がいないときだけ
-    if (e.profile.role === 'cook' && (t.kind === 'serve' || t.kind === 'askCall' || t.kind === 'complaint' || t.kind === 'manner' || t.kind === 'linger' || t.kind === 'film')) {
-      const servers = s.employees.some((x) => x.presentToday && !x.commute && x.profile.role === 'server');
+    if (role === 'cook' && (t.kind === 'serve' || t.kind === 'askCall' || t.kind === 'complaint' || t.kind === 'manner' || t.kind === 'linger' || t.kind === 'film')) {
+      const servers = s.employees.some((x) => x.presentToday && !x.commute && roleOn(x, s.day) === 'server');
       if (servers && t.kind !== 'serve') return false;
     }
     return true;
@@ -799,7 +807,9 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
   if (s.employees.length === 0) return;
   let tasks: Task[] | null = null;
   const busyTargets = playerBusyTargets(s);
-  const actingId = actingManager(s)?.e.id ?? null;
+  // 急ぎの仕込みをする人（今、店長の役割をしている人。役目の表で「急ぎの仕込み」をしてよい人だけ）
+  const acting = actingManager(s);
+  const actingId = acting && hasDuty(acting.authority, 'urgentPrep') ? acting.e.id : null;
   for (const e of s.employees) {
     // 出勤前・休憩中・退勤後・欠勤（状態は staff.ts の出勤の処理が決める）
     if (!e.presentToday) continue;

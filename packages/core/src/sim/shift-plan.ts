@@ -10,7 +10,7 @@ import { activeStore } from './company';
 import { calendarDemand } from './calendar';
 import { clockMinuteAt, clockMinuteAtEnd, DEFAULT_HOURS, hourDemand, hoursDemandWeight, openMinutesOf, SEC_PER_MIN, storeHours, todayHours, shiftSpansBreak } from './hours';
 import { notify, type SimCtx } from './notices';
-import { fatigueOf, isFullShift, isPartTime, shiftProblem, shiftsOf, WEEKDAY_LABEL, weekdayOf } from './staff';
+import { fatigueOf, isFullShift, isPartTime, keepTodayPlan, logShiftChange, sameShift, shiftFor, shiftProblem, shiftsOf, WEEKDAY_LABEL, weekdayOf } from './staff';
 
 const P = () => BALANCE.shiftPlan;
 const STEP = () => BALANCE.staff.shiftStepMin;
@@ -73,7 +73,6 @@ function remapShiftBody(sh: ShiftDay, from: StoreHours, to: StoreHours): ShiftDa
   return shiftProblem(out, newOpen) ? { start: 0, end: newOpen, breakAt: 0, breakLen: 0, fromPrep: sh.fromPrep } : out;
 }
 
-const sameShift = (a: ShiftDay | null, b: ShiftDay | null) => JSON.stringify(a) === JSON.stringify(b);
 
 /**
  * 店の営業時間を変えたときに、その店のアルバイトのシフト（曜日ごと・あす以降の日にちごと）を新しい営業時間に合わせる。
@@ -307,11 +306,19 @@ export function autoShifts(
   const { week, shortSlots } = buildShifts(s, opts.hours ?? storeHours(s), opts.owner ?? ownerWorks(s), opts.day ?? s.day);
   let changed = 0;
   let shifts = 0;
+  const who = by === 'manager' ? '店長' : '自動';
   for (const e of parts) {
     const next = week.get(e.id)!;
     shifts += next.filter(Boolean).length;
-    if (!next.every((x, i) => sameShift(x, shiftsOf(e)[i] ?? null))) changed += 1;
+    const prevWeek = shiftsOf(e);
+    if (!next.every((x, i) => sameShift(x, prevWeek[i] ?? null))) changed += 1;
+    // 組んだシフトは「あすから」。今日の予定が変わってしまう人は、今日の分は前の予定のまま残す（じろ7 B2）
+    const today = shiftFor(e, s.day);
     e.shifts = next;
+    for (let i = 0; i < 7; i++) {
+      if (!sameShift(prevWeek[i] ?? null, next[i] ?? null)) logShiftChange(s, e, { by: who, kind: 'auto', weekday: i, before: prevWeek[i] ?? null, after: next[i] ?? null });
+    }
+    keepTodayPlan(s, e, today, who);
   }
   if (!opts.silent) {
     const who = by === 'manager' ? `店長の${managerName(s)}さんが` : '';

@@ -14,6 +14,8 @@ import { activeStore } from './company';
 import { hourDemand, sessionSpans, todayHours } from './hours';
 import { autoOrderEnabled, managerOrderBudget, managerOrders, packPriceOf, pendingOf, placeOrder, stockOf } from './inventory';
 import { clearNotice, notify, type SimCtx } from './notices';
+import { activeDeputy } from './deputy';
+import { hasDuty, type StaffAuthority } from '../data/staff-roles';
 
 const M = () => BALANCE.storeManager;
 
@@ -27,20 +29,24 @@ export function storeManagerOf(s: GameState): Employee | null {
 const onFloor = (e: Employee): boolean => e.presentToday && !e.commute;
 
 /**
- * 今、店長の役割をしている人（オーナーの指示 2026-11-12: シフトリーダーを店長代理に）。
- * 店長が店で働いていれば店長。店長がいない店・店長が出勤前・休憩中・退勤後・休み・欠勤のときは、店にいるシフトリーダー（店長代理）
+ * 今、店長の役割をしている人（オーナーの指示 2026-11-12: シフトリーダーを店長代理に。じろ7 2-3: その日だけ任命した店長代理）。
+ * 店長が店で働いていれば店長。店長がいない店・店長が出勤前・休憩中・退勤後・休み・欠勤のときは、
+ * 店にいる今日の店長代理（任命した社員）→ 店にいるシフトリーダーの順。authority はその人の役目（data/staff-roles.ts の表で仕事を決める）
  */
-export function actingManager(s: GameState): { e: Employee; deputy: boolean } | null {
+export function actingManager(s: GameState): { e: Employee; deputy: boolean; authority: StaffAuthority } | null {
   const m = storeManagerOf(s);
-  if (m && onFloor(m)) return { e: m, deputy: false };
+  if (m && onFloor(m)) return { e: m, deputy: false, authority: 'manager' };
+  const ap = activeDeputy(s);
+  if (ap && onFloor(ap)) return { e: ap, deputy: true, authority: 'deputy' };
   const d = s.employees.find((e) => e.profile.role === 'leader' && e.id !== m?.id && onFloor(e));
-  return d ? { e: d, deputy: true } : null;
+  return d ? { e: d, deputy: true, authority: 'leader' } : null;
 }
 
 /** 店長（いなければ店長代理）が今、店で働いているか（発注を任せている店だけ。出勤前・休憩中・退勤後・欠勤は動かない） */
 export function managerOnFloor(s: GameState): Employee | null {
   if (!managerOrders(s)) return null;
-  return actingManager(s)?.e ?? null;
+  const a = actingManager(s);
+  return a && hasDuty(a.authority, 'expressOrder') ? a.e : null;
 }
 
 /** 仕入れる材料 → 仕込みで作る物の、作った物1単位あたりの材料の量（同じ物を作るレシピが2つあれば多いほう） */

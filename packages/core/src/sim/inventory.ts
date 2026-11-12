@@ -12,6 +12,7 @@ import { activeStore } from './company';
 import { calendarDemand } from './calendar';
 import { hoursDemandWeight, isClosedDay, storeHours, todayHours } from './hours';
 import { clearNotice, emit, notify, type SimCtx } from './notices';
+import { deputyOn } from './deputy';
 import { purchaseMultOf } from './location';
 
 export function stockOf(s: GameState, itemId: string): number {
@@ -167,8 +168,8 @@ export function managerOrders(s: GameState): boolean {
   if (!s.company) return false;
   const st = activeStore(s);
   if (st.policy.orderBy === 'self') return false;
-  // 店長がいる店。店長がいなくても、シフトリーダー（店長代理）がいる店は代わりに発注する（オーナーの指示 2026-11-12）
-  return (!!st.managerId && s.employees.some((e) => e.id === st.managerId)) || s.employees.some((e) => e.profile.role === 'leader');
+  // 店長がいる店。店長がいなくても、シフトリーダーがいる店・今日の店長代理を任命した店は代わりに発注する（オーナーの指示 2026-11-12・じろ7 2-3）
+  return (!!st.managerId && s.employees.some((e) => e.id === st.managerId)) || s.employees.some((e) => e.profile.role === 'leader') || !!deputyOn(st, s.employees, s.day);
 }
 
 /** 発注・当日便をしている人の呼び名（店長がいれば「店長」、いなければ「店長代理」） */

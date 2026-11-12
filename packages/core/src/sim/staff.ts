@@ -11,7 +11,7 @@
 import { clockMinuteAt, clockMinuteAtEnd, clockText, DEFAULT_HOURS, SEC_PER_MIN, isClosedDay, lateNightShare, openDurationOf, openMinutesOf, paidHoursWithPremium, sessionIndex, storeHours, todayHours } from './hours';
 import { BALANCE } from '../data/balance';
 import { stageOf } from '../geometry';
-import type { StoreHours, Attendance, AttendanceRecord, Employee, EmployeeSkills, Employment, GameState, ShiftDay, StaffLogEntry, StaffLogKind, StaffRecord } from '../types';
+import type { StoreHours, Attendance, AttendanceRecord, Employee, EmployeeRole, EmployeeSkills, Employment, GameState, ShiftChange, ShiftDay, StaffLogEntry, StaffLogKind, StaffRecord } from '../types';
 import { clamp01, hashString } from '../util';
 import { startArrive, startLeave } from './commute';
 import { dropHand } from './interact';
@@ -115,16 +115,21 @@ export function fatigueSpeed(e: Employee): number {
 }
 
 /** 社員の休みの曜日を決める（その曜日は来ない・日給もかからない）。週に6日以下にはできない（毎日休みはできない） */
-export function setRestDays(s: GameState, ctx: SimCtx, employeeId: string, days: unknown): { ok: boolean; reason?: string } {
+export function setRestDays(s: GameState, ctx: SimCtx, employeeId: string, days: unknown, by = '店主'): { ok: boolean; reason?: string } {
   const e = s.employees.find((x) => x.id === employeeId);
   if (!e) return { ok: false, reason: '従業員が見つかりません' };
   if (isPartTime(e)) return { ok: false, reason: 'アルバイトはシフトで休みを決めます' };
   if (!Array.isArray(days) || days.length > 6 || !days.every((d) => typeof d === 'number' && Number.isInteger(d) && d >= 0 && d <= 6)) return { ok: false, reason: '休みの曜日が正しくありません（週に1日は出勤）' };
   const rest = new Set(days as number[]);
   const before = shiftFor(e, s.day);
+  const weekBefore = shiftsOf(e);
   e.shifts = Array.from({ length: 7 }, (_, i) => (rest.has(i) ? null : fullDayShift()));
   if (rest.size === 0) delete e.shifts;
-  if (JSON.stringify(before) !== JSON.stringify(shiftFor(e, s.day))) reapplyToday(s, e, ctx);
+  const weekAfter = shiftsOf(e);
+  for (let i = 0; i < 7; i++) {
+    if (!sameShift(weekBefore[i] ?? null, weekAfter[i] ?? null)) logShiftChange(s, e, { by, kind: 'rest', weekday: i, before: weekBefore[i] ?? null, after: weekAfter[i] ?? null });
+  }
+  if (!sameShift(before, shiftFor(e, s.day))) reapplyToday(s, e, ctx);
   return { ok: true };
 }
 
@@ -134,7 +139,8 @@ export function shiftFor(e: Employee, day: number): ShiftDay | null {
   if (e.availableFrom !== undefined && day < e.availableFrom) return null;
   // けがの療養中は出勤しない（武器で襲われた日の翌日から1週間。オーナーの指示 2026-11-11）
   if (injuredOn(e, day)) return null;
-  if (isPartTime(e) && e.dateShifts && Object.prototype.hasOwnProperty.call(e.dateShifts, String(day))) return e.dateShifts[String(day)] ?? null;
+  // 日にちごとの予定（アルバイト・社員とも。社員の単日出勤・その日だけ休み。じろ7 2-2）
+  if (e.dateShifts && Object.prototype.hasOwnProperty.call(e.dateShifts, String(day))) return e.dateShifts[String(day)] ?? null;
   return shiftsOf(e)[weekdayOf(day)] ?? null;
 }
 
@@ -145,7 +151,40 @@ export function injuredOn(e: Employee, day: number): boolean {
 
 /** その日が日にちごとの予定か（くりかえしと違う予定を入れた日） */
 export function hasDateShift(e: Employee, day: number): boolean {
-  return isPartTime(e) && !!e.dateShifts && Object.prototype.hasOwnProperty.call(e.dateShifts, String(day));
+  return !!e.dateShifts && Object.prototype.hasOwnProperty.call(e.dateShifts, String(day));
+}
+
+/** 2つの予定が同じか */
+export function sameShift(a: ShiftDay | null | undefined, b: ShiftDay | null | undefined): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** シフトの変更の記録を残し、版を1つ進める（じろ7 3-4） */
+export function logShiftChange(s: GameState, e: Employee, c: Omit<ShiftChange, 'day' | 't'>): void {
+  const log = (e.shiftLog ??= []);
+  log.push({ day: s.day, t: Math.round(s.t), ...c });
+  if (log.length > ST.shiftLogMax) log.splice(0, log.length - ST.shiftLogMax);
+  e.shiftRev = (e.shiftRev ?? 0) + 1;
+}
+
+/**
+ * くりかえしの予定を書き換えたとき（自動で組む・営業時間の変更）、今日の予定は変えずに「あすから」にする（じろ7 B2）。
+ * 今日の予定が変わってしまう人は、前の予定を今日だけの予定として残す（画面・人件費の見込みと、実際の勤務が食い違わない）。
+ * before は書き換える前の今日の予定。営業日の途中（仕込み・営業・閉店作業）だけ
+ */
+export function keepTodayPlan(s: GameState, e: Employee, before: ShiftDay | null, by: string): void {
+  if (s.phase !== 'prep' && s.phase !== 'open' && s.phase !== 'closing') return;
+  if (hasDateShift(e, s.day)) return;
+  const after = shiftFor(e, s.day);
+  if (sameShift(before, after)) return;
+  (e.dateShifts ??= {})[String(s.day)] = before ? { ...before } : null;
+  logShiftChange(s, e, { by, kind: 'keep', target: s.day, before: after, after: before });
+}
+
+/** その日の担当（日にちごとの予定でその日だけの担当を決めていればそれ。じろ7 2-2） */
+export function roleOn(e: Employee, day: number): EmployeeRole {
+  if (e.att && e.att.day === day && e.att.shift?.role) return e.att.shift.role;
+  return e.profile.role;
 }
 
 /** 過ぎた日の日にちごとの予定を消す */
@@ -217,7 +256,10 @@ export function payDue(e: Employee, s: GameState): number {
     // 工事・準備の休業日は給与なし（オーナーの指示 2026-11-12。前は社員の日給を払っていた）
     if (a.status === 'closed') return 0;
     if (!a.calledIn && a.shift === null) return 0;
-    return a.absent ? 0 : fullTimeDayPay(e, s);
+    if (a.absent) return 0;
+    // 予定を変えて一度も来なかった日（単日の予定を過ぎた時刻にずらしたなど）は払わない（じろ7）
+    if (!a.arrived && a.arrivedAt === undefined && !a.prepWorked && a.workedSec <= 0) return 0;
+    return fullTimeDayPay(e, s);
   }
   if (!a || a.day !== s.day) return 0;
   const hours = a.workedSec / (60 * SEC_PER_MIN) + (a.prepWorked ? ST.employment.prepPaidHours : 0);
@@ -417,12 +459,16 @@ function leaveFloor(s: GameState, e: Employee, ctx: SimCtx, kind: 'leave' | 'bre
   }
   // すでに同じ向きで出ていく途中なら、そのまま
   if (e.commute && (e.commute.kind === 'leave' || e.commute.kind === 'break' || e.commute.kind === 'away') && e.commute.kind === kind) return true;
+  // 退勤の実績の時刻（最後に退勤した時刻。開店からの sim 秒）
+  if (kind === 'leave' && e.att && e.att.day === s.day) e.att.leftAt = s.phase === 'prep' ? -1 : s.openT;
   startLeave(s, e, kind);
   return true;
 }
 
 /** 店に入る（出勤・休憩から戻る・持ち場に戻る）。歩道から歩いて来て、あいさつと手洗いをしてから働き始める */
 function arriveFloor(s: GameState, e: Employee, kind: 'arrive' | 'return' | 'back', order = 0): void {
+  // 出勤の実績の時刻（その日に最初に着いた時刻。仕込みの時間は -1。あとで予定を変えても変えない）
+  if (kind === 'arrive' && e.att && e.att.day === s.day && e.att.arrivedAt === undefined) e.att.arrivedAt = s.phase === 'prep' ? -1 : s.openT;
   startArrive(s, e, kind, order);
 }
 
@@ -686,6 +732,11 @@ export function updateAttendance(s: GameState, dt: number, ctx: SimCtx): void {
     if (s.phase === 'prep' && sessionIndex(s) > 0 && a.shift?.midRest && a.arrived && a.status === 'working' && a.leaveAt > t) {
       if (e.conduct?.kind) e.conduct.kind = null;
       if (leaveFloor(s, e, ctx, 'break')) a.status = 'break';
+      continue;
+    }
+    // 仕込みの時間に今日の予定を消された人が、作業を終えたら上がる（作業の途中は終わるまで待つ）
+    if (s.phase === 'prep' && !a.shift && a.status === 'working' && e.presentToday && e.commute?.kind !== 'leave') {
+      if (leaveFloor(s, e, ctx, 'leave')) a.status = 'left';
       continue;
     }
     if (s.phase === 'prep') continue;
@@ -993,23 +1044,44 @@ export function promoteLeader(s: GameState, ctx: SimCtx, employeeId: string): { 
   return { ok: true };
 }
 
+/** シフトの形を受け取った値から作る（余計な値は捨てる。その日だけの担当は日にちごとの予定だけ） */
+function cleanShift(shift: ShiftDay, withRole: boolean): ShiftDay {
+  return {
+    start: shift.start,
+    end: shift.end,
+    breakAt: shift.breakLen > 0 ? shift.breakAt : 0,
+    breakLen: shift.breakLen,
+    fromPrep: shift.fromPrep,
+    ...(shift.midRest ? { midRest: true } : {}),
+    ...(withRole && shift.role ? { role: shift.role } : {}),
+  };
+}
+
+/** その日だけの担当に選べるか（シフトリーダーは昇格でなる役職なので、その日だけにはしない） */
+function dayRoleProblem(role: unknown): string | null {
+  if (role === undefined) return null;
+  return role === 'cook' || role === 'server' || role === 'cleaner' ? null : 'その日の担当が正しくありません';
+}
+
 /** シフトを設定する（null で削除＝その曜日は休み）。アルバイトだけ */
-export function setShift(s: GameState, ctx: SimCtx, employeeId: string, weekday: number, shift: ShiftDay | null): { ok: boolean; reason?: string } {
+export function setShift(s: GameState, ctx: SimCtx, employeeId: string, weekday: number, shift: ShiftDay | null, by = '店主'): { ok: boolean; reason?: string } {
   const e = s.employees.find((x) => x.id === employeeId);
   if (!e) return { ok: false, reason: '従業員が見つかりません' };
   if (!isPartTime(e)) return { ok: false, reason: '社員は毎日、仕込みから閉店まで勤務します' };
   if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return { ok: false, reason: '曜日が正しくありません' };
   let sh: ShiftDay | null = null;
   if (shift) {
-    sh = { start: shift.start, end: shift.end, breakAt: shift.breakLen > 0 ? shift.breakAt : 0, breakLen: shift.breakLen, fromPrep: shift.fromPrep, ...(shift.midRest ? { midRest: true } : {}) };
+    sh = cleanShift(shift, false);
     const bad = shiftProblem(sh, openMinutesOf(storeHours(s)));
     if (bad) return { ok: false, reason: bad };
   }
   const before = shiftFor(e, s.day);
   const list = shiftsOf(e);
+  const prev = list[weekday] ?? null;
   list[weekday] = sh;
   e.shifts = list;
-  if (weekday === weekdayOf(s.day) && JSON.stringify(before) !== JSON.stringify(shiftFor(e, s.day))) reapplyToday(s, e, ctx);
+  if (!sameShift(prev, sh)) logShiftChange(s, e, { by, kind: 'weekly', weekday, before: prev, after: sh });
+  if (!sameShift(before, shiftFor(e, s.day))) reapplyToday(s, e, ctx);
   return { ok: true };
 }
 
@@ -1020,13 +1092,24 @@ export type DateShiftMode = 'once' | 'weekly' | 'reset';
  *   once:   選んだ日だけ（shift が null なら休み）。曜日ごとのくりかえしより優先する
  *   weekly: 選んだ日の曜日のくりかえしにする（選んだ日の「その日だけ」の予定は消して、くりかえしに合わせる）
  *   reset:  選んだ日を、くりかえしの予定に戻す
- * 選べるのは今日から calendarDays 日先まで（過ぎた日は変えられない）
+ * 選べるのは今日から calendarDays 日先まで（過ぎた日は変えられない）。
+ * 社員も日にちごとの予定（単日出勤・その日だけ休み）を入れられる（じろ7 2-2）。社員のくりかえしは「仕込みから閉店まで」か「休み」だけ。
+ * baseRev: 画面が見ていた予定の版（違えば、ほかで変わったので断る。じろ7 3-4）
  */
-export function setDateShift(s: GameState, ctx: SimCtx, employeeId: string, days: unknown, shift: ShiftDay | null, mode: DateShiftMode): { ok: boolean; reason?: string } {
+export function setDateShift(
+  s: GameState,
+  ctx: SimCtx,
+  employeeId: string,
+  days: unknown,
+  shift: ShiftDay | null,
+  mode: DateShiftMode,
+  by = '店主',
+  baseRev?: number,
+): { ok: boolean; reason?: string } {
   const e = s.employees.find((x) => x.id === employeeId);
   if (!e) return { ok: false, reason: '従業員が見つかりません' };
-  if (!isPartTime(e)) return { ok: false, reason: '社員は毎日、仕込みから閉店まで勤務します' };
   if (mode !== 'once' && mode !== 'weekly' && mode !== 'reset') return { ok: false, reason: '保存のしかたが正しくありません' };
+  if (baseRev !== undefined && baseRev !== (e.shiftRev ?? 0)) return { ok: false, reason: 'ほかの操作で予定が変わっています。予定を見直してから、もう一度保存してください' };
   const last = s.day + ST.calendarDays - 1;
   if (!Array.isArray(days) || days.length === 0 || days.length > ST.calendarDays) return { ok: false, reason: '日にちを選んでください' };
   const list = [...new Set(days as unknown[])];
@@ -1035,33 +1118,56 @@ export function setDateShift(s: GameState, ctx: SimCtx, employeeId: string, days
   if (nums.some((d) => d < s.day)) return { ok: false, reason: '過ぎた日のシフトは変えられません' };
   if (nums.some((d) => d > last)) return { ok: false, reason: `シフトは${ST.calendarDays}日先まで決められます` };
   if (e.availableFrom !== undefined && nums.some((d) => d < e.availableFrom!)) return { ok: false, reason: `${e.availableFrom}日目から出勤できます（採用の手続き中）` };
+  const part = isPartTime(e);
   let sh: ShiftDay | null = null;
   if (mode !== 'reset' && shift) {
-    sh = { start: shift.start, end: shift.end, breakAt: shift.breakLen > 0 ? shift.breakAt : 0, breakLen: shift.breakLen, fromPrep: shift.fromPrep, ...(shift.midRest ? { midRest: true } : {}) };
-    const bad = shiftProblem(sh, openMinutesOf(storeHours(s)));
-    if (bad) return { ok: false, reason: bad };
+    const roleBad = dayRoleProblem(shift.role);
+    if (roleBad) return { ok: false, reason: roleBad };
+    sh = cleanShift(shift, mode === 'once');
+    // 時刻はその日の営業時間で確かめる（今日は朝に決まった営業時間。あすからは店の営業時間）
+    for (const d of nums) {
+      const hours = d === s.day && s.phase !== 'closed' ? todayHours(s) : storeHours(s);
+      const bad = shiftProblem(sh, openMinutesOf(hours));
+      if (bad) return { ok: false, reason: nums.length > 1 ? `${d}日目: ${bad}` : bad };
+    }
+    if (!part && mode === 'weekly' && !(sh.fromPrep && sh.end >= openMinutesOf(storeHours(s)))) {
+      return { ok: false, reason: '社員の毎週のくりかえしは「仕込みから閉店まで」か「休み」です（時間を変えるのは「この日だけ」）' };
+    }
   }
   pruneDateShifts(e, s.day);
   const before = shiftFor(e, s.day);
+  const beforeOf = new Map(nums.map((d) => [d, shiftFor(e, d)]));
   const map = (e.dateShifts ??= {});
   if (mode === 'once') {
     for (const d of nums) map[String(d)] = sh ? { ...sh } : null;
   } else {
     if (mode === 'weekly') {
       const week = shiftsOf(e);
-      for (const wd of new Set(nums.map(weekdayOf))) week[wd] = sh ? { ...sh } : null;
-      e.shifts = week;
+      const wds = new Set(nums.map(weekdayOf));
+      for (const wd of wds) week[wd] = sh ? (part ? { ...sh } : fullDayShift()) : null;
+      // 社員は週に1日は出勤（休みの曜日だけにはできない）
+      if (!part && week.every((x) => x === null)) return { ok: false, reason: '週に1日は出勤の曜日が要ります' };
+      e.shifts = part ? week : week.map((x) => (x ? fullDayShift() : null));
     }
     for (const d of nums) delete map[String(d)];
   }
   if (Object.keys(map).length === 0) delete e.dateShifts;
+  for (const d of nums) {
+    const after = shiftFor(e, d);
+    if (!sameShift(beforeOf.get(d), after)) logShiftChange(s, e, { by, kind: mode, target: d, before: beforeOf.get(d) ?? null, after });
+  }
   // 今日の予定が変わったら、すぐに反映する
-  const after = shiftFor(e, s.day);
-  if (JSON.stringify(before) !== JSON.stringify(after)) reapplyToday(s, e, ctx);
+  if (!sameShift(before, shiftFor(e, s.day))) reapplyToday(s, e, ctx);
   return { ok: true };
 }
 
-/** 今日の予定が変わったときに、出勤の状況を作り直す（朝に引いた結果は引き直さない） */
+/**
+ * 今日の予定が変わったときに、その人の今日の勤怠を作り直す（じろ7 3-3）。
+ * - 朝に引いた欠勤・遅刻は引き直さない。すでに起きた実績（出勤した時刻・仕込みで働いた・働いた時間）は消さない
+ * - 「予定」と「今の状態」（来ていない・勤務中・休憩中・帰る途中・退勤済み）を分けて、新しい予定で
+ *   「今いるべき」「あとで来る」「もう終わった」のどれかを決め、どの組み合わせでも同じ規則で動かす
+ *   （前は仕込みの時間に「退勤済み」の人へ予定を戻すと、どの分岐にも入らず一日中来なかった。じろ7 B1）
+ */
 function reapplyToday(s: GameState, e: Employee, ctx: SimCtx): void {
   if (s.phase !== 'prep' && s.phase !== 'open') return;
   const a = ensureAttendance(s, e);
@@ -1069,10 +1175,12 @@ function reapplyToday(s: GameState, e: Employee, ctx: SimCtx): void {
   const sh = shiftFor(e, s.day);
   const wasOff = a.status === 'off' && !a.arrived;
   planTimes(a, sh, openMinutesOf(todayHours(s)));
+  const leaving = e.commute?.kind === 'leave';
+  // 今日の勤務の途中（店で働いている・休憩で外に出ている）。帰る途中の人は含めない
+  const onShift = (a.status === 'working' || a.status === 'break') && !leaving;
   if (!sh) {
-    // 今日の予定を消した: 店にいれば上がる
-    if (a.arrived && e.presentToday) leaveFloor(s, e, ctx, 'leave');
-    else if (!a.arrived && e.presentToday) leaveFloor(s, e, ctx, 'leave');
+    // 今日の予定を消した: 店にいれば上がる（作業の途中なら終わってから。営業中・仕込み中の出勤の処理が続きを見る）
+    if (e.presentToday && !leaving) leaveFloor(s, e, ctx, 'leave');
     if (!e.work) {
       a.status = a.arrived ? 'left' : 'off';
       if (!e.presentToday) e.ai.state = 'off';
@@ -1086,31 +1194,46 @@ function reapplyToday(s: GameState, e: Employee, ctx: SimCtx): void {
     logStaff(s, e, 'calledIn', '休みの日に呼び出されて出勤した');
     if (s.phase === 'open') a.arriveAt = Math.max(a.arriveAt < 0 ? 0 : a.arriveAt, s.openT + ST.attendance.callInMin * SEC_PER_MIN);
   }
-  if (s.phase === 'prep') {
-    if (a.arriveAt < 0 && !a.arrived) {
-      a.arrived = true;
-      a.prepWorked = true;
-      a.status = 'working';
-      arriveFloor(s, e, 'arrive');
-    } else if (a.arriveAt >= 0 && a.arrived) {
-      // 仕込みから来ていた人の出勤を遅らせた: いったん上がり、出勤の時刻に来る
+  const prep = s.phase === 'prep';
+  const now = s.openT;
+  // 新しい予定で、今いるべきか（仕込みの時間は「仕込みから」の人だけ）・もう終わったか
+  const due = prep ? a.arriveAt < 0 : now >= Math.max(0, a.arriveAt);
+  const over = !prep && now >= a.leaveAt;
+  if (onShift) {
+    if (over) {
+      // 新しい退勤の時刻をもう過ぎている: 上がる
+      if (e.conduct?.kind) e.conduct.kind = null;
+      if (leaveFloor(s, e, ctx, 'leave')) a.status = 'left';
+      return;
+    }
+    if (prep && !due) {
+      // 仕込みから来ていた人の出勤を遅らせた: いったん上がり、出勤の時刻に来る（仕込みで働いた実績は残す）
       leaveFloor(s, e, ctx, 'leave');
       a.arrived = false;
-      a.prepWorked = false;
       a.status = a.lateMin > 0 ? 'late' : 'scheduled';
-      e.ai.state = 'off';
-    } else if (!a.arrived) {
-      a.status = a.lateMin > 0 ? 'late' : 'scheduled';
+      return;
     }
+    // そのまま勤務を続ける。予定の出勤を今より後にずらしても、出勤してから働いた分は給与に数える
+    if (!prep && !due) a.arriveAt = a.arrivedAt !== undefined ? a.arrivedAt : now;
     return;
   }
-  // 営業中
-  if (!a.arrived) a.status = a.lateMin > 0 ? 'late' : 'scheduled';
-  else if (a.status === 'left' && s.openT < a.leaveAt) {
-    // 上がった人の退勤を延ばした: 戻る
+  // 今は店にいない（まだ来ていない・退勤した・帰る途中）
+  if (over) {
+    if (!a.arrived) a.status = 'off';
+    return;
+  }
+  if (prep && due) {
+    // 仕込みから: 今来る（退勤したあとに予定を戻した人も来る）
+    a.arrived = true;
+    a.prepWorked = true;
     a.status = 'working';
     arriveFloor(s, e, 'arrive');
+    return;
   }
+  // 営業中の今・あとで来る: 出勤の時刻に、営業中の出勤の処理（updateAttendance）が呼ぶ
+  a.arrived = false;
+  a.status = a.lateMin > 0 ? 'late' : 'scheduled';
+  if (!e.presentToday) e.ai.state = 'off';
 }
 
 /** 共通の出来事の文（口論・冷静な対応） */
