@@ -521,6 +521,27 @@ export async function startDayApi(req: Request, env: Env, player: AuthedPlayer, 
 }
 
 /**
+ * 営業の途中のセーブ（じろ7 4）。
+ * POST /api/v1/market/:id/checkpoint {rev, baseVersion, token, sum, stateText} → 保存した（版）・断った（理由）。
+ * GET  /api/v1/market/:id/checkpoint → 続きから始められるセーブ（なければ none）。中身は Durable Object が確かめる
+ */
+export async function checkpointApi(req: Request, env: Env, player: AuthedPlayer, marketId: string): Promise<Response> {
+  if (!isUuid(marketId)) throw new HttpError(404, 'market_not_found', '市場が見つかりません');
+  await requireMember(env, marketId, player.id);
+  if (req.method === 'GET') {
+    return forward(await stub(env, marketId).fetch('https://market/internal/checkpoint', { headers: identity(player) }));
+  }
+  const text = await readJsonText(req, COMMIT_BODY_LIMIT);
+  return forward(
+    await stub(env, marketId).fetch('https://market/internal/checkpoint', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...identity(player) },
+      body: text,
+    }),
+  );
+}
+
+/**
  * POST /api/v1/market/:id/day/commit {token, state} → 受け取った・受け取らなかった（理由）。
  * 本文（会社の状態）は Worker では解釈せず、Durable Object が確かめる。受け取らなかった日・上限を超えた日は監査記録に残す
  */

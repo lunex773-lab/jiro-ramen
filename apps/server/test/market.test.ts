@@ -1,5 +1,5 @@
 // 共通市場（MarketRoom Durable Object と API。docs/MARKET_RANKING_PLAN.md）。
-import { addDays, autoPlayDay, canonicalJson, checksum, jstDateKey, jstMidnight, type GameState } from '@jiro/core';
+import { addDays, applyAction, autoPlayDay, canonicalJson, checksum, jstDateKey, jstMidnight, makeCtx, step, type GameState } from '@jiro/core';
 import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
@@ -388,5 +388,70 @@ describe('共通市場のサーバー: 操作・保存・移行', () => {
       return x.market!.schema;
     });
     expect(again).toBe(2);
+  });
+});
+
+describe('共通市場のサーバー: 営業の終わりで送る・途中のセーブ（じろ7 4・5）', () => {
+  /** 端末で1日を営業して閉店し、その日の結果を確定する（閉店後の状態） */
+  function playToClose(s: GameState, demand: Record<string, number>): void {
+    const pid = s.players[0]!.id;
+    const ctx = makeCtx();
+    s.marketDemand = { ...demand };
+    s.tutorial = null;
+    expect(applyAction(s, pid, { type: 'openShop' }, ctx).ok).toBe(true);
+    for (let t = 0; t < 4000 && s.phase !== 'closed'; t += 0.25) step(s, 0.25, ctx);
+    expect(applyAction(s, pid, { type: 'finalizeDay' }, ctx).ok).toBe(true);
+  }
+  type Cp = { ok: boolean; rev?: number; code?: string; error?: string; meta?: { rev: number; day: number; phase: string }; stateText?: string };
+
+  it('閉店後に結果を確定した日を受け取り、途中のセーブは版・開いている日・チェックサムを確かめて保存し、確定すると使わない', async () => {
+    const a = await newPlayer('セーブ');
+    const m = await create(a, '途中亭');
+    const v = await view(a, m.marketId);
+    const token = newToken();
+    const st = await callJson<{ ticket: Ticket }>(`/api/v1/market/${m.marketId}/day/start`, { token: a.token, body: { token, baseVersion: v.body.mine!.progress.stateVersion } });
+    expect(st.status).toBe(200);
+    const base = v.body.mine!.progress.stateVersion;
+    const s = v.body.mine!.state;
+    // 途中のセーブ（仕込みの時間）
+    const text1 = JSON.stringify(s);
+    const save = (rev: number, text: string, extra: Record<string, unknown> = {}) =>
+      callJson<Cp>(`/api/v1/market/${m.marketId}/checkpoint`, { token: a.token, body: { rev, baseVersion: base, token, sum: checksum(text), stateText: text, ...extra } });
+    const r1 = await save(1, text1);
+    expect(r1.status, JSON.stringify(r1.body)).toBe(200);
+    expect(r1.body.rev).toBe(1);
+    // 読み込むと同じ中身
+    const g1 = await callJson<Cp>(`/api/v1/market/${m.marketId}/checkpoint`, { token: a.token });
+    expect(g1.body.ok).toBe(true);
+    expect(g1.body.stateText).toBe(text1);
+    expect((await view(a, m.marketId)).body.mine as unknown as { checkpoint: { rev: number } }).toMatchObject({ checkpoint: { rev: 1 } });
+    // 古い版・違う日の条件・送るあいだに変わった中身・古い確定の版は受け取らない（前の正しいセーブは残る）
+    expect((await save(1, text1)).body.code).toBe('old_rev');
+    expect((await save(2, text1, { token: 'tok-other-day' })).body.code).toBe('no_open_day');
+    expect((await save(2, text1, { sum: 'bad' })).body.code).toBe('corrupt');
+    expect((await save(2, text1, { baseVersion: base - 1 })).body.code).toBe('stale');
+    expect((await callJson<Cp>(`/api/v1/market/${m.marketId}/checkpoint`, { token: a.token })).body.stateText).toBe(text1);
+    // 営業の途中の状態を保存し直す（2つの場所に交互に書く）
+    playToClose(s, st.body.ticket.demand);
+    const text2 = JSON.stringify(s);
+    expect((await save(2, text2)).body.rev).toBe(2);
+    const g2 = await callJson<Cp>(`/api/v1/market/${m.marketId}/checkpoint`, { token: a.token });
+    expect(g2.body.meta).toMatchObject({ rev: 2, phase: 'closed' });
+    expect(g2.body.stateText).toBe(text2);
+    // 営業の終わりで送る（閉店後・確定済み）→ 受け取られ、途中のセーブはもう使わない
+    const c = await callJson<Commit & { resultId?: string }>(`/api/v1/market/${m.marketId}/day/commit`, { token: a.token, body: { token, state: s } });
+    expect(c.body.ok, JSON.stringify(c.body)).toBe(true);
+    expect(c.body.reject ?? []).toEqual([]);
+    expect(c.body.resultId).toContain(`:${st.body.ticket.gameDate}`);
+    const again = await callJson<Commit>(`/api/v1/market/${m.marketId}/day/commit`, { token: a.token, body: { token, state: s } });
+    expect(again.body.duplicate).toBe(true);
+    expect((await callJson<Cp>(`/api/v1/market/${m.marketId}/checkpoint`, { token: a.token })).body.ok).toBe(false);
+    const after = await view(a, m.marketId);
+    expect(after.body.mine!.state.phase).toBe('closed');
+    expect(after.body.mine!.progress.manualProgressDays).toBe(1);
+    // 次の日は閉店後の状態から始められる
+    const st2 = await callJson<{ ticket: Ticket }>(`/api/v1/market/${m.marketId}/day/start`, { token: a.token, body: { token: newToken(), baseVersion: after.body.mine!.progress.stateVersion } });
+    expect(st2.status).toBe(200);
+    expect(st2.body.ticket.gameDate).toBe(st.body.ticket.gameDate + 1);
   });
 });

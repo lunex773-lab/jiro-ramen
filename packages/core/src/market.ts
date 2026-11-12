@@ -29,7 +29,7 @@ import { employeeSatisfaction, enterpriseValue, storeQuality } from './sim/metri
 import { receiveDeliveries, runAutoOrder } from './sim/inventory';
 import { expansionInfo } from './sim/layout';
 import { planManagerDay, runManagerDay, standaloneArrivals } from './sim/manager';
-import { makeCtx } from './sim/notices';
+import { makeCtx, type SimCtx } from './sim/notices';
 import { cleanStoreName, openStoreProblem, runAbsentStores, storeStatus } from './sim/stores';
 import { locationLabel, locationProblem, MARKET_SCOPE_LABEL, MARKET_SCOPES } from './sim/location';
 import { creditOp, creditsFor, exitCredits, flushCredits, settleCredits, type CompanyCredit, type CreditOp, type CreditResult, type PendingCredit } from './credit';
@@ -120,6 +120,62 @@ export interface MarketCompany {
   lastCommit: CommitResult & { token: string } | null;
   /** 確定した日の記録（集計がまだの分＋直近） */
   days: CompanyDayRecord[];
+  /** 営業の途中のセーブ（じろ7 4。中身はサーバーの別の場所。前の版にはない） */
+  checkpoint?: CheckpointMeta | null;
+}
+
+/**
+ * 営業の途中のセーブ（クラウドの中途セーブ。じろ7 4）の目印。中身（会社の状態）はサーバーの別の場所に置く。
+ * 続きを始める場所にだけ使い、確定する値はこれまでどおり日の終わりにサーバーが前の日の状態から確かめる
+ */
+export interface CheckpointMeta {
+  /** 版（保存するたびに端末が1つ増やす。古い版では上書きしない） */
+  rev: number;
+  /** どの確定した状態から始めた続きか（会社の状態の版。確定・自動営業で版が進むと、このセーブは使わない） */
+  baseVersion: number;
+  /** どの日の条件（チケット）の続きか */
+  token: string;
+  savedAt: number;
+  /** 中身の日・場面（画面に出す） */
+  day: number;
+  phase: string;
+  /** 中身の文字列のチェックサムと長さ（読み込むときに確かめる） */
+  sum: string;
+  length: number;
+  /** 中身を置いた場所（0 か 1。次の保存はもう一方に書いてから目印を変える） */
+  slot?: number;
+}
+
+/** 途中のセーブを受け取れない理由 */
+export type CheckpointCode = 'not_member' | 'inactive' | 'stale' | 'no_open_day' | 'old_rev' | 'bad_state';
+
+/**
+ * 途中のセーブを受け取れるか（受け取れれば null）。
+ * 確定した状態の版が同じで、今開いている日の続きで、今ある途中のセーブより新しい版で、日付が合うこと（複数の端末・古い送信の上書きを防ぐ）
+ */
+export function checkpointProblem(
+  c: MarketCompany | null,
+  req: { rev: number; baseVersion: number; token: string },
+  state: GameState,
+): { code: CheckpointCode; reason: string } | null {
+  if (!c) return { code: 'not_member', reason: 'この市場に参加していません' };
+  if (c.status !== 'active') return { code: 'inactive', reason: '営業していない企業です' };
+  if (req.baseVersion !== c.progress.stateVersion) return { code: 'stale', reason: 'ほかの端末か0時の自動営業で、会社の状態が新しくなっています' };
+  if (!c.openDay || c.openDay.token !== req.token) return { code: 'no_open_day', reason: '始めていない日の続きです' };
+  const cur = validCheckpoint(c);
+  if (cur && req.rev <= cur.rev) return { code: 'old_rev', reason: 'もっと新しい途中のセーブがあります（ほかの端末で進んでいます）' };
+  if (state.seed !== c.state.seed) return { code: 'bad_state', reason: '別の企業の状態です' };
+  // 今の日（閉店後の事務作業も含む）か、その前の確定した日の閉店後
+  const day = c.openDay.gameDate;
+  if (state.day !== day && state.day !== day - 1) return { code: 'bad_state', reason: `日付が合いません（${state.day}日目）` };
+  return null;
+}
+
+/** 使える途中のセーブ（確定した状態の版と、開いている日が同じもの。なければ null） */
+export function validCheckpoint(c: MarketCompany): CheckpointMeta | null {
+  const cp = c.checkpoint;
+  if (!cp || cp.baseVersion !== c.progress.stateVersion || !c.openDay || c.openDay.token !== cp.token) return null;
+  return cp;
 }
 
 /** 意思決定の記録（AI 企業の理由・プレイヤーの操作・同期） */
@@ -752,6 +808,8 @@ export interface CommitResult {
   duplicate?: boolean;
   /** 監査記録に残す気になる点（受け取りには影響しない。仕様書 7「不自然な価格操作の検知」など） */
   watch?: string[];
+  /** 営業結果の ID（市場・会社・営業日。同じ結果を二度数えない目印。じろ7 5-4） */
+  resultId?: string;
 }
 
 /** 0時を過ぎて、まだ同期していない期間がある（同期が済むまで新しい日は始められない） */
@@ -898,12 +956,14 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
   c.openDay = null;
   c.progress.stateVersion += 1;
   c.progress.synchronizationStatus = 'idle';
+  // 確定した: 途中のセーブはもう使わない
+  c.checkpoint = null;
   if (v.bankrupt) {
     c.status = 'bankrupt';
     c.bankruptDay = o.gameDate;
     log(m, c.id, `${c.name}は資金が尽きて破産し、市場から消えました`, o.gameDate);
     exitCredits(m, c, now, '破産した');
-    return done({ ok: true, gameDate: o.gameDate, stateVersion: c.progress.stateVersion, bankrupt: true, flags: v.flags });
+    return done({ ok: true, resultId: `${m.id}:${c.id}:${o.gameDate}`, gameDate: o.gameDate, stateVersion: c.progress.stateVersion, bankrupt: true, flags: v.flags });
   }
   c.progress.lastProcessedGameDate = o.gameDate;
   c.progress.manualProgressDays += 1;
@@ -918,7 +978,7 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
     m.pendingPeriods.sort();
   }
   const watch = watchPoints(c.state);
-  return done({ ok: true, gameDate: o.gameDate, stateVersion: c.progress.stateVersion, flags: v.flags.length > 0 ? v.flags : undefined, watch: watch.length > 0 ? watch : undefined });
+  return done({ ok: true, resultId: `${m.id}:${c.id}:${o.gameDate}`, gameDate: o.gameDate, stateVersion: c.progress.stateVersion, flags: v.flags.length > 0 ? v.flags : undefined, watch: watch.length > 0 ? watch : undefined });
 }
 
 // ───────────────────────── 自動営業（1日単位の計算） ─────────────────────────
@@ -960,6 +1020,19 @@ export interface AutoDayOptions {
  */
 export function autoPlayDay(s: GameState, day: number, demand: Record<string, number>, opts: AutoDayOptions): { bankrupt: boolean; loan: boolean; reason?: string } {
   const ctx = ctxOf();
+  let loanBefore = false;
+  if (s.phase === 'closed' && s.day === day - 1) {
+    // 端末が営業の終わりで送った前の日（閉店後・結果を確定した状態。じろ7 5）: 手動の「翌日の仕込みへ」と同じく、
+    // 期限を過ぎた未払金を払ってから（払えなければ融資・破産）、次の日の朝にして営業する
+    const pre = payBeforeNextDay(s, ctx, opts.allowLoan);
+    if (pre.bankrupt) return pre;
+    loanBefore = pre.loan;
+    if (s.finalizedDay !== s.day) {
+      runAbsentStores(s, ctx, s.day);
+      recordCompanyDay(s, s.day);
+    }
+    startNextDay(s, ctx, false);
+  }
   s.marketDemand = { ...demand };
   s.company.ownerStoreId = s.company.activeStoreId;
   s.day = day;
@@ -982,10 +1055,24 @@ export function autoPlayDay(s: GameState, day: number, demand: Record<string, nu
   }
   s.phase = 'closed';
   // 次の日へ進む前の支払い（手動の nextDay と同じ順序: 期限を過ぎた未払金を払い、払えなければ融資、それでもだめなら破産）
+  const after = payBeforeNextDay(s, ctx, opts.allowLoan);
+  const loan = loanBefore || after.loan;
+  if (after.bankrupt) return { ...after, loan };
+  runAbsentStores(s, ctx, day);
+  recordCompanyDay(s, day);
+  opts.evening?.(s);
+  s.day = day;
+  s.phase = 'closed';
+  startNextDay(s, ctx, false);
+  return { bankrupt: false, loan };
+}
+
+/** 次の日へ進む前の支払い: 期限を過ぎた未払金を払い、払えなければ（許していれば）融資、それでもだめなら破産 */
+function payBeforeNextDay(s: GameState, ctx: SimCtx, allowLoan: boolean): { bankrupt: boolean; loan: boolean; reason?: string } {
   payArrears(s, ctx);
   let bc = bankruptcyCheck(s);
   let loan = false;
-  if (bc.overdue > 0 && opts.allowLoan && loanAvailable(s)) {
+  if (bc.overdue > 0 && allowLoan && loanAvailable(s)) {
     takeLoan(s, ctx, rescueLoanAmount(s, bc.overdue));
     payArrears(s, ctx);
     bc = bankruptcyCheck(s);
@@ -996,12 +1083,6 @@ export function autoPlayDay(s: GameState, day: number, demand: Record<string, nu
     declareBankruptcy(s, ctx, reason);
     return { bankrupt: true, loan, reason };
   }
-  runAbsentStores(s, ctx, day);
-  recordCompanyDay(s, day);
-  opts.evening?.(s);
-  s.day = day;
-  s.phase = 'closed';
-  startNextDay(s, ctx, false);
   return { bankrupt: false, loan };
 }
 
@@ -1710,6 +1791,8 @@ export interface MarketView {
     range?: ReturnType<typeof marketRangeChecks>;
     /** 自分が貸し手・借り手の企業間の契約（新しい順） */
     credits?: CompanyCredit[];
+    /** 続きから始められる途中のセーブ（じろ7 4） */
+    checkpoint?: CheckpointMeta | null;
   } | null;
   /** 設定の変更の記録（新しい順） */
   settingsLog?: SettingsChange[];
@@ -1785,6 +1868,7 @@ export function marketView(m: MarketState, ownerId: string | null, now?: number)
           days: me.days.slice(-30),
           range: marketRangeChecks(m, me),
           credits: creditsFor(m, me.id),
+          checkpoint: validCheckpoint(me),
         }
       : null,
     settingsLog: (m.settingsLog ?? []).slice().reverse(),

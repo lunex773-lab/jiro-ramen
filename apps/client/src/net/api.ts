@@ -1,6 +1,6 @@
 // バックエンド（Cloudflare Workers）の HTTP API クライアント（設計書 18.1）。
 
-import type { Action, ActionResult, CommitResult, CreditOp, DayTicket, GameState, SaveFile } from '@jiro/core';
+import type { Action, ActionResult, CheckpointMeta, CommitResult, CreditOp, DayTicket, GameState, SaveFile } from '@jiro/core';
 
 const URL_KEY = 'jiro.serverUrl';
 const AUTH_KEY = 'jiro.auth';
@@ -216,8 +216,26 @@ export class Api {
 
   /** 1日の終わりの状態を送る（爆発事故の控えは送らない。サーバーが確かめて受け取る） */
   commitMarketDay(token: string, marketId: string, dayToken: string, state: GameState): Promise<CommitResult & { companyId: string | null }> {
-    const body = JSON.stringify({ token: dayToken, state }, (k, v: unknown) => (k === 'prepSnapshot' ? null : v));
+    return this.commitMarketDayText(token, marketId, Api.commitBody(dayToken, state));
+  }
+
+  /** 送る本文（送信待ちに残しておき、通信が戻ったら同じ本文を送り直す。じろ7 5-5） */
+  static commitBody(dayToken: string, state: GameState): string {
+    return JSON.stringify({ token: dayToken, state }, (k, v: unknown) => (k === 'prepSnapshot' ? null : v));
+  }
+
+  commitMarketDayText(token: string, marketId: string, body: string): Promise<CommitResult & { companyId: string | null }> {
     return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/day/commit`, { method: 'POST', token, body });
+  }
+
+  /** 営業の途中のセーブ（じろ7 4）。stateText のチェックサムを sum に入れる。サーバーが確かめてから保存した版を返す */
+  saveCheckpoint(token: string, marketId: string, cp: { rev: number; baseVersion: number; token: string; sum: string; stateText: string }): Promise<{ ok: boolean; rev: number; savedAt: number }> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/checkpoint`, { method: 'POST', token, body: JSON.stringify(cp) });
+  }
+
+  /** 続きから始められる途中のセーブ（なければ ok: false） */
+  loadCheckpoint(token: string, marketId: string): Promise<{ ok: boolean; code?: string; meta?: CheckpointMeta; stateText?: string }> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/checkpoint`, { token });
   }
 
   /** ランキング（board: community / fresh / grown、scope: week / month / year / total、metric: overall など） */

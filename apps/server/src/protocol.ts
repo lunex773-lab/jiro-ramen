@@ -13,7 +13,7 @@ export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
-  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'appointDeputy', 'setAutoOrderMode', 'setAutoOrderItem', 'promote', 'promoteLeader', 'setPrepTarget', 'setPrepPlan', 'setPrepSchedule', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
+  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'appointDeputy', 'finalizeDay', 'setAutoOrderMode', 'setAutoOrderItem', 'promote', 'promoteLeader', 'setPrepTarget', 'setPrepPlan', 'setPrepSchedule', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
   'accidentReset', 'openStore', 'setStoreLocation', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setStoreHours', 'autoShifts', 'setCompanyPolicy',
 ] as const satisfies readonly ActionType[];
 
@@ -163,6 +163,8 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   setAutoOrderMode: { mode: (v: unknown) => v === 'manual' || v === 'sales' },
   setAutoOrderItem: { itemId: isIngredient, enabled: isBool },
   setDateShift: { employeeId: isId, days: isDayList, shift: isShift, mode: (v: unknown) => v === 'once' || v === 'weekly' || v === 'reset', baseRev: (v: unknown) => v === undefined || isIntIn(0, 1_000_000_000)(v) },
+  // 営業の終わりに、その日の結果を確定する（じろ7 5）
+  finalizeDay: {},
   // 店長代理の任命（null で取り消し。中身は core の appointDeputy。じろ7 2-3）
   appointDeputy: { day: isIntIn(1, 1_000_000), employeeId: (v: unknown) => v === null || isId(v) },
   promote: { employeeId: isId },

@@ -53,7 +53,7 @@ export function reportFinalProfit(r: { finalProfit?: number; operatingProfit: nu
 }
 
 /** 損益と現金の項目（閉店後の支払いを日報に足すときに使う） */
-const STAT_MONEY: readonly (keyof DayStats)[] = ['sales', 'refunds', 'cogs', 'waste', 'wages', 'rent', 'upkeep', 'utilities', 'repairs', 'hiring', 'ads', 'interest', 'purchases', 'capex'];
+export const STAT_MONEY: readonly (keyof DayStats)[] = ['sales', 'refunds', 'cogs', 'waste', 'wages', 'rent', 'upkeep', 'utilities', 'repairs', 'hiring', 'ads', 'interest', 'purchases', 'capex'];
 
 /**
  * 閉店の精算のあとに動いたお金（夜の自動発注・閉店後の採用・設備・拡張・椅子・仕入れなど）を、その日の日報に足す。

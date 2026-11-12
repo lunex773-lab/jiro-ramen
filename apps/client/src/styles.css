@@ -1657,3 +1657,14 @@ details.help:not([open]) > .help-body { display: none; }
 /* 確認の画面の題名も白（危ない操作の題名は赤い枠のボタンで分かる） */
 .modal h3 { color: var(--text); }
 .modal { background: var(--s2); border: 1px solid var(--line2); }
+
+/* じろ7: 共通市場の営業の結果の送信（結果の画面の上）と、途中のセーブ（画面の左下） */
+.send-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line2, var(--line)); background: var(--s2, #221d19); font-size: 13px; color: var(--text); }
+.send-status:empty { display: none; }
+.send-status.done { border-color: color-mix(in srgb, var(--good) 60%, transparent); color: var(--good); }
+.send-status.pending, .send-status.error { border-color: color-mix(in srgb, var(--warn) 70%, transparent); color: var(--warn); }
+.send-status .btn.mini { min-height: 36px; }
+.cloud-status { position: absolute; left: calc(var(--sal, 0px) + 10px); bottom: calc(var(--sab, 0px) + 10px); z-index: 30; max-width: min(70vw, 420px); padding: 6px 10px; border-radius: 8px; background: rgba(17, 14, 12, 0.86); border: 1px solid var(--line2, var(--line)); color: var(--muted); font-size: 12px; pointer-events: none; }
+.cloud-status.saved { color: var(--good); }
+.cloud-status.error { color: var(--warn); }
+.cloud-status[hidden] { display: none; }

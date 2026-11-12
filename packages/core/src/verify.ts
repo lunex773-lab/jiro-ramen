@@ -7,7 +7,7 @@
 // flags（受け取るが順位から外す）: 同じ経済の式で出せる上限を超える値、日報とお金の記録の食い違い。
 // 上限の幅は、ボットで多くの日を回した実際の値に余裕を持たせて決めている（test/verify.test.ts で「ふつうの営業では引っかからない」ことを確かめる）。
 
-import { DEFAULT_HOURS, openMinutesOf, todayHours } from './sim/hours';
+import { DEFAULT_HOURS, openMinutesOf, storeHours as storeHoursOf, todayHours } from './sim/hours';
 import { BALANCE } from './data/balance';
 import { EQUIPMENT } from './data/equipment';
 import { STAGES } from './data/stages';
@@ -198,9 +198,13 @@ export function verifyCommit(prev: GameState, next: GameState, ticket: VerifyTic
     if (next.day !== prev.day && next.day !== d && next.day !== d + 1) reject.push('破産の日付が不正');
     return res(true);
   }
-  // 日付と日報
-  if (next.day !== d + 1) reject.push(`日付が合わない（${d}日目の次は${d + 1}日目。届いたのは${next.day}日目）`);
-  if (next.phase !== 'prep' && next.phase !== 'closed') reject.push(`営業日の途中の状態（${next.phase}）`);
+  // 日付と日報。営業の終わりで送った日（閉店後・その日の結果を確定した状態。じろ7 5）と、
+  // 「翌日の仕込みへ」のあとに送った日（次の日の仕込みの状態。前の版の端末）のどちらも受け取る
+  const closedForm = next.phase === 'closed' && next.day === d && next.finalizedDay === d;
+  if (!closedForm) {
+    if (next.day !== d + 1) reject.push(`日付が合わない（${d}日目の次は${d + 1}日目。届いたのは${next.day}日目）`);
+    if (next.phase !== 'prep' && next.phase !== 'closed') reject.push(`営業日の途中の状態（${next.phase}）`);
+  }
   const days = next.company.history.map((r) => r.day);
   if (!days.includes(d)) reject.push(`${d}日目の会社の日報がない`);
   if (days.some((x) => x > d)) reject.push(`${d}日目より先の会社の日報がある`);
@@ -250,7 +254,7 @@ export function verifyCommit(prev: GameState, next: GameState, ticket: VerifyTic
   }
   const active = reports.find((x) => x.entry.id === next.company.activeStoreId && x.r.managed === undefined);
   if (active) {
-    const bound = arrivalBound(prev, next, ticket.demand[active.entry.id] ?? 1, active.r.ads ?? 0);
+    const bound = arrivalBound(morningOf(prev, d), next, ticket.demand[active.entry.id] ?? 1, active.r.ads ?? 0, d);
     const came = active.r.customers + active.r.balked;
     if (came > bound) flags.push(`来客（${came}人）が見込みの上限（${Math.round(bound)}人）を超える`);
   }
@@ -261,11 +265,20 @@ export function verifyCommit(prev: GameState, next: GameState, ticket: VerifyTic
  * プレイヤーがいる店の、その日の来客（入った客＋帰った客）の上限。
  * 同じ式（arrivalRate を営業時間で積分。イベントの効果を入れる）で、値段を下げた分・評判が上がった分の余裕を足す
  */
-export function arrivalBound(prev: GameState, next: GameState, demand: number, ads = 0): number {
+export function arrivalBound(prev: GameState, next: GameState, demand: number, ads = 0, day = prev.day): number {
   // その日に払った広告費の分も入れる（開店の前の状態では、まだ払っていない）
   const base = expectedDailyArrivals(prev, { events: true }) * adFactor(ads);
   const priceUp = Math.max(1, priceDemandFactor(next) / Math.max(0.05, priceDemandFactor(prev)));
-  return base * priceUp * buzzAllowance(next, prev.day) * Math.max(0, demand) * V().arrivalMult + V().arrivalSlack;
+  return base * priceUp * buzzAllowance(next, day) * Math.max(0, demand) * V().arrivalMult + V().arrivalSlack;
+}
+
+/**
+ * 営業日 day の朝として見た前日の状態。サーバーにある前日の状態が閉店後（営業の終わりで送った日。じろ7 5）なら、
+ * 日付と今日の営業時間だけを次の日の朝に合わせた浅い複製（客の見込みの曜日・営業時間を合わせる。元の状態は変えない）
+ */
+function morningOf(prev: GameState, day: number): GameState {
+  if (prev.phase !== 'closed' || prev.day === day) return prev;
+  return { ...prev, day, openT: 0, todayHours: JSON.parse(JSON.stringify(storeHoursOf(prev))) as GameState['todayHours'] };
 }
 
 /**

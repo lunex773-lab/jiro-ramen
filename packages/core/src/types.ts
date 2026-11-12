@@ -1273,6 +1273,14 @@ export interface GameState {
   today: DayStats;
   history: DayReport[];
   cashAtDayStart: number;
+  /**
+   * 営業の終わりに結果を確定した日（共通市場: 精算したらすぐ、その日の会社の日報・ほかの店の営業を確定して送る。じろ7 5）。
+   * この日の「翌日の仕込みへ」では日報を作り直さず、確定のあとに動いたお金（閉店後の発注・採用など）は次の日の日報に入れる
+   */
+  finalizedDay?: number;
+  /** 結果を確定したときの、その日のお金の集計（確定のあとに動いた分を次の日へ回すのに使う）と手元の現金 */
+  finalizeBase?: Record<string, number>;
+  cashAtFinalize?: number;
 
   inventory: Lot[];
   deliveries: Delivery[];

@@ -12,6 +12,7 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import {
+  checkpointProblem,
   checksum,
   commitDay,
   createMarket,
@@ -35,8 +36,11 @@ import {
   startDay,
   syncPending,
   updateMarketSettings,
+  validCheckpoint,
+  validateState,
   type Action,
   type ActionResult,
+  type CheckpointMeta,
   type CommunitySettings,
   type CreditOp,
   type ExportedCompany,
@@ -495,6 +499,7 @@ export class MarketRoom extends DurableObject<Env> {
       await this.ensureAlarm(now);
       return json({ ok: true, ticket: r.ticket, clock: this.clock(now) });
     }
+    if (url.pathname === '/internal/checkpoint') return this.checkpoint(req, m, playerId, now);
     if (url.pathname === '/internal/day/commit' && req.method === 'POST') {
       const body = safeJsonParse(await req.text());
       if (!isObj(body) || typeof body.token !== 'string' || !isObj(body.state)) return json({ error: 'bad_request', message: '形式が不正です' }, 400);
@@ -507,6 +512,48 @@ export class MarketRoom extends DurableObject<Env> {
       return json({ ...r, companyId: c?.id ?? null, clock: this.clock(now) });
     }
     return json({ error: 'not_found', message: '見つかりません' }, 404);
+  }
+
+  /**
+   * 営業の途中のセーブ（じろ7 4）。中身は会社ごとに2つの場所へ交互に書き、書き終えてから目印（版・チェックサム）を変える。
+   * 書いている途中で止まっても、前の正しいセーブは残る（目印が指すのは前の場所のまま）。読むときはチェックサムで確かめる
+   */
+  private async checkpoint(req: Request, m: MarketState, playerId: string, now: number): Promise<Response> {
+    const c = playerCompany(m, playerId);
+    if (req.method === 'GET') {
+      const cp = c ? validCheckpoint(c) : null;
+      if (!c || !cp) return json({ ok: false, code: 'none', message: '続きのセーブはありません' });
+      const text = this.readBlob(`cp:${c.id}:${cp.slot ?? 0}`);
+      if (text === null || text.length !== cp.length || checksum(text) !== cp.sum) return json({ ok: false, code: 'corrupt', message: '途中のセーブが読めませんでした' });
+      return json({ ok: true, meta: cp, stateText: text });
+    }
+    if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
+    const body = safeJsonParse(await req.text());
+    if (
+      !isObj(body) || !Number.isInteger(body.rev) || (body.rev as number) < 1 || !Number.isInteger(body.baseVersion) ||
+      typeof body.token !== 'string' || typeof body.sum !== 'string' || typeof body.stateText !== 'string'
+    ) {
+      return json({ error: 'bad_request', message: '形式が不正です' }, 400);
+    }
+    const stateText = body.stateText;
+    // 送るあいだに壊れていないか（端末が計算したチェックサムと同じか）
+    if (checksum(stateText) !== body.sum) return json({ error: 'corrupt', message: '送るあいだに中身が変わりました。もう一度保存してください' }, 400);
+    const state = safeJsonParse(stateText);
+    if (!isObj(state) || validateState(state).length > 0) return json({ error: 'bad_state', message: '状態の形が不正です' }, 400);
+    const req2 = { rev: body.rev as number, baseVersion: body.baseVersion as number, token: body.token };
+    const bad = checkpointProblem(c, req2, state as unknown as GameState);
+    if (bad || !c) return json({ error: bad?.code ?? 'not_member', message: bad?.reason ?? '参加していません' }, 409);
+    const gs = state as unknown as GameState;
+    // 今の目印が指していない方の場所に書く
+    const cur = c.checkpoint;
+    const slot = cur && (cur.slot === 0 || cur.slot === 1) ? 1 - cur.slot : 0;
+    const meta: CheckpointMeta = { ...req2, savedAt: now, day: gs.day, phase: gs.phase, sum: body.sum, length: stateText.length, slot };
+    // 中身を（今の目印が指していない方の場所に）書き終えてから、目印を変える。
+    // 間で止まっても、目印は前の場所の正しいセーブを指したまま
+    this.ctx.storage.transactionSync(() => this.writeBlob(`cp:${c.id}:${slot}`, stateText));
+    c.checkpoint = meta;
+    this.save();
+    return json({ ok: true, rev: meta.rev, savedAt: now });
   }
 
   private init(body: unknown): Response {

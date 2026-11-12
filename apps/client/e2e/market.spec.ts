@@ -1,9 +1,12 @@
 // 共通市場の画面と、端末での営業（docs/MARKET_RANKING_PLAN.md）。
 // サーバーを偽物に差し替え、core の市場の規則（createMarket・marketView・startDay・commitDay・runSync）で答える。
-// 端末で1日を営業して「翌日の仕込みへ」で送ると、サーバーの確かめ方（verify）を通って受け取られることまで確かめる。
+// 端末で1日を営業すると、営業の終わり（閉店して精算したとき）にその日を送り、サーバーの確かめ方（verify）を通って受け取られることまで確かめる（じろ7 5）。
+// 営業の途中のセーブ（じろ7 4）も、core の決まり（checkpointProblem・validCheckpoint）で答える。
 import { expect, test, type Page } from './fixtures';
 import {
   addDays,
+  checkpointProblem,
+  checksum,
   commitDay,
   createMarket,
   updateMarketSettings,
@@ -23,6 +26,7 @@ import {
   runSync,
   startDay,
   syncPending,
+  validCheckpoint,
   type Action,
   type GameState,
   type MarketState,
@@ -69,7 +73,12 @@ function mockMarket(page: Page) {
   const start = Date.now();
   const cids = new Set<string>();
   const acts: Action[] = [];
-  const commits: { ok: boolean; flags?: string[]; reject?: string[] }[] = [];
+  const commits: { ok: boolean; flags?: string[]; reject?: string[]; duplicate?: boolean }[] = [];
+  /** 途中のセーブ（会社の id → 中身）と、受け取った版 */
+  const cpTexts = new Map<string, string>();
+  const checkpoints: number[] = [];
+  /** 通信が切れたときの代わり（true の間、送信を届かなくする） */
+  const net = { offline: false };
   let skew = 0;
   const now = () => Date.now() + skew;
   return {
@@ -78,6 +87,8 @@ function mockMarket(page: Page) {
     },
     acts,
     commits,
+    checkpoints,
+    net,
     /** サーバーの時計を、次の JST の0時の31分後（営業中の日を待つ30分のあと）に進めて同期する（アラームの代わり） */
     midnight() {
       const t = nextJstMidnight(now()) + 31 * 60_000;
@@ -133,11 +144,29 @@ function mockMarket(page: Page) {
           const r = startDay(market!, 'u1', now(), b.token, b.baseVersion);
           return r.ok ? send({ ok: true, ticket: r.ticket }) : send({ error: r.reason, code: r.code }, 409);
         }
+        if (p === '/api/v1/market/mk1/day/commit' && net.offline) return route.abort('internetdisconnected');
         if (p === '/api/v1/market/mk1/day/commit') {
           const b = JSON.parse(req.postData() ?? '{}') as { token: string; state: GameState };
           const r = commitDay(market!, 'u1', now(), b.token, b.state);
           commits.push(r);
           return send({ ...r, companyId: playerCompany(market!, 'u1')?.id ?? null });
+        }
+        if (p === '/api/v1/market/mk1/checkpoint') {
+          const c = playerCompany(market!, 'u1');
+          if (req.method() === 'GET') {
+            const cp = c ? validCheckpoint(c) : null;
+            if (!c || !cp) return send({ ok: false, code: 'none' });
+            return send({ ok: true, meta: cp, stateText: cpTexts.get(c.id) });
+          }
+          const b = JSON.parse(req.postData() ?? '{}') as { rev: number; baseVersion: number; token: string; sum: string; stateText: string };
+          if (checksum(b.stateText) !== b.sum) return send({ error: 'corrupt', message: '中身が変わりました' }, 400);
+          const st = JSON.parse(b.stateText) as GameState;
+          const bad = checkpointProblem(c ?? null, b, st);
+          if (bad || !c) return send({ error: bad?.code ?? 'not_member', message: bad?.reason ?? '' }, 409);
+          c.checkpoint = { rev: b.rev, baseVersion: b.baseVersion, token: b.token, savedAt: now(), day: st.day, phase: st.phase, sum: b.sum, length: b.stateText.length, slot: 0 };
+          cpTexts.set(c.id, b.stateText);
+          checkpoints.push(b.rev);
+          return send({ ok: true, rev: b.rev, savedAt: now() });
         }
         if (p === '/api/v1/rankings') {
           const board = (url.searchParams.get('board') ?? 'community') as RankBoard;
@@ -291,8 +320,7 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
     return h.state.phase;
   });
   expect(phase).toBe('closed');
-  // 翌日へ → その日をサーバーへ送る（確かめて受け取られる）
-  await page.getByRole('button', { name: '翌日の仕込みへ →' }).click();
+  // 営業の終わり（閉店して精算したとき）に、その日の結果を確定して送る（確かめて受け取られる。じろ7 5）。「翌日の仕込みへ」を押す前に届く
   await expect.poll(() => mock.commits.length).toBe(1);
   expect(mock.commits[0]!.reject ?? []).toEqual([]);
   expect(mock.commits[0]!.ok).toBe(true);
@@ -300,17 +328,52 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   const me = () => playerCompany(mock.market!, 'u1')!;
   expect(me().progress.lastProcessedGameDate).toBe(1);
   expect(me().progress.manualProgressDays).toBe(1);
-  // 送ったあと、2日目の条件をもらって続けられる
+  expect(me().state.phase).toBe('closed');
+  expect(me().state.finalizedDay).toBe(1);
+  await expect(page.locator('[data-send-status]')).toHaveAttribute('data-send-status', 'done');
+  await expect(page.locator('[data-send-status]')).toContainText('確定済み');
+  await shot(page, '61a-market-sent');
+  // 送ったあと、2日目の条件をもらう。「翌日の仕込みへ」で端末の2日目へ（もう一度は送らない）
   await expect.poll(() => me().openDay?.gameDate ?? null).toBe(2);
+  await page.getByRole('button', { name: '翌日の仕込みへ →' }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.host.state.day)).toBe(2);
+  expect(mock.commits).toHaveLength(1);
   await shot(page, '61-market-play');
+  // 営業の途中のセーブ（じろ7 4）: 経営メニューの「☁ クラウドに保存」でサーバーへ（次の日へ進んだときにも自動で保存する）
+  await expect.poll(() => mock.checkpoints.length).toBeGreaterThan(0);
+  const savedBefore = mock.checkpoints.length;
+  await page.evaluate(() => {
+    const h = (window as unknown as { __jiro: Jiro }).__jiro.host;
+    h.state.money += 0; // 状態の版を進めるための操作の代わりに、仕込みの時間を少し進める
+    h.tick(0.5);
+  });
+  await page.locator('.chip.menu').click();
+  await page.locator('.manage .tab[data-tab="system"]').click();
+  await page.locator('[data-market-save] button', { hasText: '☁ クラウドに保存' }).click();
+  await expect.poll(() => mock.checkpoints.length).toBeGreaterThan(savedBefore);
+  await expect(page.locator('[data-cloud-status]')).toHaveAttribute('data-cloud-status', 'saved');
+  await page.getByRole('button', { name: /閉じる/ }).first().click();
   // 営業中の経営メニューの「会社」に、企業間の貸し借り（オーナーの指示 2026-11-11）
   await page.locator('.chip.menu').click();
   await page.getByRole('button', { name: '会社', exact: true }).click();
   await expect(page.locator('.manage-body [data-market-credit=""]')).toContainText('貸し出しを申し込む');
   await page.getByRole('button', { name: /閉じる/ }).first().click();
 
-  // 市場の画面へ戻る（2日目は送られていない → やり直しになると知らせる）
+  // 市場の画面へ戻る（途中の状態を保存してから戻る）。もう一度始めると、途中のセーブ（2日目の仕込み）から続ける
+  const marker = await page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.host.state.t);
+  void page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.returnToTitle());
+  await page.getByRole('button', { name: '市場の画面に戻る' }).click();
+  await expect(screen.locator('[data-market-play]')).toBeVisible();
+  await screen.locator('[data-market-play]').click();
+  await expect(page.locator('.hud-top')).toBeVisible();
+  await expect(page.locator('.toast').filter({ hasText: '途中のセーブ' })).toBeVisible();
+  const resumed = await page.evaluate(() => {
+    const s = (window as unknown as { __jiro: Jiro }).__jiro.host.state;
+    return { day: s.day, phase: s.phase, t: s.t };
+  });
+  expect(resumed.day).toBe(2);
+  expect(resumed.phase).toBe('prep');
+  expect(resumed.t).toBeGreaterThanOrEqual(marker - 0.01);
   void page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.returnToTitle());
   await page.getByRole('button', { name: '市場の画面に戻る' }).click();
   await expect(screen.locator('[data-leader-day]')).toHaveText('1日目まで');
@@ -352,6 +415,55 @@ test('共通市場: 市場を作り、端末で1日を営業して送ると受�
   await shot(page, '62-ranking');
   await rk.locator('[data-ranking-back]').click();
   await expect(screen.locator('[data-market-day]')).toHaveText('1日目まで');
+});
+
+test('共通市場: 営業の終わりに送れないときは送信待ちとして端末に残し、通信が戻ると同じ日を一度だけ送る（じろ7 5-4・5-5）', async ({ page }) => {
+  test.setTimeout(120_000);
+  const mock = mockMarket(page);
+  await mock.install();
+  await page.goto('/');
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  const ok = page.getByRole('button', { name: 'わかった' });
+  if (await ok.isVisible()) await ok.click();
+  await page.evaluate((u) => localStorage.setItem('jiro.serverUrl', u), SERVER);
+  await page.getByRole('button', { name: /オンライン市場/ }).click();
+  await page.locator('.market-lobby input[placeholder="会社（店）の名前"]').fill('圏外亭');
+  await page.locator('.market-lobby [data-create-market]').click();
+  const screen = page.locator('.screen.market');
+  await screen.locator('[data-market-play]').click();
+  await expect(page.locator('.hud-top')).toBeVisible();
+  // 通信が切れた状態で1日を営業して閉店する
+  mock.net.offline = true;
+  await page.evaluate(async () => {
+    const h = (window as unknown as { __jiro: Jiro }).__jiro.host;
+    await h.act({ type: 'openShop' });
+    h.speed = 3;
+    for (let i = 0; i < 40_000 && h.state.phase !== 'closed'; i++) h.tick(0.25);
+  });
+  const status = page.locator('[data-send-status]');
+  await expect(status).toHaveAttribute('data-send-status', 'pending');
+  await expect(status).toContainText('送信待ち');
+  // 端末に残っている（画面を閉じても消えない）
+  expect(await page.evaluate(() => !!localStorage.getItem('jiro.market.pending.mk1'))).toBe(true);
+  expect(mock.commits).toHaveLength(0);
+  // 送れるまで次の日へは進めない
+  await page.getByRole('button', { name: '翌日の仕込みへ →' }).click();
+  await expect(page.locator('.toast').filter({ hasText: '送信待ち' }).first()).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.host.state.day)).toBe(1);
+  await shot(page, '63-market-pending');
+  // 通信が戻る → 「もう一度送る」で送る（同じ日の ID なので、何度送っても一度だけ数える）
+  mock.net.offline = false;
+  await status.locator('[data-send-retry]').click();
+  await expect(status).toHaveAttribute('data-send-status', 'done');
+  expect(mock.commits).toHaveLength(1);
+  expect(mock.commits[0]!.ok).toBe(true);
+  expect(await page.evaluate(() => localStorage.getItem('jiro.market.pending.mk1'))).toBeNull();
+  const me = playerCompany(mock.market!, 'u1')!;
+  expect(me.progress.manualProgressDays).toBe(1);
+  await page.getByRole('button', { name: '翌日の仕込みへ →' }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __jiro: Jiro }).__jiro.host.state.day)).toBe(2);
+  expect(playerCompany(mock.market!, 'u1')!.progress.manualProgressDays).toBe(1);
 });
 
 test('共通市場: 0時を過ぎて計算が済んでいない間は、新しい日を始められない', async ({ page }) => {

@@ -2779,18 +2779,28 @@ export class ManageMenu {
         'section',
         { class: 'card wide' },
         h('h4', null, 'セーブ'),
-        this.host.mode === 'local'
-          ? h('p', { class: 'note' }, '閉店後に自動で保存されます。いつでも手動で保存できます。')
-          : h('p', { class: 'note' }, '共同経営の保存はホストが行い、ホストのセーブスロットに記録されます。参加者のセーブは変更されません。'),
-        h('button', { class: 'btn primary', disabled: !this.host.isHost, onclick: () => this.cb.onSave() }, '今すぐ保存'),
-        this.host.mode === 'local'
+        // 共通市場の企業（端末で営業中）: 営業の途中の状態をサーバーに保存する（じろ7 4）
+        'session' in this.host
           ? h(
               'div',
-              null,
-              h('p', { class: 'note' }, 'クラウドセーブ（任意）: サーバーを設定していれば、別の端末と同じ進行を共有できます。競合したときは確認してから上書きします。'),
-              h('div', { class: 'row wrap' }, h('button', { class: 'btn', onclick: () => this.cb.onCloudSave() }, '☁ クラウドに保存'), h('button', { class: 'btn ghost', onclick: () => this.cb.onCloudLoad() }, '☁ クラウドから読み込む')),
+              { 'data-market-save': '' },
+              h('p', { class: 'note' }, '共通市場の企業: 営業の途中の状態をサーバーに保存します（2分ごと・開店・次の日へ・画面を閉じるときにも自動で保存）。次に始めるときは、最後に保存した続きから営業できます。その日の営業データは、営業が終わったときに市場へ送ります。'),
+              h('div', { class: 'row wrap' }, h('button', { class: 'btn primary', onclick: () => this.cb.onCloudSave() }, '☁ クラウドに保存')),
             )
-          : null,
+          : [
+              this.host.mode === 'local'
+                ? h('p', { class: 'note' }, '閉店後に自動で保存されます。いつでも手動で保存できます。')
+                : h('p', { class: 'note' }, '共同経営の保存はホストが行い、ホストのセーブスロットに記録されます。参加者のセーブは変更されません。'),
+              h('button', { class: 'btn primary', disabled: !this.host.isHost, onclick: () => this.cb.onSave() }, '今すぐ保存'),
+              this.host.mode === 'local'
+                ? h(
+                    'div',
+                    null,
+                    h('p', { class: 'note' }, 'クラウドセーブ（任意）: サーバーを設定していれば、別の端末と同じ進行を共有できます。競合したときは確認してから上書きします。'),
+                    h('div', { class: 'row wrap' }, h('button', { class: 'btn', onclick: () => this.cb.onCloudSave() }, '☁ クラウドに保存'), h('button', { class: 'btn ghost', onclick: () => this.cb.onCloudLoad() }, '☁ クラウドから読み込む')),
+                  )
+                : null,
+            ],
       ),
       h(
         'section',

@@ -13,7 +13,7 @@ import { activeStore, recordCompanyDay } from './company';
 import { storeRentMult } from './location';
 import { payAds } from './ads';
 import { runAbsentStores } from './stores';
-import { cash, emptyDayStats, finalProfit, foldIntoLastReport, netSales, operatingProfit, recordPL, totalDebt } from './economy';
+import { cash, emptyDayStats, finalProfit, foldIntoLastReport, netSales, operatingProfit, recordPL, STAT_MONEY, totalDebt } from './economy';
 import { finishRepair, resaleValue, runMaintenance, upkeepTotal, useEquipment } from './equipment';
 import { dropHand } from './interact';
 import { ensureStartingUnlocks, morningRollCall, refreshCandidates, releaseTemps, wagesDue } from './employees';
@@ -440,12 +440,34 @@ export function nextDay(s: GameState, ctx: SimCtx): { ok: boolean; reason?: stri
       return { ok: false, reason: `期限を過ぎた未払金 ¥${again.overdue.toLocaleString('ja-JP')} があります。設備の売却・融資・解雇で支払ってください` };
     }
   }
-  // 閉店のあとに動いたお金（夜の自動発注・閉店後の採用や設備など）をその日の日報に足す
+  // その日の結果を確定する（営業の終わりに確定していれば、もうしない。じろ7 5）
+  if (s.finalizedDay !== s.day) closeOutDay(s, ctx);
+  return startNextDay(s, ctx);
+}
+
+/**
+ * その日の結果を確定する: 閉店のあとに動いたお金（夜の自動発注・閉店後の採用や設備など）をその日の日報に足し、
+ * プレイヤーがいない店のその日（店長の営業）と、会社の日報（店舗の合計）を作る
+ */
+function closeOutDay(s: GameState, ctx: SimCtx): void {
   foldIntoLastReport(s);
-  // プレイヤーがいない店のその日（店長の営業）と、会社の日報（店舗の合計）
   runAbsentStores(s, ctx, s.day);
   recordCompanyDay(s, s.day);
-  return startNextDay(s, ctx);
+}
+
+/**
+ * 営業の終わり（精算したあと）に、その日の結果を確定する（じろ7 5「1日の営業データは、営業が終了した段階で送信・確定する」）。
+ * 共通市場では、このあとすぐにその日をサーバーへ送る。何度呼んでも同じ（2回目からは何もしない）。
+ * 確定のあとの閉店後の事務作業で動いたお金は、その日の日報を書き換えずに、次の日の日報に入れる（startNextDay）
+ */
+export function finalizeDay(s: GameState, ctx: SimCtx): { ok: boolean; reason?: string } {
+  if (s.phase !== 'closed') return { ok: false, reason: '閉店後にだけ、その日の結果を確定できます' };
+  if (s.finalizedDay === s.day) return { ok: true };
+  closeOutDay(s, ctx);
+  s.finalizedDay = s.day;
+  s.finalizeBase = Object.fromEntries(STAT_MONEY.map((k) => [k, (s.today[k] as number | undefined) ?? 0]));
+  s.cashAtFinalize = s.money;
+  return { ok: true };
 }
 
 /**
@@ -453,11 +475,25 @@ export function nextDay(s: GameState, ctx: SimCtx): { ok: boolean; reason?: stri
  * nextDay と、共通市場の自動営業（market.ts）の両方から使う（手動と自動で同じ朝の規則）。takeSnapshot: 爆発事故のリセット用の控えを作るか
  */
 export function startNextDay(s: GameState, ctx: SimCtx, takeSnapshot = true): { ok: boolean; reason?: string } {
+  // 営業の終わりに結果を確定した日なら、確定のあとに動いたお金を次の日の日報に回す（その日の日報は書き換えない。じろ7 5）
+  let carry: Record<string, number> | null = null;
+  let cashStart = s.money;
+  if (s.finalizedDay === s.day && s.finalizeBase) {
+    carry = {};
+    for (const k of STAT_MONEY) {
+      const d = ((s.today[k] as number | undefined) ?? 0) - (s.finalizeBase[k] ?? 0);
+      if (d !== 0) carry[k] = d;
+    }
+    cashStart = s.cashAtFinalize ?? s.money;
+  }
+  delete s.finalizeBase;
+  delete s.cashAtFinalize;
   s.day += 1;
   s.t = 0;
   s.openT = 0;
   s.today = emptyDayStats();
-  s.cashAtDayStart = s.money;
+  if (carry) for (const [k, v] of Object.entries(carry)) (s.today as unknown as Record<string, number>)[k] = v;
+  s.cashAtDayStart = cashStart;
   s.regularsVisitedToday = [];
   // 今日の営業時間（店の設定。変えた設定は次の営業日から。じろ1 5.1）
   s.todayHours = JSON.parse(JSON.stringify(storeHours(s))) as StoreHours;

@@ -104,6 +104,15 @@ export class App {
   private marketPlay: { session: MarketSession; api: Api; auth: Auth; marketId: string } | null = null;
   /** サーバーへ1日を送っている間（時間を止め、操作できないようにする） */
   private marketBusy: HTMLElement | null = null;
+  /** 共通市場: 営業の結果を送っている最中・送信の状態の表示（結果の画面の中）・途中のセーブ（じろ7 4・5） */
+  private sending = false;
+  private sendStatusEl: HTMLElement | null = null;
+  private sendRetry: number | null = null;
+  private cloudTimer: number | null = null;
+  private cloudSaving = false;
+  private lastCloudVersion = -1;
+  private cloudStatusEl: HTMLElement | null = null;
+  private cloudHide: number | null = null;
   private localPos = { x: 0, z: 0 };
   private moveSendAcc = 0;
   private unsub: (() => void)[] = [];
@@ -155,8 +164,13 @@ export class App {
       this.world?.resize();
     });
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') this.autosave('hidden');
+      if (document.visibilityState !== 'hidden') return;
+      this.autosave('hidden');
+      // 共通市場: 画面を閉じる・切り替えるときに途中のセーブ（じろ7 4）
+      void this.cloudSave('hidden');
     });
+    // 通信が戻ったら、送信待ちの日を送る（じろ7 5-5）
+    window.addEventListener('online', () => void this.retryPendingSend());
     window.addEventListener('pagehide', () => this.autosave('hidden'));
     // iOS の音声制限: 最初のタッチで有効化
     const unlock = () => this.sfx.unlock();
@@ -346,7 +360,12 @@ export class App {
     }
     if (!r.ok) {
       const waiting = r.code === 'sync_pending' || r.code === 'syncing';
-      await alertDialog(this.uiLayer, waiting ? '0時の計算中です' : '営業を始められません', waiting ? '日付が変わったので、全社の日付をそろえる計算をしています。終わるまで新しい日は始められません。' : r.message, 'わかった');
+      await alertDialog(
+        this.uiLayer,
+        waiting ? '0時の計算中です' : r.code === 'pending' ? '送信待ちの日があります' : '営業を始められません',
+        waiting ? '日付が変わったので、全社の日付をそろえる計算をしています。終わるまで新しい日は始められません。' : r.message,
+        'わかった',
+      );
       return;
     }
     this.slot = 0;
@@ -358,7 +377,179 @@ export class App {
     }
     this.startGame(new MarketHost(r.state, me?.id ?? 'p1', session));
     this.marketPlay = { session, api, auth, marketId };
-    toast(this.uiLayer, `${r.ticket.gameDate}日目の営業（日の終わりにサーバーへ送ります）`, 'info', 3000);
+    // 送信待ちだった日を送った結果
+    if (r.sentPending && !r.sentPending.ok) toast(this.uiLayer, `送信待ちだった日は受け取られませんでした（${r.sentPending.reason ?? ''}）。サーバーの状態から続けます`, 'warn', 6000);
+    else if (r.sentPending?.gameDate) toast(this.uiLayer, `送信待ちだった${r.sentPending.gameDate}日目を送りました`, 'good', 3000);
+    if (r.resumed) {
+      const at = new Date(r.resumed.savedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+      toast(this.uiLayer, `途中のセーブ（${at}に保存・${r.resumed.day}日目）から続けます`, 'good', 4000);
+    } else if (r.state.phase === 'closed') toast(this.uiLayer, `${r.state.day}日目の営業データは確定済みです。閉店後の作業のあと、次の日へ進めます`, 'info', 4000);
+    else toast(this.uiLayer, `${r.ticket.gameDate}日目の営業（営業が終わったらサーバーへ送ります）`, 'info', 3000);
+    // 途中のセーブ: 2分ごと（変わっていれば）。開店・次の日へ・画面を閉じるとき・手動でも保存する（じろ7 4-3）
+    this.lastCloudVersion = r.resumed ? r.state.version : -1;
+    if (this.cloudTimer !== null) clearInterval(this.cloudTimer);
+    this.cloudTimer = window.setInterval(() => void this.cloudSave('auto'), 120_000);
+  }
+
+  /** 途中のセーブ（共通市場。じろ7 4）。保存がサーバーで確かめられるまで「保存しました」と出さない */
+  private async cloudSave(kind: 'auto' | 'event' | 'manual' | 'hidden'): Promise<boolean> {
+    const mp = this.marketPlay;
+    const host = this.host;
+    if (!mp || !host || this.cloudSaving) return false;
+    if (host.state.phase === 'bankrupt') return false;
+    if ((kind === 'auto' || kind === 'hidden') && host.state.version === this.lastCloudVersion) return true;
+    if (!mp.session.ticket) {
+      if (kind === 'manual') toast(this.uiLayer, 'その日の営業データを送ったあと、次の日を始めると保存できます', 'info', 4000);
+      return false;
+    }
+    this.cloudSaving = true;
+    this.setCloudStatus('saving', '☁ 保存中…');
+    const v = host.state.version;
+    try {
+      const r = await mp.session.saveCheckpoint(host.state);
+      if (this.host !== host) return false;
+      if (r.ok) {
+        this.lastCloudVersion = v;
+        const at = new Date(r.savedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+        this.setCloudStatus('saved', `☁ 保存しました（${at}）`);
+        if (kind === 'manual') toast(this.uiLayer, `途中の状態をサーバーに保存しました（${at}）`, 'good', 2500);
+        return true;
+      }
+      if (r.code === 'network') this.setCloudStatus('error', '☁ 保存できません（通信を確かめてください。2分後にもう一度保存します）');
+      else this.setCloudStatus('error', `☁ 保存できません: ${r.message}`);
+      return false;
+    } finally {
+      this.cloudSaving = false;
+    }
+  }
+
+  /** 途中のセーブの状態の表示（画面の左下。保存しましたは少しで消える） */
+  private setCloudStatus(kind: 'saving' | 'saved' | 'error', text: string): void {
+    if (!this.cloudStatusEl) {
+      this.cloudStatusEl = h('div', { class: 'cloud-status', 'data-cloud-status': '', role: 'status' });
+      this.uiLayer.appendChild(this.cloudStatusEl);
+    }
+    const el = this.cloudStatusEl;
+    el.className = `cloud-status ${kind}`;
+    el.dataset.cloudStatus = kind;
+    el.textContent = text;
+    el.hidden = false;
+    if (this.cloudHide !== null) clearTimeout(this.cloudHide);
+    this.cloudHide = kind === 'saved' ? window.setTimeout(() => (el.hidden = true), 4000) : null;
+  }
+
+  /** 営業の結果の送信の状態（結果の画面の上。じろ7 14-4: 集計中・送信中・サーバー確認中・確定済み・送信待ち） */
+  private setSendStatus(kind: 'aggregate' | 'sending' | 'done' | 'pending' | 'error', text: string, retry = false): void {
+    const el = this.sendStatusEl;
+    if (!el) {
+      if (kind === 'pending' || kind === 'error') toast(this.uiLayer, text, 'warn', 5000);
+      return;
+    }
+    el.className = `send-status ${kind}`;
+    el.dataset.sendStatus = kind;
+    replace(el, h('span', null, text), retry ? h('button', { class: 'btn mini', 'data-send-retry': '', onclick: () => void this.finalizeAndSend() }, 'もう一度送る') : null);
+  }
+
+  /** 送信待ちの日があれば送る（通信が戻ったとき・一定時間ごと） */
+  private async retryPendingSend(): Promise<void> {
+    const mp = this.marketPlay;
+    const host = this.host;
+    if (!mp || !host || this.sending || !mp.session.hasPending()) return;
+    if (host.state.phase === 'closed') await this.finalizeAndSend();
+  }
+
+  /**
+   * 営業の終わり（閉店して精算したあと）に、その日の結果を確定して市場へ送る（じろ7 5-2）。
+   * 集計（その日の結果を確定）→ 送る前に端末へ送信待ちとして残す → 送信 → サーバーが確かめて受け取る → 確定済み。
+   * 送れなければ送信待ちのまま（通信が戻ったら・30秒ごとに送り直す）。受け取られたら次の日の条件をもらう。確定済みなら true
+   */
+  private async finalizeAndSend(): Promise<boolean> {
+    const mp = this.marketPlay;
+    const host = this.host;
+    if (!mp || !host || host.state.phase !== 'closed') return false;
+    const s = host.state;
+    if (mp.session.committedDay === s.day && !mp.session.hasPending()) {
+      this.setSendStatus('done', `確定済み: ${s.day}日目の営業データは市場に送ってあります`);
+      return true;
+    }
+    if (this.sending) return false;
+    this.sending = true;
+    try {
+      this.setSendStatus('aggregate', `集計中…（${s.day}日目の営業の結果を確定しています）`);
+      if (s.finalizedDay !== s.day) {
+        const f = await host.act({ type: 'finalizeDay' });
+        if (!f.ok) {
+          this.setSendStatus('error', f.reason ?? 'その日の結果を確定できませんでした');
+          return false;
+        }
+      }
+      this.setSendStatus('sending', '送信中…（サーバーが確かめています）');
+      const pend = mp.session.pending();
+      const r = pend ? await mp.session.flushPending() : await mp.session.commit(host.state);
+      if (this.host !== host) return false;
+      if (!r.ok && r.code === 'network') {
+        this.setSendStatus('pending', `送信待ち: ${s.day}日目の営業データを送れていません（${r.reason}）。この端末に残してあり、通信が戻ると自動で送ります`, true);
+        if (this.sendRetry === null) this.sendRetry = window.setInterval(() => void this.retryPendingSend(), 30_000);
+        return false;
+      }
+      if (this.sendRetry !== null) clearInterval(this.sendRetry);
+      this.sendRetry = null;
+      if (!r.ok) {
+        const reasons = 'reject' in r && r.reject ? r.reject.slice(0, 3).join('・') : '';
+        this.setSendStatus('error', `受け取られませんでした: ${r.reason ?? ''}`);
+        await alertDialog(this.uiLayer, 'この日は受け取られませんでした', `${r.reason ?? ''}${reasons ? `（${reasons}）` : ''}`, 'サーバーの状態からやり直す');
+        await this.startMarketPlay(mp.api, mp.auth, mp.marketId);
+        return false;
+      }
+      this.setSendStatus('done', `確定済み: ${r.gameDate ?? s.day}日目の営業データを市場に送りました${r.duplicate ? '（送信済みでした）' : ''}`);
+      if (r.flags && r.flags.length > 0) toast(this.uiLayer, 'この日は上限を超える値があったため、順位には数えられません', 'warn', 6000);
+      // 次の日の条件をもらう（0時の計算中なら、開店するときにもう一度もらう）
+      const t = await mp.session.startTicket();
+      if (this.host !== host) return true;
+      if (!t.ok && t.code === 'stale') {
+        await this.startMarketPlay(mp.api, mp.auth, mp.marketId);
+        return false;
+      }
+      if (!t.ok && (t.code === 'sync_pending' || t.code === 'syncing')) toast(this.uiLayer, '0時の計算中です。次の日は、計算が終わってから開店できます', 'info', 5000);
+      return true;
+    } finally {
+      this.sending = false;
+    }
+  }
+
+  /** 共通市場の「翌日の仕込みへ」: 営業の結果を確定・送信してから、端末で次の日の朝へ進む（送るのは営業の終わり。じろ7 5） */
+  private async marketNextDay(): Promise<void> {
+    const host = this.host;
+    if (!host) return;
+    if (!(await this.finalizeAndSend())) {
+      if (this.marketPlay?.session.hasPending()) toast(this.uiLayer, '送信待ちの日を送れるまで、次の日には進めません', 'warn', 4000);
+      return;
+    }
+    const res = await host.act({ type: 'nextDay' });
+    if (res.ok) {
+      this.afterMarketNextDay();
+      return;
+    }
+    // 破産した日はサーバーへ送ってから市場の画面へ
+    if ((host.state.phase as string) === 'bankrupt') {
+      await this.commitMarketDay();
+      return;
+    }
+    if (host.state.phase === 'closed' && overdueShortfall(host.state)) {
+      await this.resolveOverdue();
+      return;
+    }
+    toast(this.uiLayer, res.reason ?? '進めません', 'danger', 5000);
+    this.openManage('dash');
+  }
+
+  /** 端末で次の日の朝へ進んだあと（共通市場）: その日の条件を入れ、途中のセーブ */
+  private afterMarketNextDay(): void {
+    const mp = this.marketPlay;
+    const host = this.host;
+    if (!mp || !host) return;
+    if (mp.session.ticket) prepareState(host.state, mp.session.ticket);
+    void this.cloudSave('event');
   }
 
   /** ランキングの画面（コミュニティ・全体。閉じると市場の画面へ） */
@@ -494,7 +685,7 @@ export class App {
       onSave: () => this.saveNow(true),
       onCloudSave: () => {
         if (this.marketPlay) {
-          this.saveNow(true);
+          void this.cloudSave('manual');
           return;
         }
         this.saveNow(false);
@@ -502,7 +693,7 @@ export class App {
       },
       onCloudLoad: async () => {
         if (this.marketPlay) {
-          this.saveNow(true);
+          toast(this.uiLayer, '市場の企業は、始めるときに途中のセーブから自動で続けます', 'info', 4000);
           return;
         }
         const replaced = await cloudDownload(this.uiLayer, this.store, this.slot, this.settings.playerName);
@@ -578,6 +769,13 @@ export class App {
     cancelAnimationFrame(this.raf);
     this.marketPlay = null;
     this.setMarketBusy(null);
+    if (this.cloudTimer !== null) clearInterval(this.cloudTimer);
+    if (this.sendRetry !== null) clearInterval(this.sendRetry);
+    this.cloudTimer = this.sendRetry = null;
+    this.cloudStatusEl?.remove();
+    this.cloudStatusEl = null;
+    this.sendStatusEl = null;
+    this.lastCloudVersion = -1;
     for (const u of this.unsub) u();
     this.unsub = [];
     this.manage?.close();
@@ -629,18 +827,29 @@ export class App {
       return;
     }
     if (this.marketPlay) {
-      const closed = host.state.phase === 'closed';
+      const mp = this.marketPlay;
+      const committed = host.state.phase === 'closed' && mp.session.committedDay === host.state.day && !mp.session.hasPending();
       const ok = await confirmDialog(
         this.uiLayer,
         '市場の画面に戻りますか？',
-        closed
-          ? '今日の営業は、まだサーバーに送られていません（「次の日へ」で送ります）。戻ると、この日はサーバーの前の日の状態から、もう一度やり直しになります。'
-          : '今日の営業は、まだサーバーに送られていません。戻ると、この日はサーバーの前の日の状態から、もう一度やり直しになります。',
+        committed
+          ? '今日の営業データは市場に送ってあります。閉店後の作業の続きは、サーバーに途中のセーブとして保存してから戻ります。'
+          : mp.session.hasPending()
+            ? '送信待ちの日があります（この端末に残してあり、次に始めるときに送ります）。'
+            : '今の営業の途中の状態をサーバーに保存してから戻ります。次に始めるときは、この続きから営業できます。',
         '市場の画面に戻る',
-        true,
+        false,
         'キャンセル',
       );
-      if (ok && this.host === host) this.backToMarket();
+      if (!ok || this.host !== host) return;
+      // 途中のセーブ（じろ7 4「ゲーム終了・離脱時」）。保存できなければ、それでも戻るかを聞く
+      const saved = mp.session.ticket ? await this.cloudSave('manual') : true;
+      if (this.host !== host) return;
+      if (!saved) {
+        const again = await confirmDialog(this.uiLayer, '保存できませんでした', '途中の状態をサーバーに保存できませんでした。戻ると、この日はサーバーの前の日の状態（または前回の途中のセーブ）からやり直しになります。', 'それでも戻る', true, 'キャンセル');
+        if (!again || this.host !== host) return;
+      }
+      this.backToMarket();
       return;
     }
     const remote = host.mode === 'remote';
@@ -962,20 +1171,19 @@ export class App {
       this.show(null);
       return;
     }
-    this.show(
-      resultScreen(s, r, host.isHost, {
+    const screenEl = resultScreen(s, r, host.isHost, {
         onNextDay: async () => {
           // 練習の日（営業0日目）の結果は残さず、1日目を新しく始める
           if (s.tutorial?.kind === 'basics') {
             this.finishTutorial();
             return;
           }
-          const res = await host.act({ type: 'nextDay' });
-          // 共通市場: 次の日へ進めたら（破産も）、その日をサーバーへ送る
-          if (this.marketPlay && (res.ok || host.state.phase === 'bankrupt')) {
-            await this.commitMarketDay();
+          // 共通市場: 営業の結果は営業の終わりに送る。送れていれば端末で次の日へ（じろ7 5）
+          if (this.marketPlay) {
+            await this.marketNextDay();
             return;
           }
+          const res = await host.act({ type: 'nextDay' });
           if (!res.ok) {
             // 期限を過ぎた未払金を払えずに進めないときは、どうするかを選んでもらう（オーナーの指示 2026-11-12）
             if (host.state.phase === 'closed' && overdueShortfall(host.state)) {
@@ -996,8 +1204,17 @@ export class App {
           this.saveNow(true);
           this.showTitle();
         },
-      }),
-    );
+      });
+    // 共通市場: 営業の結果の送信の状態を結果の画面の上に出し、すぐに送る（じろ7 5・14-4）
+    if (this.marketPlay) {
+      const st = h('div', { class: 'send-status', 'data-send-status': '', role: 'status' });
+      const head = screenEl.querySelector('h2');
+      if (head) head.after(st);
+      else screenEl.prepend(st);
+      this.sendStatusEl = st;
+    } else this.sendStatusEl = null;
+    this.show(screenEl);
+    if (this.marketPlay) void this.finalizeAndSend();
   }
 
   /**
@@ -1024,7 +1241,8 @@ export class App {
       if (f.loanPick > 0) choices.push({ label: `🏦 ${yen(f.loanPick)} を借りて払う`, value: 'loan', kind: 'primary' });
       if (f.sellable > 0) choices.push({ label: '🔧 設備を売る', value: 'equip', kind: 'ghost' });
       if (this.marketPlay) choices.push({ label: '🤝 ほかの会社から借りる', value: 'credit', kind: 'ghost' });
-      choices.push({ label: '💀 破産する', value: 'bankrupt', kind: 'danger' });
+      // 共通市場の企業は、自分で破産を選べない（払えないまま次の日へ進むと、市場の決まりで破産になる）
+      if (!this.marketPlay) choices.push({ label: '💀 破産する', value: 'bankrupt', kind: 'danger' });
       choices.push({ label: 'あとで決める', value: 'later', kind: 'ghost' });
       const v = await choiceDialog(this.uiLayer, '⚠ 支払いの期限が過ぎています', lines.join('\n'), choices);
       if (v === 'loan') {
@@ -1037,7 +1255,8 @@ export class App {
         const res = await host.act({ type: 'nextDay' });
         if (res.ok || (host.state.phase as string) === 'bankrupt') {
           toast(this.uiLayer, `${yen(f.loanPick)} を借りて未払金を払いました`, 'good', 3000);
-          if (this.marketPlay) await this.commitMarketDay();
+          if (this.marketPlay && res.ok) this.afterMarketNextDay();
+          else if (this.marketPlay) await this.commitMarketDay();
           return;
         }
         // まだ足りなければ、もう一度選ぶ
@@ -1102,6 +1321,8 @@ export class App {
     this.sfx.unlock();
     const r = await this.host?.act({ type: 'openShop' });
     if (r && !r.ok) toast(this.uiLayer, r.reason ?? '開店できません', 'warn');
+    // 共通市場: 開店したら途中のセーブ（大事な状態の変わり目。じろ7 4）
+    else if (r?.ok) void this.cloudSave('event');
   }
 
   // ───────────────── チュートリアル ─────────────────
@@ -1224,7 +1445,8 @@ export class App {
     const host = this.host;
     if (!host) return;
     if (this.marketPlay) {
-      if (notify) toast(this.uiLayer, '市場の企業は、1日の終わり（次の日へ）にサーバーへ送られます', 'info');
+      // 共通市場: 営業の途中のセーブをサーバーへ（じろ7 4）
+      void this.cloudSave(notify ? 'manual' : 'event');
       return;
     }
     if (this.slot === 0) {

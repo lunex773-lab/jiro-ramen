@@ -12,7 +12,7 @@ import { dist, newId } from '../util';
 import { cash, recordPL } from './economy';
 import { buyEquipment, isUnlocked, requestRepair, sellEquipment } from './equipment';
 import { fire, hire, hireTemp, setPrepTarget, setPriority, setRole } from './employees';
-import { nextDay, openShop, payArrears, takeLoan, declareBankruptcy, updateFinanceWarnings } from './day';
+import { finalizeDay, nextDay, openShop, payArrears, takeLoan, declareBankruptcy, updateFinanceWarnings } from './day';
 import { cancelWork, dropHand, getActor, interact, type Args } from './interact';
 import { placeOrder, setAutoOrderItem } from './inventory';
 import { autoPlace, expand, placeEquipment, storeEquipment } from './layout';
@@ -62,6 +62,8 @@ export type Action =
   | { type: 'setAutoOrderMode'; mode: 'manual' | 'sales' }
   /** カレンダーで日にちを選んでシフトを決める（once: その日だけ / weekly: 毎週くりかえす / reset: くりかえしに戻す） */
   | { type: 'setDateShift'; employeeId: Id; days: number[]; shift: ShiftDay | null; mode: DateShiftMode; baseRev?: number }
+  /** 営業の終わりに、その日の結果を確定する（共通市場で送る前。じろ7 5） */
+  | { type: 'finalizeDay' }
   /** その日の店長代理を任命する（employeeId が null なら取り消す。じろ7 2-3） */
   | { type: 'appointDeputy'; day: number; employeeId: Id | null }
   /** アルバイトを社員にする */
@@ -311,6 +313,8 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return { ok: true };
     case 'setDateShift':
       return setDateShift(s, ctx, a.employeeId, a.days, a.shift, a.mode, player.name, typeof a.baseRev === 'number' ? a.baseRev : undefined);
+    case 'finalizeDay':
+      return finalizeDay(s, ctx);
     case 'appointDeputy':
       return appointDeputy(s, ctx, a.day, a.employeeId ?? null, player.name);
     case 'promote':

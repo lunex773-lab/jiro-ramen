@@ -7,7 +7,7 @@ import { connectRoom, createSession, joinSession, leaveSession } from './api/ses
 import { rankingsApi, rewardsApi } from './api/ranking';
 import { grantEndedCommunities, grantGlobalRewards } from './rank-store';
 import { jstDateKey } from '@jiro/core';
-import { actMarketApi, commitDayApi, createMarketApi, creditMarketApi, deleteMarketApi, joinMarketApi, listMarketsApi, publicCommunitiesApi, retireCompanyApi, startDayApi, updateMarketSettingsApi, viewMarketApi } from './api/market';
+import { actMarketApi, checkpointApi, commitDayApi, createMarketApi, creditMarketApi, deleteMarketApi, joinMarketApi, listMarketsApi, publicCommunitiesApi, retireCompanyApi, startDayApi, updateMarketSettingsApi, viewMarketApi } from './api/market';
 import { requirePlayer } from './auth';
 import type { Env } from './env';
 import { allowedOrigins, corsHeaders, errorResponse, HttpError, withCors } from './http';
@@ -57,6 +57,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const marketRetire = /^\/api\/v1\/market\/([^/]+)\/retire$/.exec(path);
   const marketSettings = /^\/api\/v1\/market\/([^/]+)\/settings$/.exec(path);
   const marketCredit = /^\/api\/v1\/market\/([^/]+)\/credit$/.exec(path);
+  // 営業の途中のセーブ（じろ7 4）
+  const marketCheckpoint = /^\/api\/v1\/market\/([^/]+)\/checkpoint$/.exec(path);
   const rankingPath = path === '/api/v1/rankings' || path === '/api/v1/rewards';
   const known =
     path === '/api/v1/profile' ||
@@ -73,6 +75,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     marketRetire !== null ||
     marketSettings !== null ||
     marketCredit !== null ||
+    marketCheckpoint !== null ||
     rankingPath;
   if (!known) throw new HttpError(404, 'not_found', 'API が見つかりません');
 
@@ -137,6 +140,11 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   // ランキングと報酬
   if (path === '/api/v1/rankings' && m === 'GET') return rankingsApi(req, env, ctx, player);
   if (path === '/api/v1/rewards' && m === 'GET') return rewardsApi(env, player);
+  if (marketCheckpoint && (m === 'POST' || m === 'GET')) {
+    // 保存はクラウドセーブと同じ回数の上限（数分ごとの自動保存と、手動・画面を閉じるとき）
+    limit(m === 'POST' ? HTTP_LIMITS.save : HTTP_LIMITS.market, player.id);
+    return checkpointApi(req, env, player, decodeURIComponent(marketCheckpoint[1]!));
+  }
   if (marketDay && m === 'POST') {
     limit(HTTP_LIMITS.market, player.id);
     const id = decodeURIComponent(marketDay[1]!);
