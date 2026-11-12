@@ -111,6 +111,8 @@ export class MarketSession {
 export function prepareState(s: GameState, t: DayTicket): void {
   s.marketDemand = { ...t.demand };
   s.tutorial = null;
+  // 市場の会社には従業員のチュートリアルの案内を出さない（案内済みにしておく）
+  s.career.staffTutorialOffered = true;
   // 前の版で作られた状態を今の規則に直す（仕込み担当 → 接客担当など）
   ensureStartingUnlocks(s);
   if (s.phase === 'prep' && !hasPrepSnapshot(s)) takePrepSnapshot(s);

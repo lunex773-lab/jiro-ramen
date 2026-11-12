@@ -1103,7 +1103,8 @@ export class App {
 
   private async offerStaffTutorial(): Promise<void> {
     const host = this.host;
-    if (!host || host.mode !== 'local') return;
+    // オンライン市場の営業では案内しない（オーナーの指示 2026-11-11: 市場で営業を始めるたびに出ていた不具合）
+    if (!host || host.mode !== 'local' || host instanceof MarketHost) return;
     const s = host.state;
     if (s.tutorial || s.day < 3 || s.phase !== 'prep' || s.career.staffTutorialOffered) return;
     const take = await confirmDialog(
