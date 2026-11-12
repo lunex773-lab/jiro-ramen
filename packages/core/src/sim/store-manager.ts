@@ -60,7 +60,7 @@ function inProcess(s: GameState, itemId: string): number {
   for (const e of s.equipment) {
     const pr = e.process ? PREP_RECIPES[e.process.recipeId] : undefined;
     if (!pr) continue;
-    for (const o of pr.outputs) if (o.itemId === itemId) n += o.qty;
+    for (const o of pr.outputs) if (o.itemId === itemId) n += o.qty * (e.process?.mult ?? 1);
   }
   return n;
 }

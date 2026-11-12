@@ -2,6 +2,7 @@
 // シングルプレイではブラウザ内で、共同経営ではサーバー（Durable Object）で検証・適用する（設計書 17.4）。
 
 import { BALANCE } from '../data/balance';
+import { prepPlanMax, setPrepPlan, setPrepSchedule } from './prep-control';
 import { BOWL_PACK, EQUIPMENT, SEAT_PRICE } from '../data/equipment';
 import { INGREDIENTS } from '../data/ingredients';
 import { MENU } from '../data/menu';
@@ -66,6 +67,10 @@ export type Action =
   | { type: 'promoteLeader'; employeeId: Id }
   /** 仕込みの目安（作った品の量。null で自動。じろ1 5.8） */
   | { type: 'setPrepTarget'; itemId: string; qty: number | null }
+  /** 開店前の仕込みの計画（品 → 量。0・null で外す）。オーナーの指示 2026-11-12 */
+  | { type: 'setPrepPlan'; items: Record<string, number | null> }
+  /** 仕込みの量を時間帯・曜日で変える倍率 */
+  | { type: 'setPrepSchedule'; weekday?: number[]; hours?: number[] }
   /** ホストへの確認（YouTuber の撮影の許可・テレビ取材）に答える */
   | { type: 'answerRequest'; requestId: Id; accept: boolean }
   | { type: 'expand' }
@@ -309,6 +314,10 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       return promoteLeader(s, ctx, a.employeeId);
     case 'setPrepTarget':
       return setPrepTarget(s, a.itemId, a.qty === null ? null : Number(a.qty));
+    case 'setPrepPlan':
+      return setPrepPlan(s, a.items, (id) => prepPlanMax(s, id));
+    case 'setPrepSchedule':
+      return setPrepSchedule(s, { weekday: a.weekday, hours: a.hours });
     case 'answerRequest':
       return answerRequest(s, ctx, a.requestId, a.accept === true);
     case 'expand':

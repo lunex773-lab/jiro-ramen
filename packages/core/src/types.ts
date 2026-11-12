@@ -85,6 +85,8 @@ export interface PotProcess {
   quality: number;
   freshness: number;
   startedBy: Id;
+  /** 仕込みの量の倍率（1 = レシピの量。オーナーの指示 2026-11-12: 仕込むときに量を選べる） */
+  mult?: number;
 }
 
 // ───────────────────────── 行為者 ─────────────────────────
@@ -1239,6 +1241,13 @@ export interface GameState {
   autoOrderMode?: 'manual' | 'sales';
   /** 仕込みの目安（作った品の量。品の id → 量）。ない品は自動（売れ行きから。じろ1 5.8） */
   prepTargets?: Record<string, number>;
+  /**
+   * 開店前の仕込みの計画（オーナーの指示 2026-11-12）。その日の開店までに、品ごとにこの量（できた品の量）まで仕込む。
+   * day の日の仕込みの時間だけ使う
+   */
+  prepPlan?: { day: number; items: Record<string, number> };
+  /** 仕込みの量を時間帯・曜日で変える倍率（weekday[0..6] = WEEKDAY_LABEL の順（weekdayOf の値）、hours[i] = 開店から i 時間目。なければ 1） */
+  prepSchedule?: { weekday?: number[]; hours?: number[] };
   /** 自動の仕入れ（自動発注・店長の発注・当日便）をしない食材（じろ2: 食材ごとの有効/無効。目安の量は残る） */
   autoOrderOff?: string[];
   /** 仕入れの記録（新しいものが後ろ。60件。じろ2） */
@@ -1348,6 +1357,8 @@ export type StoreKey =
   | 'history'
   | 'closedForConstruction'
   | 'prepTargets'
+  | 'prepPlan'
+  | 'prepSchedule'
   | 'autoOrderOff'
   | 'purchaseLog';
 

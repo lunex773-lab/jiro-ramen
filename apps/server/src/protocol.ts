@@ -13,7 +13,7 @@ export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 export const ACTION_TYPES = [
   'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
-  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'setAutoOrderItem', 'promote', 'promoteLeader', 'setPrepTarget', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
+  'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'setAutoOrderMode', 'setAutoOrderItem', 'promote', 'promoteLeader', 'setPrepTarget', 'setPrepPlan', 'setPrepSchedule', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
   'accidentReset', 'openStore', 'setStoreLocation', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setStoreHours', 'autoShifts', 'setCompanyPolicy',
 ] as const satisfies readonly ActionType[];
 
@@ -160,6 +160,15 @@ const RULES: Record<AcceptedActionType, FieldRules> = {
   promote: { employeeId: isId },
   promoteLeader: { employeeId: isId },
   setPrepTarget: { itemId: isId, qty: (v: unknown) => v === null || (isNum(v) && (v as number) >= 0) },
+  // 開店前の仕込みの計画（品 → 量・null）と、時間帯・曜日の倍率（中身は core で確かめる。オーナーの指示 2026-11-12）
+  setPrepPlan: {
+    items: (v: unknown) =>
+      isObj(v) && Object.keys(v).length >= 1 && Object.keys(v).length <= 12 && Object.entries(v).every(([k, x]) => isId(k) && (x === null || (isNum(x) && (x as number) >= 0 && (x as number) <= 1_000_000))),
+  },
+  setPrepSchedule: {
+    weekday: (v: unknown) => v === undefined || (Array.isArray(v) && v.length === 7 && v.every((x) => isNum(x) && (x as number) >= 0.5 && (x as number) <= 2)),
+    hours: (v: unknown) => v === undefined || (Array.isArray(v) && v.length <= 24 && v.every((x) => isNum(x) && (x as number) >= 0.5 && (x as number) <= 2)),
+  },
   answerRequest: { requestId: isId, accept: isBool },
   expand: {},
   setPrice: { menuId: isId, price: isNum },

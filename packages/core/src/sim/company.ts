@@ -36,6 +36,8 @@ const STORE_KEY_SET: Record<StoreKey, true> = {
   history: true,
   closedForConstruction: true,
   prepTargets: true,
+  prepPlan: true,
+  prepSchedule: true,
   autoOrderOff: true,
   purchaseLog: true,
 };

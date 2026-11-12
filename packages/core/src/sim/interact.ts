@@ -3,6 +3,7 @@
 // 各動詞は 開始条件 / 所要時間 / 効果 をデータとして持ち、サーバーでも同じ判定を行う。
 
 import { BALANCE } from '../data/balance';
+import { prepAmountText, prepInputs, prepMult, prepScales, prepTime } from './prep-control';
 import type { EquipmentRole } from '../data/equipment';
 import { CALLS, DEFAULT_CALL, MENU, callToSpoken } from '../data/menu';
 import { NOODLE_SOURCES, INGREDIENTS } from '../data/ingredients';
@@ -1213,9 +1214,11 @@ function prepVerb(r: PrepRecipe): VerbDef {
     match: (t) => t.kind === 'equipment' && roleOf(t.e) === r.station,
     phases: COOKING_PHASES,
     skill: 'cook',
-    plan: (s, a, t) => {
+    plan: (s, a, t, args) => {
       const e = eq(t);
-      const label = r.name;
+      // 量（倍率）: 引数の mult。レシピにない倍率は 1（オーナーの指示 2026-11-12: 仕込むときに量を選べる）
+      const mult = prepMult(r, args?.mult);
+      const label = prepScales(r).length > 1 ? `${r.name}（${prepAmountText(r, mult)}）` : r.name;
       if (r.unlock && !s.career.unlocked.includes(r.unlock)) return no(label, 'まだ解放されていません');
       const bad = needUsable(e, label);
       if (bad) return bad;
@@ -1224,19 +1227,20 @@ function prepVerb(r: PrepRecipe): VerbDef {
         return no(label, `${PREP_RECIPES[e.process.recipeId]?.name ?? '工程'}の途中です（残り${left}秒）`);
       }
       if (r.kind === 'hold' && !handIsEmpty(a.hand)) return no(label, '手をあけてください');
-      for (const inp of r.inputs) {
-        if (stockOf(s, inp.itemId) < inp.qty) return no(label, `${INGREDIENTS[inp.itemId]?.name ?? inp.itemId}が足りません`);
+      for (const inp of prepInputs(r, mult)) {
+        if (stockOf(s, inp.itemId) < inp.qty - 1e-9) return no(label, `${INGREDIENTS[inp.itemId]?.name ?? inp.itemId}が足りません`);
       }
-      if (r.soupL && e.soupL + r.soupL > defOf(e).capacity + 1e-6) return no(label, '寸胴に入りきりません（スープを使ってから）');
-      const time = r.kind === 'hold' ? r.time / Math.max(0.3, effectiveSpeed(e)) : 1.2;
-      return ok(r.kind === 'process' ? `${label}（${r.time}秒）` : label, time, 1);
+      if (r.soupL && e.soupL + r.soupL * mult > defOf(e).capacity + 1e-6) return no(label, '寸胴に入りきりません（スープを使ってから）');
+      const time = r.kind === 'hold' ? prepTime(r, mult) / Math.max(0.3, effectiveSpeed(e)) : 1.2;
+      return ok(r.kind === 'process' ? `${label}・${Math.round(prepTime(r, mult))}秒` : label, time, 1);
     },
-    applyUnit: (s, a, t, _args, ctx) => {
+    applyUnit: (s, a, t, args, ctx) => {
       const e = eq(t);
+      const mult = prepMult(r, args?.mult);
       let cost = 0;
       let quality = 0;
       let freshness = 1;
-      for (const inp of r.inputs) {
+      for (const inp of prepInputs(r, mult)) {
         const c = consume(s, inp.itemId, inp.qty);
         if (!c.ok) {
           notify(s, ctx, `stock:${inp.itemId}`, 'danger', `${INGREDIENTS[inp.itemId]?.name ?? inp.itemId}が足りません`);
@@ -1248,10 +1252,10 @@ function prepVerb(r: PrepRecipe): VerbDef {
       }
       useEquipment(s, ctx, e);
       if (r.kind === 'process') {
-        e.process = { recipeId: r.id, elapsed: 0, duration: r.time, cost, quality, freshness, startedBy: a.id };
+        e.process = { recipeId: r.id, elapsed: 0, duration: prepTime(r, mult), cost, quality, freshness, startedBy: a.id, ...(mult !== 1 ? { mult } : {}) };
         emit(ctx, { type: 'processStart', actorId: a.id, targetId: e.id, text: r.name });
       } else {
-        produceOutputs(s, ctx, r, cost, quality * (0.85 + 0.15 * freshness));
+        produceOutputs(s, ctx, r, cost, quality * (0.85 + 0.15 * freshness), mult);
         emit(ctx, { type: 'prepDone', actorId: a.id, targetId: e.id, text: r.name });
       }
     },
@@ -1259,9 +1263,10 @@ function prepVerb(r: PrepRecipe): VerbDef {
 }
 
 /** 仕込みの完成品を在庫に入れる */
-export function produceOutputs(s: GameState, ctx: SimCtx, r: PrepRecipe, cost: number, quality: number): void {
+export function produceOutputs(s: GameState, ctx: SimCtx, r: PrepRecipe, cost: number, quality: number, mult = 1): void {
   for (const out of r.outputs) {
-    addLot(s, out.itemId, out.qty, (cost * out.costShare) / out.qty, clamp01(quality));
+    const qty = out.qty * mult;
+    addLot(s, out.itemId, qty, (cost * out.costShare) / qty, clamp01(quality));
   }
   emit(ctx, { type: 'produced', text: `${r.name}：完成` });
 }
@@ -1274,15 +1279,17 @@ export function completeProcess(s: GameState, ctx: SimCtx, e: Equipment): void {
   e.process = null;
   if (!r) return;
   const q = clamp01(p.quality * (0.85 + 0.15 * p.freshness) * (e.status === 'faulty' ? 0.9 : 1));
+  const mult = p.mult ?? 1;
   if (r.soupL) {
-    const total = e.soupL + r.soupL;
+    const add = r.soupL * mult;
+    const total = e.soupL + add;
     // スープは継ぎ足し。品質は量で加重平均（炊きたては乳化が進んで高品質）
     const fresh = Math.min(1, 0.78 + 0.22 * q);
-    e.soupQuality = total > 0 ? (e.soupQuality * e.soupL + fresh * r.soupL) / total : fresh;
+    e.soupQuality = total > 0 ? (e.soupQuality * e.soupL + fresh * add) / total : fresh;
     e.soupL = Math.min(defOf(e).capacity, total);
     e.soupCost += p.cost;
   }
-  produceOutputs(s, ctx, r, p.cost, q);
+  produceOutputs(s, ctx, r, p.cost, q, mult);
   notify(s, ctx, `process:${e.id}`, 'good', `${r.name}が完了しました`);
 }
 

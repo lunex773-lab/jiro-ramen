@@ -23,6 +23,7 @@ export * from './sim/economy';
 export * from './sim/inventory';
 export * from './sim/store-manager';
 export * from './sim/shift-plan';
+export * from './sim/prep-control';
 export * from './sim/armory';
 export * from './data/weapons';
 export * from './sim/equipment';

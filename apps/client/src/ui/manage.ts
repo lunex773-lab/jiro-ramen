@@ -111,6 +111,13 @@ import {
   prefRangeProblem,
   rangeTitle,
   type MarketView,
+  forecastDay,
+  prepPlanItems,
+  prepPlanProgress,
+  prepHave,
+  prepScheduleMult,
+  suggestPrepPlan,
+  PREP_SCHEDULE_CHOICES,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 import { MarketHost } from '../game/market-play';
@@ -128,16 +135,17 @@ import { openStoreMap } from './store-map';
 import { hoursDialog, hoursSummary } from './hours-dialog';
 import { loanControl } from './loan';
 import { forecastLines } from './site-lines';
-import { alertBox, cardHead, delta, flowBar, kpi, kpiRow, profitBars, yenSigned } from './kit';
+import { alertBox, cardHead, delta, flowBar, kpi, kpiRow, meterBar, profitBars, yenSigned } from './kit';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
 import { lookSeedOf, staffLook, staffLookText } from '../render/staff-look';
 
-export type ManageTab = 'dash' | 'company' | 'stock' | 'menu' | 'equip' | 'staff' | 'layout' | 'career' | 'system';
+export type ManageTab = 'dash' | 'company' | 'stock' | 'prep' | 'menu' | 'equip' | 'staff' | 'layout' | 'career' | 'system';
 
 const TABS: [ManageTab, string][] = [
   ['dash', '経営'],
   ['company', '会社'],
   ['stock', '在庫・発注'],
+  ['prep', '仕込み'],
   ['menu', 'メニュー'],
   ['equip', '設備'],
   ['staff', '従業員'],
@@ -423,6 +431,7 @@ export class ManageMenu {
         this.tab === 'dash' ? this.dash(s)
         : this.tab === 'company' ? this.company(s)
         : this.tab === 'stock' ? this.stock(s)
+        : this.tab === 'prep' ? this.prep(s)
         : this.tab === 'menu' ? this.menu(s)
         : this.tab === 'equip' ? this.equip(s)
         : this.tab === 'staff' ? this.staff(s)
@@ -927,7 +936,7 @@ export class ManageMenu {
         'section',
         { class: 'card wide' },
         cardHead('仕込み品（店内で作る）', '仕込み: 豚を煮込む→（煮豚・タレ）→ 仕込み台で豚を切る / 野菜ゆで釜でヤサイ / 仕込み台でニンニクを刻む / 煮込み鍋で背脂を炊く / 寸胴でスープを炊く。'),
-        this.prepTargetRows(s),
+        h('div', { class: 'row wrap' }, h('span', { class: 'note' }, '仕込みの目安・開店前の計画・時間帯と曜日の調整は「仕込み」のタブで決めます'), h('button', { class: 'mini', 'data-guest-ok': '1', onclick: () => { this.tab = 'prep'; this.render(); this.body.scrollTop = 0; } }, '仕込みのタブへ')),
         h('div', { class: 'table' }, prepared.map((d) => h('div', { class: 'trow' }, h('div', { class: 'tname' }, d.name), h('div', { class: 'tsub' }, `${Math.floor(stockOf(s, d.id)).toLocaleString('ja-JP')}${d.unit}`), h('div', { class: 'tsub' }, d.shelfLifeDays === 0 ? '当日限り' : `${d.shelfLifeDays}日もつ`)))),
       ),
     );
@@ -1047,6 +1056,146 @@ export class ManageMenu {
             ),
           );
         }),
+      ),
+    );
+  }
+
+  // ───────────────── 仕込み（オーナーの指示 2026-11-12: 仕込みの調整機能） ─────────────────
+  private prep(s: GameState): HTMLElement {
+    const items = prepPlanItems(s);
+    const today = forecastDay(s, s.day);
+    const bowls = today && !today.closed ? today.bowls : null;
+    const progress = prepPlanProgress(s);
+    const planOn = s.prepPlan?.day === s.day;
+    const canPlan = s.phase === 'prep';
+    const avg = progress.length > 0 ? progress.reduce((a, p) => a + p.ratio, 0) / progress.length : null;
+    const host = this.host.isHost;
+    const unitOf = (id: string) => INGREDIENTS[id]?.unit ?? '';
+    const servingsOf = (id: string, q: number) => Math.round(q / Math.max(1e-9, prepPerBowl(s, id)));
+    const planRows = items.map(({ itemId, max }) => {
+      const d = INGREDIENTS[itemId]!;
+      const per = prepPerBowl(s, itemId);
+      const cur = s.prepPlan?.day === s.day ? (s.prepPlan.items[itemId] ?? 0) : 0;
+      const have = prepHave(s, itemId);
+      const opts: [number, string][] = [[0, '計画しない']];
+      const seen = new Set<number>([0]);
+      for (const n of [10, 20, 30, 40, 60, 80, 100, 150]) {
+        const q = Math.round(n * per);
+        if (q <= 0 || q > max || seen.has(q)) continue;
+        seen.add(q);
+        opts.push([q, `${n}人前（${q.toLocaleString('ja-JP')}${unitOf(itemId)}）`]);
+      }
+      if (cur > 0 && !seen.has(cur)) opts.push([cur, `${servingsOf(itemId, cur)}人前（${cur.toLocaleString('ja-JP')}${unitOf(itemId)}）`]);
+      const ratio = cur > 0 ? Math.min(1, have / cur) : null;
+      return h(
+        'div',
+        { class: 'trow', 'data-plan-row': itemId },
+        h('div', { class: 'tname' }, d.name, h('small', null, `手元 ${Math.floor(have).toLocaleString('ja-JP')}${unitOf(itemId)}（約${servingsOf(itemId, have)}人前・鍋で作っている分を含む）`)),
+        h(
+          'select',
+          {
+            class: 'select',
+            'data-plan-item': itemId,
+            disabled: !canPlan,
+            onchange: (ev: Event) => {
+              const v = Number((ev.target as HTMLSelectElement).value);
+              void this.act({ type: 'setPrepPlan', items: { [itemId]: v > 0 ? v : null } }, v > 0 ? `${d.name}を開店までに${servingsOf(itemId, v)}人前（${v.toLocaleString('ja-JP')}${unitOf(itemId)}）仕込む計画にしました` : `${d.name}を計画から外しました`);
+            },
+          },
+          opts.map(([v, label]) => h('option', { value: String(v), selected: v === cur }, label)),
+        ),
+        h('div', { class: 'tsub plan-meter' }, ratio === null ? '—' : meterBar(ratio, ratio >= 1 ? 'good' : 'accent', `${d.name}の仕込みの進み具合 ${Math.round(ratio * 100)}%`), ratio === null ? null : h('small', null, `${Math.round(ratio * 100)}%`)),
+      );
+    });
+    const choice = (v: number) => (v === 1 ? 'ふつう' : `×${v}`);
+    const sched = s.prepSchedule ?? {};
+    const wds = sched.weekday ?? [1, 1, 1, 1, 1, 1, 1];
+    const openHours = Math.max(1, Math.ceil(openMinutesOf(storeHours(s)) / 60));
+    const hrs = Array.from({ length: openHours }, (_, i) => sched.hours?.[i] ?? 1);
+    const setWeekday = (i: number, v: number) => {
+      const next = [...wds];
+      next[i] = v;
+      void this.act({ type: 'setPrepSchedule', weekday: next }, `${WEEKDAY_LABEL[i]}曜の仕込みの量を${choice(v)}にしました`);
+    };
+    const setHour = (i: number, v: number) => {
+      const next = [...hrs];
+      next[i] = v;
+      void this.act({ type: 'setPrepSchedule', hours: next }, `開店から${i + 1}時間目の仕込みの量を${choice(v)}にしました`);
+    };
+    const hourLabel = (i: number) => `${shiftTimeText(i * 60, storeHours(s))}〜`;
+    return h(
+      'div',
+      null,
+      kpiRow(
+        [
+          kpi('今日の予想', bowls !== null ? `約${bowls}杯` : '—', bowls !== null ? '最近の営業・曜日・営業時間から' : '営業した日がまだありません', '', '', { 'data-kpi': 'prep-forecast' }),
+          kpi('開店前の計画', planOn ? `${progress.length}品` : 'なし', avg !== null ? `進み具合 ${Math.round(avg * 100)}%` : canPlan ? '下で決められます' : '開店前（仕込みの時間）に決めます', avg !== null && avg >= 1 ? 'good' : '', avg !== null && avg >= 1 ? 'good' : '', { 'data-kpi': 'prep-plan' }),
+          kpi('今の倍率', `×${prepScheduleMult(s)}`, `${WEEKDAY_LABEL[weekdayOf(s.day)]}曜・${s.phase === 'open' ? '営業中の時間帯' : '開店から1時間目'}`, prepScheduleMult(s) !== 1 ? 'accent' : ''),
+        ],
+        'tab-kpis',
+      ),
+      h(
+        'section',
+        { class: 'card wide', 'data-prep-plan': '1' },
+        cardHead('開店前の仕込みの計画', '開店前（仕込みの時間）に、品ごとに「開店までに用意する量」を決めると、店員がその量まで仕込みます。手元の量には鍋・釜で作っている分を含みます。開店すると計画は終わり、ふだんの仕込みの目安に戻ります。'),
+        canPlan
+          ? h(
+              'div',
+              { class: 'row wrap' },
+              host
+                ? h('button', { class: 'mini', 'data-plan-suggest': '1', onclick: () => void this.act({ type: 'setPrepPlan', items: suggestPrepPlan(s) }, '今日の予想の半分（残りは営業中に仕込みます）を計画にしました') }, '📈 今日の予想から決める')
+                : null,
+              host && planOn
+                ? h('button', { class: 'mini ghost', 'data-plan-clear': '1', onclick: () => void this.act({ type: 'setPrepPlan', items: Object.fromEntries(Object.keys(s.prepPlan!.items).map((k) => [k, null])) }, '計画を消しました') }, '計画を消す')
+                : null,
+            )
+          : h('p', { class: 'note' }, '計画は開店前（仕込みの時間）に決めます。営業中は下の「仕込みの目安」と「時間帯・曜日」で店員が仕込みます。'),
+        h('div', { class: 'table' }, planRows),
+      ),
+      h(
+        'section',
+        { class: 'card wide' },
+        cardHead('仕込みの目安（営業中に店員が仕込む量）', '在庫がこの量より少なくなったら、店員が仕込みます。「自動」は売れ行きから決めます。下の「時間帯・曜日」の倍率が掛かります。'),
+        this.prepTargetRows(s),
+      ),
+      h(
+        'section',
+        { class: 'card wide', 'data-prep-schedule': '1' },
+        cardHead('時間帯・曜日で変える', '仕込みの目安に掛ける倍率です。忙しい曜日・時間帯は多め、閉店前は少なめ、などにできます（開店前の仕込みは開店から1時間目の倍率）。'),
+        h('h5', null, '曜日'),
+        h(
+          'div',
+          { class: 'sched-row' },
+          WEEKDAY_LABEL.map((label, i) =>
+            h(
+              'label',
+              { class: 'sched-cell' },
+              h('span', null, label),
+              h(
+                'select',
+                { class: 'select', 'data-sched-weekday': String(i), onchange: (ev: Event) => setWeekday(i, Number((ev.target as HTMLSelectElement).value)) },
+                PREP_SCHEDULE_CHOICES.map((v) => h('option', { value: String(v), selected: v === wds[i] }, choice(v))),
+              ),
+            ),
+          ),
+        ),
+        h('h5', null, '時間帯（開店からの1時間ごと）'),
+        h(
+          'div',
+          { class: 'sched-row' },
+          hrs.map((v0, i) =>
+            h(
+              'label',
+              { class: 'sched-cell' },
+              h('span', null, hourLabel(i)),
+              h(
+                'select',
+                { class: 'select', 'data-sched-hour': String(i), onchange: (ev: Event) => setHour(i, Number((ev.target as HTMLSelectElement).value)) },
+                PREP_SCHEDULE_CHOICES.map((v) => h('option', { value: String(v), selected: v === v0 }, choice(v))),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

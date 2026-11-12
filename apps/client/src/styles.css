@@ -1294,3 +1294,12 @@ details.help:not([open]) > .help-body { display: none; }
 .team-table td.bad { color: var(--bad); font-weight: 700; }
 .team-table td.info { color: #6fb3e0; }
 .team-table td.off, .team-table td.closed { color: var(--muted); }
+/* 仕込みのタブ（オーナーの指示 2026-11-12: 仕込みの調整） */
+.sched-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(82px, 1fr)); gap: 6px; margin: 4px 0 8px; }
+.sched-cell { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.sched-cell .select { width: 100%; min-height: 36px; }
+.plan-meter { display: flex; align-items: center; gap: 6px; min-width: 110px; }
+.plan-meter .mbar { flex: 1; }
+.prep-amount-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.prep-amount-row .chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.prep-amount-row .chips .mini { min-height: 32px; min-width: 44px; }

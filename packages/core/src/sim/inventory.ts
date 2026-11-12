@@ -194,7 +194,11 @@ function recentOpenDays(s: GameState): DayReport[] {
  * 翌日が定休日なら closed（発注しない。定休日の夜に、次の営業日の分を発注する）。営業した日がまだなければ null
  */
 export function forecastNextDay(s: GameState): ManagerForecast | null {
-  const day = s.day + 1;
+  return forecastDay(s, s.day + 1);
+}
+
+/** その日の来客の予測（forecastNextDay と同じ考え方。仕込みの計画では今日の分を見る） */
+export function forecastDay(s: GameState, day: number): ManagerForecast | null {
   const hours = storeHours(s);
   if (isClosedDay(hours, day)) return { day, closed: true, customers: 0, bowls: 0, basis: 0 };
   const rows = recentOpenDays(s);

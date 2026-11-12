@@ -35,6 +35,9 @@ import {
   todayHours,
   WEAPONS,
   speedLocked,
+  PREP_RECIPES,
+  prepAmountText,
+  prepScales,
 } from '@jiro/core';
 import type { GameHost } from '../game/host';
 import { targetName, type FocusResult } from '../game/targeting';
@@ -116,6 +119,8 @@ export class Hud {
   private workShown = false;
   /** 長押し中の動詞 */
   private holding: string | null = null;
+  /** 自分で仕込むときの量（レシピごとの倍率。オーナーの指示 2026-11-12: 仕込むときに量を選べる） */
+  private prepMult = new Map<string, number>();
   private acc = 0;
 
   constructor(
@@ -369,7 +374,7 @@ export class Hud {
     const explain = me.hand.kind !== 'none' || t?.kind === 'equipment';
     const reason = far ? '近づいてください' : enabled.length === 0 && explain && first?.reason ? `${first.label}: ${first.reason}` : '';
     if (this.focusReason.textContent !== reason) this.focusReason.textContent = reason;
-    const key = `${t?.id ?? ''}|${shown.map((v) => `${v.verb}:${v.label}:${v.enabled}:${v.reason}`).join('|')}|${me.work?.verb ?? ''}`;
+    const key = `${t?.id ?? ''}|${shown.map((v) => `${v.verb}:${v.label}:${v.enabled}:${v.reason}${v.verb.startsWith('prep:') ? `:${this.prepMult.get(v.verb.slice(5)) ?? 1}` : ''}`).join('|')}|${me.work?.verb ?? ''}`;
     // 押している間は変えない（指の下のボタンが変わると、押したことにならない）
     if (key !== this.lastActionsKey && !this.actPressed) {
       this.lastActionsKey = key;
@@ -440,7 +445,9 @@ export class Hud {
     if (b.el.title !== title) b.el.title = title;
     if (b.icon.textContent !== f.icon) b.icon.textContent = f.icon;
     if (b.label.textContent !== f.short) b.label.textContent = f.short;
-    const badge = f.badge ?? '';
+    // 仕込みは選んだ量をボタンの隅に出す（×2 など）
+    const pm = v.verb.startsWith('prep:') ? (this.prepMult.get(v.verb.slice(5)) ?? 1) : 1;
+    const badge = pm !== 1 ? `×${pm}` : (f.badge ?? '');
     if (b.badge.textContent !== badge) b.badge.textContent = badge;
     const key = !this.root.closest('.touch') && i < 6 ? (i === 0 ? 'E' : String(i + 1)) : '';
     if (b.keyHint.textContent !== key) b.keyHint.textContent = key;
@@ -458,7 +465,8 @@ export class Hud {
         return;
       }
       this.holding = v.verb;
-      void this.host.act({ type: 'interact', targetId: this.focus.id, verb: v.verb, args: argsFor(this.host.state, v.verb, this.focus) }).then((r) => {
+      const args = v.verb.startsWith('prep:') ? { mult: this.prepMult.get(v.verb.slice(5)) ?? 1 } : argsFor(this.host.state, v.verb, this.focus);
+      void this.host.act({ type: 'interact', targetId: this.focus.id, verb: v.verb, args }).then((r) => {
         if (!r.ok && r.reason) toast(this.root, r.reason, 'warn', 1800);
         if (!v.hold) this.holding = null;
         // 押した結果（手に持った物・ボタン）をすぐ出す（いつもの 0.1 秒ごとの更新を待たない）
@@ -636,13 +644,24 @@ export class Hud {
           }),
         );
       } else if (def?.role === 'soup') {
-        key += `${e.soupL.toFixed(1)}:${e.process?.elapsed.toFixed(0)}`;
+        key += `${e.soupL.toFixed(1)}:${e.process?.elapsed.toFixed(0)}:${this.prepKey(def.role)}`;
         content = h(
           'div',
           null,
           h('div', { class: 'detail-title' }, `${def.name}${statusTxt}`),
           h('div', { class: 'slot' }, `スープ ${e.soupL.toFixed(1)} / ${def.capacity}L ・品質 ${Math.round(e.soupQuality * 100)}`),
           e.process ? h('div', { class: 'slot' }, `炊いています… 残り${Math.ceil(e.process.duration - e.process.elapsed)}秒`) : null,
+          this.prepAmountRows(s, def.role),
+        );
+      } else if (def && (def.role === 'pot' || def.role === 'prep' || def.role === 'veg' || def.role === 'noodle_maker')) {
+        // 仕込みの設備: 工程の残りと、自分で仕込むときの量（オーナーの指示 2026-11-12）
+        key += `${e.process ? Math.floor(e.process.elapsed) : '-'}:${this.prepKey(def.role)}`;
+        content = h(
+          'div',
+          null,
+          h('div', { class: 'detail-title' }, `${def.name}${statusTxt}`),
+          e.process ? h('div', { class: 'slot' }, `${PREP_RECIPES[e.process.recipeId]?.name ?? '工程'}… 残り${Math.ceil(e.process.duration - e.process.elapsed)}秒`) : null,
+          this.prepAmountRows(s, def.role),
         );
       } else if (def?.role === 'topping') {
         const items: [string, string, string][] = [
@@ -721,6 +740,51 @@ export class Hud {
       replace(this.detail);
       this.detail.style.display = 'none';
     }
+  }
+
+  /** 仕込みの量の選択の印（変わったら説明の欄を描き直す） */
+  private prepKey(role: string): string {
+    return Object.values(PREP_RECIPES)
+      .filter((r) => r.station === role)
+      .map((r) => this.prepMult.get(r.id) ?? 1)
+      .join(',');
+  }
+
+  /** 設備の仕込みのレシピごとに、量を選ぶボタン（選んだ量で「仕込む」ボタンが仕込む） */
+  private prepAmountRows(s: GameState, role: string): HTMLElement | null {
+    const list = Object.values(PREP_RECIPES).filter((r) => r.station === role && prepScales(r).length > 1 && (!r.unlock || s.career.unlocked.includes(r.unlock)));
+    if (list.length === 0) return null;
+    return h(
+      'div',
+      { class: 'prep-amount', 'data-prep-amount': role },
+      list.map((r) => {
+        const cur = this.prepMult.get(r.id) ?? 1;
+        return h(
+          'div',
+          { class: 'slot prep-amount-row' },
+          h('span', { class: 'slot-main' }, r.name),
+          h(
+            'span',
+            { class: 'chips' },
+            prepScales(r).map((m) =>
+              h(
+                'button',
+                {
+                  class: `mini ${m === cur ? 'on' : 'ghost'}`,
+                  'data-prep-mult': `${r.id}:${m}`,
+                  onclick: () => {
+                    this.prepMult.set(r.id, m);
+                    this.lastDetailKey = '';
+                    this.acc = 1;
+                  },
+                },
+                prepAmountText(r, m).replace(/^\S+ /, ''),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
   }
 
   private actWith(verb: string, args: Record<string, number>): void {

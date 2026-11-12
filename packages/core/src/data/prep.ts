@@ -19,6 +19,8 @@ export interface PrepRecipe {
   unlock?: string;
   /** 従業員AIが補充を判断する目安（この量を下回ったら仕込む） */
   restockBelow?: { itemId: string; qty: number };
+  /** 1回に仕込める量の倍率（材料と出来上がりの量に掛ける。オーナーの指示 2026-11-12: 仕込むときに量を選べる） */
+  scales?: number[];
 }
 
 export const PREP_RECIPES: Record<string, PrepRecipe> = {
@@ -28,6 +30,7 @@ export const PREP_RECIPES: Record<string, PrepRecipe> = {
     outputs: [{ itemId: 'pork_block', qty: 4, costShare: 0.8 }, { itemId: 'tare', qty: 2500, costShare: 0.2 }],
     time: 90, interruptible: false,
     restockBelow: { itemId: 'buta', qty: 60 },
+    scales: [0.5, 1, 1.5, 2],
   },
   render_abura: {
     id: 'render_abura', name: '背脂を炊く', kind: 'process', station: 'pot',
@@ -35,6 +38,7 @@ export const PREP_RECIPES: Record<string, PrepRecipe> = {
     outputs: [{ itemId: 'abura', qty: 1000, costShare: 1 }],
     time: 25, interruptible: false,
     restockBelow: { itemId: 'abura', qty: 250 },
+    scales: [0.5, 1, 2],
   },
   slice_pork: {
     id: 'slice_pork', name: '豚を切る', kind: 'hold', station: 'prep',
@@ -42,6 +46,7 @@ export const PREP_RECIPES: Record<string, PrepRecipe> = {
     outputs: [{ itemId: 'buta', qty: 18, costShare: 1 }],
     time: 6, interruptible: true,
     restockBelow: { itemId: 'buta', qty: 20 },
+    scales: [1, 2, 3],
   },
   chop_garlic: {
     id: 'chop_garlic', name: 'ニンニクを刻む', kind: 'hold', station: 'prep',
@@ -49,6 +54,7 @@ export const PREP_RECIPES: Record<string, PrepRecipe> = {
     outputs: [{ itemId: 'garlic', qty: 500, costShare: 1 }],
     time: 8, interruptible: true,
     restockBelow: { itemId: 'garlic', qty: 100 },
+    scales: [0.5, 1, 2],
   },
   boil_veg: {
     id: 'boil_veg', name: 'ヤサイをゆでる', kind: 'process', station: 'veg',
@@ -56,6 +62,7 @@ export const PREP_RECIPES: Record<string, PrepRecipe> = {
     outputs: [{ itemId: 'yasai', qty: 5000, costShare: 1 }],
     time: 18, interruptible: false,
     restockBelow: { itemId: 'yasai', qty: 1200 },
+    scales: [0.5, 1, 1.5],
   },
   boil_moyashi: {
     id: 'boil_moyashi', name: 'もやしだけゆでる', kind: 'process', station: 'veg',
@@ -63,6 +70,7 @@ export const PREP_RECIPES: Record<string, PrepRecipe> = {
     outputs: [{ itemId: 'yasai', qty: 4500, costShare: 1 }],
     time: 16, interruptible: false,
     restockBelow: { itemId: 'yasai', qty: 1200 },
+    scales: [0.5, 1, 1.5],
   },
   simmer_soup: {
     id: 'simmer_soup', name: 'スープを炊く', kind: 'process', station: 'soup',
@@ -70,6 +78,7 @@ export const PREP_RECIPES: Record<string, PrepRecipe> = {
     outputs: [],
     soupL: 18,
     time: 70, interruptible: false,
+    scales: [0.5, 1],
   },
   make_noodles: {
     id: 'make_noodles', name: '製麺する', kind: 'process', station: 'noodle_maker',
@@ -77,6 +86,7 @@ export const PREP_RECIPES: Record<string, PrepRecipe> = {
     outputs: [{ itemId: 'homemade_noodle', qty: 6800, costShare: 1 }],
     time: 40, interruptible: false, unlock: 'noodle_maker',
     restockBelow: { itemId: 'homemade_noodle', qty: 1500 },
+    scales: [0.5, 1, 1.5],
   },
 };
 

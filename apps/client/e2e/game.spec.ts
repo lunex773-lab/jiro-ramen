@@ -750,13 +750,25 @@ test('従業員: みんなの勤務のカレンダーで日を選んでシフト
   await body.locator('[data-cal-group="staff"]').click();
   await expect(body.locator(`[data-cal-emp="${empId}"]`)).toContainText('休み');
   await body.locator('[data-cal-view-btn="twoWeeks"]').click();
-  // 仕込みの目安（在庫・発注のタブ）。「○人前」で選ぶ（じろ2）
-  await page.getByRole('button', { name: '在庫・発注', exact: true }).click();
+  // 仕込みのタブ（オーナーの指示 2026-11-12）: 仕込みの目安（「○人前」）・開店前の計画・時間帯と曜日
+  await page.getByRole('button', { name: '仕込み', exact: true }).click();
   await expect(body.locator('[data-prep-target="yasai"] option').nth(2)).toContainText('人前');
   await expect(body.locator('[data-prep-row="yasai"]')).toContainText('1人前');
   await body.locator('[data-prep-target="yasai"]').selectOption({ index: 2 });
   await expect.poll(async () => (await state()).prepTargets?.yasai ?? 0).toBeGreaterThan(0);
+  // 開店前の計画: 予想から決める → 品ごとに量と進み具合。1品の量を変える
+  await body.locator('[data-plan-suggest]').click();
+  type P = { prepPlan?: { items: Record<string, number> }; prepSchedule?: { weekday?: number[] } };
+  await expect.poll(async () => Object.keys(((await state()) as unknown as P).prepPlan?.items ?? {}).length).toBeGreaterThan(0);
+  await body.locator('[data-plan-item="garlic"]').selectOption({ index: 2 });
+  await expect.poll(async () => ((await state()) as unknown as P).prepPlan?.items.garlic ?? 0).toBeGreaterThan(0);
+  await expect(body.locator('[data-plan-row="garlic"] .plan-meter')).toContainText('%');
+  // 曜日で変える（7番目の曜日を多め）
+  await body.locator('[data-sched-weekday="6"]').selectOption('1.5');
+  await expect.poll(async () => ((await state()) as unknown as P).prepSchedule?.weekday?.[6] ?? 1).toBe(1.5);
+  await shot(page, 'prep-tab');
   // 食材ごとの自動の仕入れ（じろ2）と仕入れの記録
+  await page.getByRole('button', { name: '在庫・発注', exact: true }).click();
   await body.locator('[data-auto-item="moyashi"]').click();
   await expect(body.locator('[data-auto-item="moyashi"]')).toHaveText('自動 OFF');
   await expect(body.locator('[data-purchase-log]')).toBeVisible();
@@ -771,6 +783,13 @@ test('従業員: みんなの勤務のカレンダーで日を選んでシフト
   await page.locator('.modal').getByRole('button', { name: 'シフトリーダーにする' }).click();
   await expect.poll(async () => (await state()).employees[0]!.profile.role).toBe('leader');
   await expect(body.locator('.emp[data-emp]').first()).toContainText('シフトリーダー');
+  // 自分で仕込むときに量を選べる（煮込み鍋の説明の欄で量を選ぶと、仕込むボタンの隅に倍率）
+  await page.locator('.manage .close').click();
+  await face(page, 'braise_pot');
+  const chip = page.locator('[data-prep-mult="braise_pork:2"]');
+  await expect(chip).toBeVisible();
+  await press(chip);
+  await expect(page.locator('.act[data-verb="prep:braise_pork"] .act-badge')).toHaveText('×2');
 });
 
 test('従業員: シフト表で曜日 × 時間の人数と必要な人数を見て、「シフトを自動で組む」でアルバイトのシフトを組める。店長がいれば「店長に任せる」を選べる', async ({ page }) => {

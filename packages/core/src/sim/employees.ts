@@ -3,6 +3,7 @@
 // 同じ仕事は予約（taskId）で一人だけが担当する。担当者が離脱した仕事は予約が外れ、他の人が引き継げる。
 
 import { openDurationOf } from './hours';
+import { maxPossibleMult, prepPlanQty, prepScheduleMult, staffPrepMult } from './prep-control';
 import { actingManager } from './store-manager';
 import { BALANCE } from '../data/balance';
 import { EQUIPMENT } from '../data/equipment';
@@ -110,9 +111,10 @@ function inProcessOutput(s: GameState, itemId: string): number {
   for (const e of s.equipment) {
     const pr = e.process ? PREP_RECIPES[e.process.recipeId] : undefined;
     if (!pr) continue;
+    const m = e.process?.mult ?? 1;
     for (const o of pr.outputs) {
-      if (o.itemId === itemId) n += o.qty;
-      else if (itemId === 'buta' && o.itemId === 'pork_block') n += o.qty * BUTA_PER_BLOCK;
+      if (o.itemId === itemId) n += o.qty * m;
+      else if (itemId === 'buta' && o.itemId === 'pork_block') n += o.qty * m * BUTA_PER_BLOCK;
     }
   }
   return n;
@@ -140,15 +142,31 @@ export function prepUseRate(s: GameState, itemId: string): number {
  */
 export function restockTarget(s: GameState, r: { id: string; time: number; restockBelow?: { itemId: string; qty: number } }): number {
   if (!r.restockBelow) return 0;
+  // 時間帯・曜日の倍率（オーナーの指示 2026-11-12）と、開店前の仕込みの計画（その日の仕込みの時間は計画の量まで仕込む）
+  const plan = prepPlanQty(s, r.restockBelow.itemId);
+  const k = prepScheduleMult(s);
   // プレイヤーが決めた仕込みの目安（じろ1 5.8）があればそれを使う
   const manual = s.prepTargets?.[r.restockBelow.itemId];
-  if (manual !== undefined && manual >= 0) return manual;
+  if (manual !== undefined && manual >= 0) return Math.max(manual * k, plan ?? 0);
+  return Math.max(autoRestockTarget(s, r) * k, plan ?? 0);
+}
+
+/** 自動（売れ行きから）の仕込みの目安 */
+function autoRestockTarget(s: GameState, r: { id: string; time: number; restockBelow?: { itemId: string; qty: number } }): number {
+  if (!r.restockBelow) return 0;
   const P = BALANCE.prepPlan;
   const rate = prepUseRate(s, r.restockBelow.itemId);
   const lead = r.time + P.leadMarginSec + (r.id === 'braise_pork' ? (PREP_RECIPES.slice_pork?.time ?? 0) : 0);
   let want = rate * P.peakFactor * lead * P.safety;
   if (s.phase === 'open') want = Math.min(want, rate * Math.max(0, openDurationOf(s) - s.openT) * P.safety);
   return Math.max(r.restockBelow.qty, want);
+}
+
+/** 仕込み品の手元の量（在庫 ＋ 鍋・釜で工程中の分。豚は煮込み済みのブロックを切ったあとの枚数も） */
+export function prepHave(s: GameState, itemId: string): number {
+  let have = stockOf(s, itemId) + inProcessOutput(s, itemId);
+  if (itemId === 'buta') have += stockOf(s, 'pork_block') * BUTA_PER_BLOCK;
+  return have;
 }
 
 /** 仕込みの目安を決められる品（仕込みで作る品）と、自動のときの最低の量 */
@@ -597,12 +615,16 @@ export function buildTasks(s: GameState): Task[] {
       if (r.unlock && !s.career.unlocked.includes(r.unlock)) continue;
       const stations = s.equipment.filter((e) => e.placed && EQUIPMENT[e.type]?.role === r.station && isUsable(e));
       if (stations.length === 0) continue;
-      if (!r.inputs.every((i) => stockOf(s, i.itemId) >= i.qty)) continue;
+      // 材料が足りる量があるか（量を選べるレシピは、少ない量なら作れることがある）
+      if (maxPossibleMult(s, r, null) === null) continue;
       if (r.soupL) {
         for (const pot of stations) {
           if (pot.process) continue;
-          if (pot.soupL + r.soupL > defOf(pot).capacity) continue;
-          if (pot.soupL < 8) add(pot.soupL < 3 ? 'prepUrgent' : 'prep', `prep:${r.id}:${pot.id}`, [step(pot.id, `prep:${r.id}`)]);
+          if (pot.soupL >= 8) continue;
+          const room = defOf(pot).capacity - pot.soupL;
+          const m = staffPrepMult(s, r, room, pot, defOf(pot).capacity);
+          if (pot.soupL + r.soupL * m > defOf(pot).capacity + 1e-6) continue;
+          add(pot.soupL < 3 ? 'prepUrgent' : 'prep', `prep:${r.id}:${pot.id}`, [step(pot.id, `prep:${r.id}`, m !== 1 ? { mult: m } : null)]);
         }
         continue;
       }
@@ -618,12 +640,15 @@ export function buildTasks(s: GameState): Task[] {
       if (have >= target) continue;
       const st = stations.find((e) => !e.process || r.kind === 'hold');
       if (!st) continue;
+      // 足りない分に合う量で仕込む（オーナーの指示 2026-11-12: 量を選べる。店員は計画・目安との差で決める）
+      const m = staffPrepMult(s, r, target - have, st);
+      const ps = step(st.id, `prep:${r.id}`, m !== 1 ? { mult: m } : null);
       // 切れる寸前ほど優先度を上げる（盛り付けに必要な量を切ったら調理より先に補充）
       const ratio = have / target;
       const minNeed = MIN_FOR_BOWL[item] ?? 0;
-      if (stockOf(s, item) < minNeed && r.id !== 'braise_pork') add('prepUrgent', `prep:${r.id}`, [step(st.id, `prep:${r.id}`)], 30);
-      else if (ratio < 0.4) add('prepUrgent', `prep:${r.id}`, [step(st.id, `prep:${r.id}`)], Math.round((0.4 - ratio) * 40));
-      else add('prep', `prep:${r.id}`, [step(st.id, `prep:${r.id}`)], Math.round((1 - ratio) * 20));
+      if (stockOf(s, item) < minNeed && r.id !== 'braise_pork') add('prepUrgent', `prep:${r.id}`, [ps], 30);
+      else if (ratio < 0.4) add('prepUrgent', `prep:${r.id}`, [ps], Math.round((0.4 - ratio) * 40));
+      else add('prep', `prep:${r.id}`, [ps], Math.round((1 - ratio) * 20));
     }
   }
 
