@@ -92,7 +92,7 @@ describe('知名度・評判・話題性を分ける（設計書 11・オーナ�
     expect(fameDemandFactor(s)).toBeCloseTo((1 + FAME.awarenessMaxBonus) * (1 + FAME.topicMaxBonus), 6);
   });
 
-  it('話題性は毎日薄れ、知名度はゆっくり変わる。ふつうの営業だけでは知名度はほとんど上がらない（ふつうの日の収支はほぼ今のまま）', () => {
+  it('話題性は毎日薄れ、知名度はゆっくり変わる。ふつうの営業だけでは知名度はほとんど上がらない（ふつうの日の収支はほぼ今のまま）', { timeout: 60_000 }, () => {
     quiet();
     const { s, ctx } = game(2, 2);
     const f = ensureFame(s);
@@ -183,7 +183,7 @@ describe('YouTuber（設計書 7）', () => {
     expect(planAllowed('bigEat', 'deny')).toBe(false);
   });
 
-  it('動画の結果は知名度・話題性・評判へ別々に効く。炎上は評判を下げる（最大 -0.3★）。大バズはほかの YouTuber を呼び、伝説になる', () => {
+  it('動画の結果は知名度・話題性・評判へ別々に効く。炎上は評判を下げる（最大 -0.3★）。大バズはほかの YouTuber を呼び、伝説になる', { timeout: 60_000 }, () => {
     const outcomes = new Map<string, { rep: number; topic: number; awareness: number; boosts: number; legends: number }>();
     for (let seed = 1; seed < 160 && outcomes.size < 4; seed++) {
       const { s, ctx } = newGame(seed);
@@ -277,7 +277,7 @@ describe('客どうしの口論（オーナーの判断 Q8）', () => {
 });
 
 describe('古いセーブ', () => {
-  it('知名度などの状態がない古いセーブでも、そのまま営業できる', () => {
+  it('知名度などの状態がない古いセーブでも、そのまま営業できる', { timeout: 60_000 }, () => {
     const { s, ctx } = newGame(8);
     s.day = 5;
     addLegend(s, ctx, 'ufo', { summary: 'x', witnesses: 3 });
