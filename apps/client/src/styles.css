@@ -1483,3 +1483,13 @@ details.help:not([open]) > .help-body { display: none; }
 @container (min-width: 860px) {
   .stock-row { grid-template-columns: minmax(11em, 1fr) minmax(16em, 1.4fr) 10.5em 25em; }
 }
+/* 借入の内訳（借入の総額と返済の残りを分ける） */
+.loan-cells { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5em, 1fr)); gap: 6px; margin: 4px 0 6px; }
+.loan-cell { display: flex; flex-direction: column; background: var(--s2); border-radius: 8px; padding: 5px 8px; min-width: 0; }
+.loan-cell small { font-size: 10.5px; color: var(--muted); }
+.loan-cell b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.loan-cell.warn b { color: var(--warn); }
+.loan-cell.bad b { color: var(--bad); }
+.loan-cell.good b { color: var(--good); }
+.loan-row { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px; padding: 3px 0; }
+.loan-row b { font-variant-numeric: tabular-nums; }

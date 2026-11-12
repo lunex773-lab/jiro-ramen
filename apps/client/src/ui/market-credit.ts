@@ -132,9 +132,9 @@ export function creditCard(root: HTMLElement, v: MarketView, handlers: CreditHan
         'summary',
         null,
         h('b', null, `${lending ? '貸し' : '借り'}: ${other}`),
-        ` ${yenStr(cr.principal)}・${cr.days}日・${rateText(cr.dailyRate)}`,
+        ` 元金 ${yenStr(cr.principal)}・${cr.days}日・${rateText(cr.dailyRate)}`,
         h('span', { class: `chip ${tone}` }, STATUS_LABEL[cr.status]),
-        open ? h('small', null, `残り ${yenStr(owed)}（期限 市場の${cr.dueDay}日目）`) : cr.lost > 0 ? h('small', null, `返せなかった分 ${yenStr(cr.lost)}`) : null,
+        open ? h('small', null, `返済の残り ${yenStr(owed)}（利息を含む・期限 市場の${cr.dueDay}日目）`) : cr.lost > 0 ? h('small', null, `返せなかった分 ${yenStr(cr.lost)}`) : null,
       ),
       actions.length > 0 ? h('div', { class: 'row' }, ...actions) : null,
       h(

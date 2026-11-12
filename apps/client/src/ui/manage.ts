@@ -134,7 +134,7 @@ function companyTabVisible(s: GameState): boolean {
 import { confirmDialog, confirmNode, h, replace, stars, toast, yenStr } from './dom';
 import { openStoreMap } from './store-map';
 import { hoursDialog, hoursSummary } from './hours-dialog';
-import { loanControl } from './loan';
+import { loanControl, loanSummary } from './loan';
 import { forecastLines } from './site-lines';
 import { alertBox, cardHead, delta, flowBar, kpi, kpiRow, meterBar, profitBars, yenSigned } from './kit';
 import { debugEventsCard, debugEventsEnabled } from './debug-events';
@@ -562,12 +562,14 @@ export class ManageMenu {
       cardHead(`会社の財務 — ${s.day}日目`, 'お金・借入・キャリアは会社のものです。プレイヤーがいない店は店長が営業し、1日ごとに計算します（細かい動きは見えません）。'),
       kpiRow([
         kpi('現金（会社）', yenSigned(s.money), null, s.money < 50_000 ? 'bad' : ''),
-        kpi('借入・未払金', yenSigned(totalDebt(s)), null, totalDebt(s) > 0 ? 'warn' : ''),
+        kpi('返済の残り（借入・未払金）', yenSigned(totalDebt(s)), `借入の総額 ${yenStr(s.loans.reduce((a, l) => a + l.principal, 0))}`, totalDebt(s) > 0 ? 'warn' : ''),
         kpi('店の数', `${c.stores.length}店`, null),
         last ? kpi(`${last.day}日目の営業利益（全店）`, yenSigned(last.operatingProfit, true), `純売上 ${yenSigned(last.netSales)}${last.interest > 0 ? `・利息 −${yenStr(last.interest)}` : ''}`, last.operatingProfit < 0 ? 'bad' : 'good') : null,
       ]),
       week.length > 0 ? row(`直近${week.length}日の営業利益（全店）`, yenSigned(weekOp, true), weekOp < 0 ? 'bad' : 'good') : null,
       c.history.length > 1 ? profitBars(c.history.slice(-14).map((r) => ({ day: r.day, value: r.operatingProfit }))) : null,
+      h('h5', null, '🏦 銀行の借入'),
+      loanSummary(s),
     );
     const storeCards = c.stores.map((entry) => {
       const st = storeStatus(s, entry);
@@ -946,6 +948,9 @@ export class ManageMenu {
           fc.loans > 0 ? row('融資返済＋利息', yenStr(fc.loans)) : null,
           row('合計', yenStr(fc.total), s.money < fc.total ? 'bad' : ''),
         ),
+        s.loans.length > 0 || arrears > 0
+          ? h('section', { class: 'card', 'data-dash-loans': '' }, cardHead('借入（銀行）', '借入の総額は借りた額の合計、返済の残りはまだ返していない額です。毎日の閉店後の精算で、元金の分と利息を返します。'), loanSummary(s))
+          : null,
         this.hoursCard(s, activeStore(s)),
       h(
         'section',
