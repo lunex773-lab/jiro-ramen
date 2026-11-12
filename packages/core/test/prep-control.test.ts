@@ -12,11 +12,13 @@ import {
   stockOf,
   suggestPrepPlan,
   weekdayOf,
+  type GameState,
+  type SimCtx,
 } from '../src';
 import { addLot } from '../src/sim/inventory';
 import { addBot, eqByType, newGame, run, standAt } from './helpers';
 
-const act = (s: Parameters<typeof applyAction>[0], ctx: Parameters<typeof applyAction>[2], targetId: string, verb: string, mult?: number) =>
+const act = (s: GameState, ctx: SimCtx, targetId: string, verb: string, mult?: number) =>
   applyAction(s, 'p1', { type: 'interact', targetId, verb, ...(mult !== undefined ? { args: { mult } } : {}) }, ctx);
 
 describe('仕込むときに量を選べる', () => {

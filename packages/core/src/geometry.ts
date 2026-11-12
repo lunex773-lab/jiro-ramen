@@ -120,6 +120,44 @@ export function alleyRect(st: StageDef): Rect {
   return { x0: armoryRect(st).x1, z0: -0.5, x1: st.w * CELL + 1.9, z1: 2.2 };
 }
 
+/**
+ * 店のある区画（オーナーの指示 2026-11-12「店の外も地域性を反映し、区画を裏通りも含めて1周歩ける」）。
+ * 区画は建物で埋まっていて（左右の隣の建物・店・店の裏の建物）、その周りを歩道が1周する（表通り・左の通り・右の通り・裏通り）
+ */
+export const BLOCK_WALK = 2.6;
+
+export function blockRect(st: StageDef): Rect {
+  return { x0: -6, z0: 0, x1: st.w * CELL + 8, z1: st.d * CELL + 4 };
+}
+
+/** 区画の周りの歩ける帯（表通りの歩道・左の通り・右の通り・裏通り） */
+export function blockWalkRects(st: StageDef): Rect[] {
+  const b = blockRect(st);
+  const w = BLOCK_WALK;
+  return [
+    { x0: b.x0 - w, z0: -4.5, x1: b.x1 + w, z1: 0 },
+    { x0: b.x0 - w, z0: -4.5, x1: b.x0, z1: b.z1 + w },
+    { x0: b.x1, z0: -4.5, x1: b.x1 + w, z1: b.z1 + w },
+    { x0: b.x0 - w, z0: b.z1, x1: b.x1 + w, z1: b.z1 + w },
+  ];
+}
+
+/**
+ * 区画の周りの歩道に置く物の場所（自販機・ベンチ・自転車・植木・バス停 など。地域ごとに何を置くかは画面が決める）。
+ * 建物の壁に沿った決まった場所で、歩くときはぶつかる
+ */
+export function outdoorBays(st: StageDef): (Rect & { side: 'left' | 'right' | 'back' })[] {
+  const b = blockRect(st);
+  const d = 0.85;
+  const out: (Rect & { side: 'left' | 'right' | 'back' })[] = [];
+  for (const z of [2.2, (b.z1 + 2.2) / 2 + 1.5]) {
+    out.push({ side: 'left', x0: b.x0 - d, z0: z, x1: b.x0, z1: z + 1.3 });
+    out.push({ side: 'right', x0: b.x1, z0: z, x1: b.x1 + d, z1: z + 1.3 });
+  }
+  for (const x of [b.x0 + 2.5, (b.x0 + b.x1) / 2 - 0.7, b.x1 - 3.8]) out.push({ side: 'back', x0: x, z0: b.z1, x1: x + 1.3, z1: b.z1 + d });
+  return out;
+}
+
 /** 衝突判定用の箱（壁・カウンター・設備） */
 export function colliders(s: GameState): Rect[] {
   const st = stageOf(s);
@@ -145,7 +183,8 @@ export function isWalkable(s: GameState, p: Vec2, radius: number): boolean {
   const W = inside.x1;
   const D = inside.z1;
   const inInterior = p.x >= radius && p.x <= W - radius && p.z >= radius && p.z <= D - radius;
-  const inStreet = p.x >= street.x0 && p.x <= street.x1 && p.z >= street.z0 && p.z <= -radius;
+  // 店の前の通りと、区画の周りを1周する歩道（建物の壁・縁石から radius だけ離れる）
+  const inStreet = (p.x >= street.x0 && p.x <= street.x1 && p.z >= street.z0 && p.z <= -radius) || inBlockWalk(st, p, radius);
   const inDoor = p.x >= st.door.x0 + radius && p.x <= st.door.x1 - radius && p.z > -radius - 0.01 && p.z < radius + 0.01;
   const alley = alleyRect(st);
   const inAlley = p.x >= alley.x0 + radius && p.x <= alley.x1 - radius && p.z >= alley.z0 && p.z <= alley.z1 - radius;
@@ -153,7 +192,13 @@ export function isWalkable(s: GameState, p: Vec2, radius: number): boolean {
   for (const r of colliders(s)) {
     if (inRect(p, r, radius)) return false;
   }
+  if (!inInterior && outdoorBays(st).some((r) => inRect(p, r, radius))) return false;
   return true;
+}
+
+/** 区画の周りの歩道の上か（建物の壁・縁石から radius だけ離れる） */
+function inBlockWalk(st: StageDef, p: Vec2, radius: number): boolean {
+  return blockWalkRects(st).some((r) => p.x >= r.x0 + radius && p.x <= r.x1 - radius && p.z >= r.z0 + radius && p.z <= r.z1 - radius);
 }
 
 /**

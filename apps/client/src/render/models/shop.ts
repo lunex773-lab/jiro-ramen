@@ -2,11 +2,11 @@
 // StageDef（CELL=0.5m）から作る。店内 x∈[0,w*CELL], z∈[0,d*CELL]、z=0 が正面の壁（通り側）、z<0 が歩道。
 
 import * as THREE from 'three';
-import { CELL, MENU, MENU_IDS, type StageDef, type Surroundings } from '@jiro/core';
+import { ARMORY_DEPTH, BLOCK_WALK, blockRect, CELL, MENU, MENU_IDS, outdoorBays, type StageDef, type Surroundings } from '@jiro/core';
 import { cached, GeoBuilder, makeRng, rr, type Disposable } from './common';
 import { MAT, plastic, glow } from './materials';
 import { canvasTexture, JP_FONT } from './textures';
-import { buildSurroundings, neighborHeight } from './surroundings';
+import { buildBlockAround, buildSurroundings, neighborHeight } from './surroundings';
 
 export interface ShopShell extends Disposable {
   group: THREE.Group;
@@ -422,25 +422,33 @@ export function createShopShell(stage: StageDef, shopName: string, surroundings:
   const cup = std('cup', { color: '#d9e6ee', roughness: 0.15, transparent: true, opacity: 0.7 });
   for (let i = 0; i < 3; i++) b.cyl(cup, 0.035, 0.028, 0.09 + i * 0.012, 10, { x: shelfX + 0.11, y: 1.065, z: 0.98 - i * 0.002 });
 
-  // ── 外: 歩道・縁石・道路・隣の建物 ──
-  const sx0 = -6;
-  const sx1 = W + 8;
+  // ── 外: 歩道・縁石・道路・隣の建物（区画を1周歩ける。オーナーの指示 2026-11-12） ──
+  const blk = blockRect(stage);
+  const sx0 = blk.x0 - BLOCK_WALK;
+  const sx1 = blk.x1 + BLOCK_WALK;
   b.box(MAT.sidewalk(), sx1 - sx0, 0.05, 4.5 - WALL_T, { x: (sx0 + sx1) / 2, y: -0.025, z: -(4.5 + WALL_T) / 2, uv: 1.0 });
   b.box(SM.curb(), sx1 - sx0, 0.18, 0.18, { x: (sx0 + sx1) / 2, y: -0.06, z: -4.5 });
   b.box(MAT.asphalt(), sx1 - sx0 + 30, 0.05, 9, { x: (sx0 + sx1) / 2, y: -0.175, z: -4.5 - 4.5, uv: 2.0 });
   for (let x = sx0 - 14; x < sx1 + 14; x += 3) b.box(SM.roadLine(), 1.5, 0.01, 0.12, { x, y: -0.145, z: -9 });
   // 隣の店（シャッター）。高さは地域で変わる（都会は高いビル、郊外・田舎は低い）
   const nbH = neighborHeight(surroundings);
-  b.box(SM.shutter(), -WALL_T - sx0, 2.4, 0.06, { x: (sx0 - WALL_T) / 2, y: 1.2, z: -WALL_T - 0.05, uv: 1.0 });
-  b.box(SM.building(0), -WALL_T - sx0, nbH, 0.4, { x: (sx0 - WALL_T) / 2, y: nbH / 2, z: 0.2 });
+  // 区画の建物: 左の隣・右の隣（奥まで）・店の裏の建物。表の面はシャッター
+  b.box(SM.shutter(), -WALL_T - blk.x0, 2.4, 0.06, { x: (blk.x0 - WALL_T) / 2, y: 1.2, z: -WALL_T - 0.05, uv: 1.0 });
+  b.box(SM.building(0), -WALL_T - blk.x0, nbH, blk.z1, { x: (blk.x0 - WALL_T) / 2, y: nbH / 2, z: blk.z1 / 2 });
   // 右の隣の店は、店との間に路地をあける（店の右の横の壁の外に物置と隠し扉がある。じろ1 5.12）
   const alleyX = W + 1.9;
-  b.box(SM.shutter(), sx1 - alleyX, 2.4, 0.06, { x: (alleyX + sx1) / 2, y: 1.2, z: -WALL_T - 0.05, uv: 1.0 });
-  b.box(SM.building(1), sx1 - alleyX, nbH, 0.4, { x: (alleyX + sx1) / 2, y: nbH / 2, z: 0.2 });
-  // 路地: 床・隣の建物の横の壁・奥の塀
+  b.box(SM.shutter(), blk.x1 - alleyX, 2.4, 0.06, { x: (alleyX + blk.x1) / 2, y: 1.2, z: -WALL_T - 0.05, uv: 1.0 });
+  b.box(SM.building(1), blk.x1 - alleyX, nbH, blk.z1, { x: (alleyX + blk.x1) / 2, y: nbH / 2, z: blk.z1 / 2 });
+  // 店の裏の建物（店の奥の壁から裏通りまで）と、路地の奥の塀の向こう
+  const rearZ0 = D + WALL_T;
+  b.box(SM.building(2), alleyX + WALL_T, Math.max(3.2, nbH * 0.8), blk.z1 - rearZ0, { x: (alleyX - WALL_T) / 2, y: Math.max(3.2, nbH * 0.8) / 2, z: (rearZ0 + blk.z1) / 2 });
+  const alleyBackX0 = W + WALL_T + ARMORY_DEPTH;
+  b.box(SM.building(2), alleyX - alleyBackX0, 2.6, rearZ0 - 2.42, { x: (alleyBackX0 + alleyX) / 2, y: 1.3, z: (2.42 + rearZ0) / 2 });
+  // 路地: 床・奥の塀
   b.box(MAT.sidewalk(), alleyX - W, 0.05, 2.45, { x: (W + alleyX) / 2, y: -0.025, z: 2.3 / 2 - 0.08, uv: 1.0 });
-  b.box(SM.building(1), 0.2, nbH, 2.5, { x: alleyX + 0.1, y: nbH / 2, z: 1.25 });
   b.box(SM.facade(), alleyX - W, 2.6, 0.12, { x: (W + alleyX) / 2, y: 1.3, z: 2.36 });
+  // 区画の周り: 左右と裏の歩道・車道・建物の横と裏の壁・通りの向こう・歩道の物（地域ごと）
+  buildBlockAround(b, surroundings, r, { x0: blk.x0, x1: blk.x1, z1: blk.z1, walk: BLOCK_WALK, bays: outdoorBays(stage) }, nbH, MAT.sidewalk(), MAT.asphalt(), SM.curb());
   // 向かいの建物（出店先の地域の特性。じろ1 5.10）
   buildSurroundings(b, surroundings, r, sx0, sx1);
   // 電柱

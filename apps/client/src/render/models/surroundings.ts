@@ -193,3 +193,218 @@ export function buildSurroundings(b: GeoBuilder, kind: Surroundings, r: () => nu
     }
   }
 }
+
+// ───────────────── 区画の周り（オーナーの指示 2026-11-12: 区画を裏通りも含めて1周歩ける・地域ごとの物） ─────────────────
+
+export interface BlockDims {
+  /** 区画（建物で埋まっている所） */
+  x0: number;
+  x1: number;
+  z1: number;
+  /** 歩道の幅 */
+  walk: number;
+  /** 歩道に置く物の場所（core の outdoorBays） */
+  bays: { side: 'left' | 'right' | 'back'; x0: number; z0: number; x1: number; z1: number }[];
+}
+
+type Prop = 'vending' | 'bench' | 'bikes' | 'planter' | 'mailbox' | 'busstop' | 'trash' | 'garbage' | 'ac';
+
+/** 地域ごとに、歩道の場所（左1・右1・左2・右2・裏1・裏2・裏3）に置く物 */
+const BAY_PROPS: Record<Surroundings, Prop[]> = {
+  metro: ['vending', 'bikes', 'vending', 'ac', 'trash', 'ac', 'bikes'],
+  station: ['bikes', 'vending', 'bikes', 'bikes', 'trash', 'vending', 'planter'],
+  town: ['vending', 'planter', 'mailbox', 'bikes', 'trash', 'ac', 'planter'],
+  residential: ['planter', 'bikes', 'mailbox', 'planter', 'garbage', 'bench', 'planter'],
+  suburb: ['vending', 'bench', 'planter', 'bikes', 'garbage', 'planter', 'bench'],
+  rural: ['busstop', 'vending', 'bench', 'planter', 'garbage', 'planter', 'bench'],
+};
+
+const P = {
+  vend: () => std('vend', { color: '#d8dde2', roughness: 0.5, metalness: 0.2 }),
+  vendRed: () => std('vendRed', { color: '#b8322a', roughness: 0.5 }),
+  vendPanel: () => std('vendPanel', { color: '#1c2a38', emissive: '#7fb6ff', emissiveIntensity: 0.35, roughness: 0.3 }),
+  wood: () => std('benchWood', { color: '#8a6440', roughness: 0.8 }),
+  metal: () => std('metal', { color: '#5c6166', roughness: 0.5, metalness: 0.5 }),
+  tire: () => std('tire', { color: '#1a1a1a', roughness: 0.9 }),
+  pot: () => std('planterPot', { color: '#7a5a46', roughness: 0.9 }),
+  red: () => std('postRed', { color: '#c4302b', roughness: 0.5 }),
+  bin: () => std('bin', { color: '#3b6e4a', roughness: 0.6 }),
+  net: () => std('garbageNet', { color: '#2f5fa0', roughness: 0.9 }),
+  bag: () => std('garbageBag', { color: '#d7dce0', roughness: 0.7 }),
+  ac: () => std('acUnit', { color: '#e3e3dc', roughness: 0.6 }),
+  acFan: () => std('acFan', { color: '#45484a', roughness: 0.6 }),
+  sign: () => std('busSign', { color: '#2f6fb0', roughness: 0.5 }),
+  pipe: () => std('pipe', { color: '#8e8d86', roughness: 0.7, metalness: 0.3 }),
+  door: () => std('backDoor', { color: '#5d5a55', roughness: 0.6, metalness: 0.2 }),
+};
+
+/** 歩道の場所の向き: 建物の壁から歩道の方（out）と、壁に沿った方（along） */
+function bayFrame(bay: BlockDims['bays'][number]): { cx: number; cz: number; out: [number, number]; along: [number, number]; ry: number; len: number; dep: number } {
+  const cx = (bay.x0 + bay.x1) / 2;
+  const cz = (bay.z0 + bay.z1) / 2;
+  if (bay.side === 'left') return { cx, cz, out: [-1, 0], along: [0, 1], ry: -Math.PI / 2, len: bay.z1 - bay.z0, dep: bay.x1 - bay.x0 };
+  if (bay.side === 'right') return { cx, cz, out: [1, 0], along: [0, -1], ry: Math.PI / 2, len: bay.z1 - bay.z0, dep: bay.x1 - bay.x0 };
+  return { cx, cz, out: [0, 1], along: [1, 0], ry: 0, len: bay.x1 - bay.x0, dep: bay.z1 - bay.z0 };
+}
+
+/** 歩道の物を1つ置く（a: 壁に沿った位置、o: 壁から外へ。どちらも場所の中心から） */
+function buildProp(b: GeoBuilder, kind: Prop, bay: BlockDims['bays'][number], r: () => number): void {
+  const f = bayFrame(bay);
+  const at = (a: number, o: number) => ({ x: f.cx + f.along[0] * a + f.out[0] * o, z: f.cz + f.along[1] * a + f.out[1] * o });
+  const box = (m: THREE.Material, w: number, h: number, d: number, a: number, y: number, o: number) => b.box(m, w, h, d, { ...at(a, o), y, ry: f.ry });
+  switch (kind) {
+    case 'vending':
+      for (const [a, m] of [[-0.33, P.vend()], [0.33, P.vendRed()]] as const) {
+        box(m, 0.62, 1.8, 0.7, a, 0.9, 0);
+        box(P.vendPanel(), 0.48, 0.9, 0.02, a, 1.2, 0.36);
+      }
+      break;
+    case 'bench':
+      box(P.wood(), 1.2, 0.06, 0.4, 0, 0.45, 0.1);
+      box(P.wood(), 1.2, 0.3, 0.05, 0, 0.7, -0.12);
+      for (const a of [-0.5, 0.5]) box(P.metal(), 0.06, 0.45, 0.4, a, 0.22, 0.05);
+      break;
+    case 'bikes':
+      for (const a of [-0.35, 0.1, 0.5]) {
+        for (const o of [-0.3, 0.3]) b.add(P.tire(), new THREE.TorusGeometry(0.28, 0.03, 6, 14), { ...at(a, o), y: 0.3, ry: f.ry + Math.PI / 2 });
+        box(P.metal(), 0.04, 0.04, 0.62, a, 0.5, 0);
+        box(P.metal(), 0.04, 0.5, 0.04, a, 0.55, -0.1);
+      }
+      break;
+    case 'planter':
+      for (const a of [-0.4, 0.4]) {
+        box(P.pot(), 0.45, 0.4, 0.45, a, 0.2, 0);
+        b.add(std('leaf2', { color: '#4f7a3a', roughness: 0.9 }), new THREE.SphereGeometry(0.32 + r() * 0.08, 8, 6), { ...at(a, 0), y: 0.6 });
+      }
+      break;
+    case 'mailbox':
+      b.cyl(P.red(), 0.22, 0.22, 1.1, 12, { ...at(0, 0.1), y: 0 });
+      box(P.red(), 0.5, 0.08, 0.5, 0, 1.12, 0.1);
+      box(P.pot(), 0.45, 0.35, 0.45, 0.45, 0.17, 0);
+      break;
+    case 'busstop':
+      b.cyl(P.metal(), 0.04, 0.04, 2.2, 8, { ...at(-0.45, 0.25), y: 0 });
+      b.cyl(P.sign(), 0.28, 0.28, 0.05, 16, { ...at(-0.45, 0.25), y: 2.1, rx: Math.PI / 2, ry: f.ry });
+      box(P.wood(), 0.8, 0.06, 0.35, 0.25, 0.45, 0);
+      for (const a of [-0.05, 0.55]) box(P.metal(), 0.05, 0.45, 0.35, a, 0.22, 0);
+      break;
+    case 'trash':
+      for (const a of [-0.3, 0.3]) b.cyl(P.bin(), 0.22, 0.2, 0.75, 12, { ...at(a, 0), y: 0 });
+      break;
+    case 'garbage':
+      box(P.net(), 1.2, 0.05, 0.75, 0, 0.5, 0);
+      for (const [a, o] of [[-0.35, -0.1], [0.05, 0.1], [0.38, -0.12]] as const) b.add(P.bag(), new THREE.SphereGeometry(0.22, 8, 6), { ...at(a, o), y: 0.22 });
+      break;
+    case 'ac':
+      for (const a of [-0.32, 0.32]) {
+        box(P.ac(), 0.58, 0.55, 0.3, a, 0.28, -0.2);
+        b.cyl(P.acFan(), 0.17, 0.17, 0.02, 14, { ...at(a, -0.04), y: 0.3, rx: Math.PI / 2, ry: f.ry });
+      }
+      break;
+  }
+}
+
+/**
+ * 区画の周り: 左右と裏の歩道・縁石・車道、区画の建物の横と裏の壁（窓・勝手口・配管）、通りの向こうの建物、歩道の物。
+ * nbH: 区画の建物の高さ
+ */
+export function buildBlockAround(b: GeoBuilder, kind: Surroundings, r: () => number, d: BlockDims, nbH: number, sidewalk: THREE.Material, asphalt: THREE.Material, curb: THREE.Material): void {
+  const { x0, x1, z1, walk } = d;
+  const L = x0 - walk;
+  const Rr = x1 + walk;
+  const Z = z1 + walk;
+  // 歩道（前の歩道は shop.ts）と縁石
+  b.box(sidewalk, walk, 0.05, Z, { x: (L + x0) / 2, y: -0.025, z: Z / 2, uv: 1.0 });
+  b.box(sidewalk, walk, 0.05, Z, { x: (x1 + Rr) / 2, y: -0.025, z: Z / 2, uv: 1.0 });
+  b.box(sidewalk, x1 - x0, 0.05, walk, { x: (x0 + x1) / 2, y: -0.025, z: (z1 + Z) / 2, uv: 1.0 });
+  b.box(curb, 0.18, 0.18, Z + 4.5, { x: L, y: -0.06, z: (Z - 4.5) / 2 });
+  b.box(curb, 0.18, 0.18, Z + 4.5, { x: Rr, y: -0.06, z: (Z - 4.5) / 2 });
+  b.box(curb, Rr - L, 0.18, 0.18, { x: (L + Rr) / 2, y: -0.06, z: Z });
+  // 左右と裏の車道（裏は細い裏通り）
+  const side = kind === 'suburb' || kind === 'rural' ? 8 : 6.5;
+  b.box(asphalt, side, 0.05, Z + 4.5 + side + 9, { x: L - side / 2, y: -0.178, z: (Z + side - 13.5) / 2, uv: 2.0 });
+  b.box(asphalt, side, 0.05, Z + 4.5 + side + 9, { x: Rr + side / 2, y: -0.178, z: (Z + side - 13.5) / 2, uv: 2.0 });
+  b.box(asphalt, Rr - L, 0.05, 4.5, { x: (L + Rr) / 2, y: -0.179, z: Z + 2.25, uv: 2.0 });
+  // 区画の建物の横・裏の壁: 窓・裏口・配管・室外機の跡（区画の建物の箱は shop.ts）
+  const winMat = M.window();
+  const wallDecor = (x: number, z: number, along: 'x' | 'z', len: number, nx: number, nz: number) => {
+    const n = Math.max(1, Math.floor(len / 3.2));
+    for (let i = 0; i < n; i++) {
+      const t = -len / 2 + (i + 0.5) * (len / n);
+      const px = along === 'x' ? x + t : x + nx * 0.03;
+      const pz = along === 'z' ? z + t : z + nz * 0.03;
+      for (let k = 0; k < Math.max(1, Math.floor((nbH - 1) / 3)); k++) {
+        b.box(k === 0 && i % 2 === 1 ? P.door() : winMat, along === 'x' ? 1.1 : 0.05, k === 0 && i % 2 === 1 ? 2.0 : 1.0, along === 'z' ? 1.1 : 0.05, { x: px, y: k === 0 && i % 2 === 1 ? 1.0 : 1.9 + k * 3, z: pz });
+      }
+      if (i % 3 === 0) b.cyl(P.pipe(), 0.05, 0.05, nbH, 8, { x: px + (along === 'x' ? 0.8 : nx * 0.08), y: 0, z: pz + (along === 'z' ? 0.8 : nz * 0.08) });
+    }
+  };
+  wallDecor(x0, z1 / 2, 'z', z1, -1, 0);
+  wallDecor(x1, z1 / 2, 'z', z1, 1, 0);
+  wallDecor((x0 + x1) / 2, z1, 'x', x1 - x0, 0, 1);
+  // 都会・駅前: 横の壁に縦長の光る看板（文字なし）
+  if (kind === 'metro' || kind === 'station') {
+    for (const [x, nx] of [[x0, -1], [x1, 1]] as const) {
+      const neon = kind === 'metro' ? ['#ff3d6e', '#3dd6ff'][nx > 0 ? 1 : 0]! : '#ffd23d';
+      b.box(glow(neon, 1.3), 0.2, 2.6, 0.7, { x: x + nx * 0.15, y: 4.2, z: 1.6 });
+    }
+  }
+  // 通りの向こう（左・右・裏）
+  const far = (cx: number, cz: number, along: 'x' | 'z', len: number, face: number) => {
+    const n = Math.max(2, Math.floor(len / 7));
+    for (let i = 0; i < n; i++) {
+      const t = -len / 2 + (i + 0.5) * (len / n);
+      const px = along === 'x' ? cx + t : cx;
+      const pz = along === 'z' ? cz + t : cz;
+      const w = (len / n) * 0.85;
+      switch (kind) {
+        case 'metro': {
+          const h = rr(r, 18, 34);
+          b.box(M.tower(i), along === 'x' ? w : 6, h, along === 'z' ? w : 6, { x: px, y: h / 2 - 0.15, z: pz });
+          break;
+        }
+        case 'station':
+        case 'town': {
+          const h = rr(r, 6, 13);
+          b.box(M.building(i + 1), along === 'x' ? w : 5, h, along === 'z' ? w : 5, { x: px, y: h / 2 - 0.15, z: pz });
+          break;
+        }
+        case 'residential': {
+          const h = rr(r, 5, 6);
+          b.box(i % 2 ? M.wall() : M.wall2(), along === 'x' ? w * 0.8 : 6, h, along === 'z' ? w * 0.8 : 6, { x: px, y: h / 2 - 0.15, z: pz });
+          gableRoof(b, i % 3 ? M.roof() : M.roof2(), px, h - 0.15, pz, along === 'x' ? w * 0.8 + 0.6 : 6.6, along === 'z' ? w * 0.8 + 0.6 : 6.6, 1.6);
+          if (r() < 0.6) tree(b, px + (along === 'x' ? w * 0.45 : 0), pz + (along === 'z' ? w * 0.45 : 0), 0.9);
+          break;
+        }
+        case 'suburb': {
+          if (i % 2 === 0) b.box(M.lot(), along === 'x' ? w : 9, 0.04, along === 'z' ? w : 9, { x: px, y: -0.17, z: pz });
+          else {
+            b.box(M.building(5), along === 'x' ? w : 7, 4.5, along === 'z' ? w : 7, { x: px, y: 2.1, z: pz });
+          }
+          break;
+        }
+        case 'rural': {
+          b.box(i % 2 ? M.paddy() : M.field(), along === 'x' ? w : 10, 0.04, along === 'z' ? w : 10, { x: px, y: -0.18, z: pz });
+          if (i % 3 === 1) {
+            b.box(M.wall2(), 5, 4, 5, { x: px, y: 1.85, z: pz });
+            gableRoof(b, M.roof2(), px, 3.85, pz, 5.6, 5.6, 2);
+          }
+          break;
+        }
+      }
+      void face;
+    }
+  };
+  const zMid = (Z - 4.5) / 2;
+  far(L - side - 4, zMid, 'z', Z + 4.5, 1);
+  far(Rr + side + 4, zMid, 'z', Z + 4.5, -1);
+  far((L + Rr) / 2, Z + 4.5 + 3.5, 'x', Rr - L + 2 * side, -1);
+  // 交番（駅前）: 左の角の向こうに小さな建物と赤い灯り（文字なし）
+  if (kind === 'station') {
+    b.box(M.building(3), 3.2, 3.2, 3.2, { x: L - side - 2, y: 1.45, z: -2.5 });
+    b.cyl(glow('#ff3030', 1.4), 0.18, 0.18, 0.3, 10, { x: L - side - 0.35, y: 2.6, z: -2.5 });
+  }
+  // 歩道の物
+  const props = BAY_PROPS[kind];
+  d.bays.forEach((bay, i) => buildProp(b, props[i % props.length]!, bay, r));
+}
