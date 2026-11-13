@@ -52,13 +52,13 @@ describe('隠し扉と武器庫', () => {
     // まだ何も買っていない: 買う操作だけ（じろ2: 値段は案の2倍）
     expect(listVerbs(s, 'p1', ARMORY_RACK_ID).map((v) => v.label)).toEqual([
       '武器の棚を見る',
-      '日本刀を買う（¥600,000）',
-      '包丁を買う（¥60,000）',
-      '金属バットを買う（¥100,000）',
-      '鉄パイプを買う（¥80,000）',
-      '拳銃を買う（¥2,000,000）',
-      '散弾銃を買う（¥3,000,000）',
-      '爆弾を買う（¥1,000,000・1個）',
+      '日本刀を買う（¥300,000）',
+      '包丁を買う（¥30,000）',
+      '金属バットを買う（¥50,000）',
+      '鉄パイプを買う（¥40,000）',
+      '拳銃を買う（¥1,000,000）',
+      '散弾銃を買う（¥1,500,000）',
+      '爆弾を買う（¥500,000・1個）',
     ]);
     s.tutorial = { step: 0 } as never;
     expect(interact(s, ctx, ARMORY_DOOR_ID, 'armory_door').ok).toBe(false);
@@ -212,25 +212,26 @@ describe('武器を買う（じろ2: 改修設計書05。値段は案の2倍。�
     return { s, ctx };
   }
 
-  it('値段（包丁6万・鉄パイプ8万・金属バット10万・日本刀60万・拳銃200万＋弾1発10万・散弾銃300万＋弾1発16万・爆弾1個100万）', () => {
+  // オーナーの指示 2026-11-13: 半額（弾・爆弾も）
+  it('値段（包丁3万・鉄パイプ4万・金属バット5万・日本刀30万・拳銃100万＋弾1発5万・散弾銃150万＋弾1発8万・爆弾1個50万）', () => {
     expect(Object.fromEntries(Object.values(WEAPONS).map((w) => [w.id, [w.price, w.ammoPrice ?? 0]]))).toEqual({
-      knife: [60_000, 0],
-      pipe: [80_000, 0],
-      bat: [100_000, 0],
-      katana: [600_000, 0],
-      pistol: [2_000_000, 100_000],
-      shotgun: [3_000_000, 160_000],
-      bomb: [1_000_000, 0],
+      knife: [30_000, 0],
+      pipe: [40_000, 0],
+      bat: [50_000, 0],
+      katana: [300_000, 0],
+      pistol: [1_000_000, 50_000],
+      shotgun: [1_500_000, 80_000],
+      bomb: [500_000, 0],
     });
   });
 
   it('お金が足りなければ買えない。買うとお金が減り、武器庫に残る（戻しても、次の日も持てる）', () => {
-    const { s, ctx } = opened(60, 50_000);
+    const { s, ctx } = opened(60, 25_000);
     expect(interact(s, ctx, ARMORY_RACK_ID, 'buy_weapon:knife').ok).toBe(false);
     s.money = 100_000;
     expect(interact(s, ctx, ARMORY_RACK_ID, 'buy_weapon:knife').ok).toBe(true);
-    expect(s.money).toBe(40_000);
-    expect(s.transactions.at(-1)).toMatchObject({ type: 'weapon', amount: -60_000 });
+    expect(s.money).toBe(70_000);
+    expect(s.transactions.at(-1)).toMatchObject({ type: 'weapon', amount: -30_000 });
     expect(listVerbs(s, 'p1', ARMORY_RACK_ID).map((v) => v.verb)).not.toContain('buy_weapon:knife');
     expect(interact(s, ctx, ARMORY_RACK_ID, 'weapon:knife').ok).toBe(true);
     expect(interact(s, ctx, ARMORY_RACK_ID, 'weapon_return').ok).toBe(true);
@@ -257,7 +258,7 @@ describe('武器を買う（じろ2: 改修設計書05。値段は案の2倍。�
   });
 
   it('爆弾は1個ずつ買い、持つと武器庫から減り、戻すと戻り、投げるとなくなる', () => {
-    const { s, ctx } = opened(62, 2_500_000);
+    const { s, ctx } = opened(62, 1_250_000);
     expect(interact(s, ctx, ARMORY_RACK_ID, 'buy_weapon:bomb').ok).toBe(true);
     expect(interact(s, ctx, ARMORY_RACK_ID, 'buy_weapon:bomb').ok).toBe(true);
     expect(interact(s, ctx, ARMORY_RACK_ID, 'buy_weapon:bomb').ok).toBe(false);

@@ -12,7 +12,7 @@ import { MAT } from './materials';
 
 export type { Disposable } from './common';
 export { createBowl, BOWL_DIMS, innerRadiusAt, type BowlModel, type BowlDetail } from './bowl';
-export { createCharacter, type CharacterAct, type CharacterFx, type CharacterModel, type CharacterPose, type CharacterOpts } from './character';
+export { ATTACK_SEC, createCharacter, type AttackMotion, type CharacterAct, type CharacterFx, type CharacterModel, type CharacterPose, type CharacterOpts } from './character';
 export { createEquipment, type EquipmentModel } from './equipment';
 export { createShopShell, createStool, COUNTER_TOP_Y, COUNTER_SHELF_Y, CEILING_Y, type ShopShell } from './shop';
 export { createDirt, createLostItem, createHeldItem, type HeldKind } from './props';

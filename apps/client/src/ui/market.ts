@@ -1222,7 +1222,7 @@ export class MarketScreen {
             { class: 'trow' },
             h('div', { class: 'tname' }, e.profile.name, h('small', null, `${ROLE_LABEL[e.profile.role]}・${e.profile.employment === 'full' ? '社員' : 'アルバイト'}`)),
             e.profile.employment !== 'full' ? h('button', { class: 'mini', onclick: () => void this.act({ type: 'promote', employeeId: e.id }, '社員にしました') }, '社員にする') : null,
-            entry.snapshot === null && others.length > 0
+            others.length > 0 && !e.profile.temp
               ? h('select', { onchange: (ev: Event) => { const to = (ev.target as HTMLSelectElement).value; if (to) void this.act({ type: 'transferEmployee', employeeId: e.id, toStoreId: to }, '異動しました'); } }, h('option', { value: '' }, '異動…'), others.map((x) => h('option', { value: x.id }, x.name)))
               : null,
           ),

@@ -206,8 +206,25 @@ export const FILM_RESPONSE_LABEL = {
 /**
  * テレビ取材の番組と出演者（すべて架空。実在の番組・人物ではない）
  */
-export const TV_SHOWS = ['突撃！となりの行列店', 'ガッツリ食べ歩き紀行', 'ラーメン道場 夕方スペシャル', '麺ハンターの休日'] as const;
+export const TV_SHOWS = [
+  '突撃！となりの行列店',
+  'ガッツリ食べ歩き紀行',
+  'ラーメン道場 夕方スペシャル',
+  '麺ハンターの休日',
+  'どんぶり探検隊',
+  '深夜のマシマシ食堂',
+  '日曜はがっつり日和',
+  '麺と湯気の旅',
+  'となりの大盛りさん',
+  'ハラペコ列島縦断',
+  '湯切り一本勝負',
+  '週末グルメ散歩 ちょい足し編',
+] as const;
 
+/**
+ * テレビの出演者（すべて架空の名前。実在の人物ではない。オーナーの指示 2026-11-13 で増やした）。
+ * 前からいる8人の id は変えない（飾ったサインのデータが残っている）
+ */
 export const CELEBRITIES: readonly { id: string; name: string }[] = [
   { id: 'cel_menta', name: '麺田 ススル' },
   { id: 'cel_mashiko', name: 'ヤサイ マシ子' },
@@ -217,6 +234,30 @@ export const CELEBRITIES: readonly { id: string; name: string }[] = [
   { id: 'cel_tenchi', name: '天地 カエス' },
   { id: 'cel_wasshi', name: 'ワシワシ 麺子' },
   { id: 'cel_chashu', name: '豚山 ブタ太郎' },
+  { id: 'cel_yugiri', name: '湯切 シャキ' },
+  { id: 'cel_kaedama', name: '替玉 もう一' },
+  { id: 'cel_donburi', name: '丼本 マンプク' },
+  { id: 'cel_moyashi', name: 'モヤシ 山盛' },
+  { id: 'cel_shoyu', name: '醤油 濃太' },
+  { id: 'cel_nitamago', name: '煮玉 トロ美' },
+  { id: 'cel_futomen', name: '太麺 ゴワ助' },
+  { id: 'cel_menma', name: '支那竹 コリ子' },
+  { id: 'cel_negi', name: '青ネギ 香' },
+  { id: 'cel_gyokai', name: '魚介 ダシ男' },
+  { id: 'cel_tonkotsu', name: '豚骨 白湯' },
+  { id: 'cel_kosho', name: '黒胡椒 ピリ' },
+  { id: 'cel_raiko', name: '来光 ススリ' },
+  { id: 'cel_harapeko', name: '腹ペコ 満' },
+  { id: 'cel_zenbu', name: '全部 マシ太' },
+  { id: 'cel_sukunaku', name: '少なめ 遠慮' },
+  { id: 'cel_katamen', name: '麺カタ 硬子' },
+  { id: 'cel_ramen_k', name: 'ラーメン 小次郎' },
+  { id: 'cel_umami', name: '旨味 ジュワ' },
+  { id: 'cel_kotteri', name: 'こってり 重' },
+  { id: 'cel_asari', name: 'あっさり 澄子' },
+  { id: 'cel_hokahoka', name: 'ほかほか 湯気之介' },
+  { id: 'cel_tsuyu', name: '汁谷 飲干' },
+  { id: 'cel_gyoza', name: '餃子 パリ蔵' },
 ] as const;
 
 /** 爆発事故の前、燃え広がる火に気づいたお客さんと従業員のセリフ（騒ぐが店からは出ない） */

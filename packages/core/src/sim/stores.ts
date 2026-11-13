@@ -363,22 +363,34 @@ export function assignManager(s: GameState, ctx: SimCtx, storeId: Id, employeeId
   return { ok: true };
 }
 
-/** 今の店の従業員を、ほかの店へ異動させる（閉店後） */
+/**
+ * 従業員をほかの店へ異動させる（閉店後）。どの店の従業員でも、どの店へでも移せて、すぐに異動先の店の従業員になる
+ * （オーナーの指示 2026-11-13「新店舗からでも・従業員の移動も即反映」）。異動先では次の営業日から働く。
+ * アルバイトのシフトは、異動先の店の営業時間に合わせて同じ時刻に働くように直す
+ */
 export function transferEmployee(s: GameState, ctx: SimCtx, employeeId: Id, toStoreId: Id, asManager = false): { ok: boolean; reason?: string } {
   if (s.phase !== 'closed') return { ok: false, reason: '閉店後にだけ異動できます' };
-  const to = s.company.stores.find((x) => x.id === toStoreId);
-  if (!to || !to.snapshot) return { ok: false, reason: '異動先の店が見つかりません' };
-  const e = s.employees.find((x) => x.id === employeeId);
-  if (!e) return { ok: false, reason: 'この店の従業員ではありません' };
+  const c = s.company;
+  const to = c.stores.find((x) => x.id === toStoreId);
+  if (!to || (to.id !== c.activeStoreId && !to.snapshot)) return { ok: false, reason: '異動先の店が見つかりません' };
+  const from = c.stores.find((x) => staffOf(s, x).some((e) => e.id === employeeId));
+  if (!from) return { ok: false, reason: '従業員が見つかりません' };
+  if (from.id === to.id) return { ok: false, reason: 'すでにその店の従業員です' };
+  const e = staffOf(s, from).find((x) => x.id === employeeId)!;
   if (e.profile.temp) return { ok: false, reason: '短期バイトは異動できません（今日だけ来る人です）' };
   if (asManager && e.profile.employment !== 'full') return { ok: false, reason: '店長は社員から選びます' };
-  const cur = activeStore(s);
-  s.employees = s.employees.filter((x) => x.id !== employeeId);
-  if (cur.managerId === employeeId) cur.managerId = null;
+  // 元の店から外す（店長・店長代理の任命も外す）
+  if (from.id === c.activeStoreId) s.employees = s.employees.filter((x) => x.id !== employeeId);
+  else from.snapshot!.employees = from.snapshot!.employees.filter((x) => x.id !== employeeId);
+  if (from.managerId === employeeId) from.managerId = null;
+  if (from.deputies) from.deputies = from.deputies.filter((d) => d.employeeId !== employeeId);
   detach(e);
-  to.snapshot.employees.push(e);
+  // シフトを異動先の営業時間に合わせる（前の店と同じ時刻に働く）
+  remapShiftsForHours([e], from.hours ?? DEFAULT_HOURS, to.hours ?? DEFAULT_HOURS, s.day);
+  if (to.id === c.activeStoreId) s.employees.push(e);
+  else to.snapshot!.employees.push(e);
   if (asManager) to.managerId = e.id;
-  notify(s, ctx, `store:move:${e.id}`, 'info', `${e.profile.name}さんを${storeDisplayName(s, to)}へ異動しました${asManager ? '（店長）' : ''}`);
+  notify(s, ctx, `store:move:${e.id}`, 'info', `${e.profile.name}さんを${storeDisplayName(s, from)}から${storeDisplayName(s, to)}へ異動しました${asManager ? '（店長）' : ''}。次の営業日から${storeDisplayName(s, to)}で働きます`);
   return { ok: true };
 }
 

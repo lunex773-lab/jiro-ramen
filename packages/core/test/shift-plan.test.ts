@@ -1,6 +1,8 @@
 // アルバイトのシフトを営業時間に合わせて管理する（オーナーの指示 2026-11-11）
 import { describe, expect, it } from 'vitest';
 import {
+  isFullShift,
+  shiftEndOf,
   applyAction,
   autoShifts,
   DEFAULT_HOURS,
@@ -69,7 +71,8 @@ describe('営業時間を変えたら、アルバイトのシフトを合わせ�
     expect([shiftTimeText(b.start, TWO), shiftTimeText(b.end, TWO, true)]).toEqual(['13:00', '14:00']);
     // 仕込みから最後まで → 新しい営業時間の最後まで
     const c = remapShift(sh(0, 240, true), DEFAULT_HOURS, TWO);
-    expect(c).toEqual(sh(0, openMinutesOf(TWO), true));
+    expect(isFullShift(c)).toBe(true);
+    expect(shiftEndOf(c, openMinutesOf(TWO))).toBe(openMinutesOf(TWO));
     // 夜だけの店（17〜22時）: 昼のシフトは重ならない → 同じ割合の位置・同じ長さ
     const d = remapShift(sh(60, 180), DEFAULT_HOURS, DINNER);
     expect(d.end - d.start).toBe(120);

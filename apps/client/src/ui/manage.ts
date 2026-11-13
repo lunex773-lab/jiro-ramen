@@ -76,6 +76,7 @@ import {
   injuredOn,
   hasDateShift,
   shiftTimeText,
+  shiftEndOf,
   staffLog,
   staffSummary,
   weekdayOf,
@@ -216,7 +217,7 @@ function attText(a: { absent: boolean; workedMin: number; lateMin: number; overt
 /** 表のマスに入る短いシフト（「11-15」） */
 function shiftShort(sh: ShiftDay, hrs: StoreHours): string {
   const a = shiftTimeText(sh.start, hrs).replace(/:00$/, '');
-  const b = shiftTimeText(sh.end, hrs, true).replace(/:00$/, '');
+  const b = shiftTimeText(shiftEndOf(sh, openMinutesOf(hrs)), hrs, true).replace(/:00$/, '');
   return `${a}-${b}`;
 }
 
@@ -812,26 +813,26 @@ export class ManageMenu {
       ),
       h('p', { class: 'note' }, '全国の市区町村に、駅前・住宅街・郊外の3つの候補地があります。人口の多い街は客が少し多く、家賃も少し高くなります。'),
     );
-    // 異動（今の店の従業員をほかの店へ）
-    const others = c.stores.filter((x) => x.id !== c.activeStoreId);
+    // 異動（どの店の従業員でも、ほかの店へ。すぐに異動先の従業員になる。オーナーの指示 2026-11-13）
+    const staffRows = c.stores.flatMap((entry) => storeStatus(s, entry).employees.filter((e) => !e.profile.temp).map((e) => ({ entry, e })));
     const moveCard =
-      others.length > 0 && s.employees.length > 0
+      c.stores.length > 1 && staffRows.length > 0
         ? h(
             'section',
-            { class: 'card wide' },
-            h('h4', null, '異動（今の店の従業員をほかの店へ）'),
-            h('p', { class: 'note' }, '閉店後にできます。店長の営業では、従業員の担当と能力で出せる杯数が増えます。'),
+            { class: 'card wide', 'data-move-card': '' },
+            h('h4', null, '異動（店の間で従業員を移す）'),
+            h('p', { class: 'note' }, '閉店後にできます。どの店の従業員でも、ほかの店へすぐに移せます（異動先の店で次の営業日から働きます。アルバイトのシフトは異動先の営業時間に合わせて直します）。店長の営業では、従業員の担当と能力で出せる杯数が増えます。'),
             h(
               'div',
               { class: 'table' },
-              s.employees.map((e) => {
-                const sel = h('select', null, others.map((x) => h('option', { value: x.id }, storeDisplayName(s, x))));
+              staffRows.map(({ entry, e }) => {
+                const sel = h('select', { 'data-move-to': e.id }, c.stores.filter((x) => x.id !== entry.id).map((x) => h('option', { value: x.id }, storeDisplayName(s, x))));
                 return h(
                   'div',
-                  { class: 'trow' },
-                  h('div', { class: 'tname' }, e.profile.name, h('small', null, `${ROLE_LABEL[e.profile.role]}・${e.profile.employment === 'full' ? '社員' : 'アルバイト'}`)),
+                  { class: 'trow', 'data-move-row': e.id },
+                  h('div', { class: 'tname' }, e.profile.name, h('small', null, `${storeDisplayName(s, entry)}${entry.id === c.activeStoreId ? '（今いる店）' : ''}・${ROLE_LABEL[e.profile.role]}・${e.profile.employment === 'full' ? '社員' : 'アルバイト'}${entry.managerId === e.id ? '・店長' : ''}`)),
                   sel,
-                  h('button', { class: 'mini', disabled: !closed, onclick: () => void this.act({ type: 'transferEmployee', employeeId: e.id, toStoreId: (sel as HTMLSelectElement).value }, '異動しました') }, '異動する'),
+                  h('button', { class: 'mini', 'data-move': e.id, disabled: !closed || !this.host.isHost, onclick: () => void this.act({ type: 'transferEmployee', employeeId: e.id, toStoreId: (sel as HTMLSelectElement).value }, '異動しました') }, '異動する'),
                 );
               }),
             ),
@@ -2264,7 +2265,7 @@ export class ManageMenu {
     if (!sh) return '休み';
     const hrs = storeHours(this.host.state);
     const b = sh.breakLen > 0 ? `（休憩${sh.breakLen}分）` : '';
-    const end = Math.min(sh.end, openMinutesOf(hrs));
+    const end = shiftEndOf(sh, openMinutesOf(hrs));
     // 中休みは休む: 枠ごとの時間を並べる（「11:00〜14:00・17:00〜21:00（中休みは休み）」）
     if (sh.midRest && shiftSpansBreak(hrs, sh.start, end)) {
       const parts: string[] = [];
@@ -2397,8 +2398,10 @@ export class ManageMenu {
       const hrs = todayOnly ? todayHours(s) : storeHours(s);
       const mixedHours = !todayOnly && picked.includes(s.day) && s.phase !== 'closed' && JSON.stringify(todayHours(s).sessions) !== JSON.stringify(storeHours(s).sessions);
       const close = openMinutesOf(hrs);
-      const base = shiftFor(e, picked[0]!);
-      const draft: ShiftDay | null = ed && ed.draft !== undefined ? ed.draft : base;
+      // 「仕込みから閉店まで」の予定は、選んだ日の営業時間の閉店の時刻で見せる（営業時間とリンク。オーナーの指示 2026-11-13）
+      const shown = (sh: ShiftDay | null): ShiftDay | null => (sh ? { ...sh, end: shiftEndOf(sh, close) } : null);
+      const base = shown(shiftFor(e, picked[0]!));
+      const draft: ShiftDay | null = ed && ed.draft !== undefined ? shown(ed.draft) : base;
       const setDraft = (d: ShiftDay | null) => {
         this.shiftEdit = { id: e.id, days: picked, draft: d };
         this.render();

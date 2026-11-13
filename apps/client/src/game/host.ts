@@ -12,7 +12,9 @@ import {
   type GameState,
   type PeerInfo,
   type SimCtx,
-  speedLockReason,
+  type EventSlowConfig,
+  type SpeedLimit,
+  speedLimit,
 } from '@jiro/core';
 
 export type ConnState = 'local' | 'connecting' | 'online' | 'reconnecting' | 'paused' | 'closed';
@@ -38,10 +40,10 @@ export interface GameHost {
   onStatus(cb: () => void): () => void;
   /** 速度倍率（シングルプレイのみ） */
   speed: number;
-  /** 店で珍しいことが起きている間は等倍にする（設定。初期はオン。オーナーの判断 2026-11-13） */
-  slowOnEvents: boolean;
-  /** 今は倍速にできない理由（できるなら null） */
-  speedLockReason(): string | null;
+  /** 店で珍しいことが起きている間は倍速を解除する（設定。どのイベントで・何倍に。オーナーの判断 2026-11-13） */
+  slow: EventSlowConfig;
+  /** 今の倍速の上限（なければ null） */
+  speedLimit(): SpeedLimit | null;
   dispose(): void;
 }
 
@@ -51,7 +53,7 @@ export class LocalHost implements GameHost {
   readonly conn: ConnState = 'local';
   readonly peers: PeerInfo[] = [];
   speed = 1;
-  slowOnEvents = true;
+  slow: EventSlowConfig = { on: true };
   private ctx: SimCtx = makeCtx();
   private eventCbs = new Set<(ev: GameEvent[]) => void>();
   private statusCbs = new Set<() => void>();
@@ -86,25 +88,27 @@ export class LocalHost implements GameHost {
     // 爆発事故（発火してから焼け跡のあいだ）は倍速をやめて等速にする（オーナーの指示: 15秒の火事をそのまま体験してから爆発する）。
     // 発火がフレームの途中で始まっても倍速で進みすぎないよう、細かく区切って進める
     // 人を襲った日の事件の間（襲った瞬間から営業が終わるまで）も等速に戻す（オーナーの指示 2026-11-11）
-    // 店で珍しいこと（珍客・YouTuber・テレビ取材・覆面調査員・SNS のバズ・クレームなど）が起きている間も等倍（設定でオフにできる）
+    // 店で珍しいこと（珍客・YouTuber・テレビ取材・覆面調査員・SNS のバズ・クレームなど）が起きている間も、設定の速さ（等倍か2倍）まで下げる
     let real = Math.min(0.25, dtReal);
     while (real > 1e-9) {
-      if (this.speed !== 1 && this.speedLockReason()) this.speed = 1;
+      this.capSpeed();
       const r = Math.min(real, 0.05);
       step(this.state, r * this.speed, this.ctx);
       real -= r;
     }
-    if (this.speed !== 1 && this.speedLockReason()) this.speed = 1;
+    this.capSpeed();
     this.flush();
   }
 
-  speedLockReason(): string | null {
-    return speedLockReason(this.state, this.slowOnEvents);
+  /** 上限より速ければ上限に下げる（上限より遅いときはそのまま。×1 は ×1 のまま） */
+  private capSpeed(): void {
+    if (this.speed === 1) return;
+    const l = this.speedLimit();
+    if (l && this.speed > l.cap) this.speed = l.cap;
   }
 
-  /** 倍速にできないか（爆発事故・人を襲った事件・珍しいことが起きている間） */
-  get speedLocked(): boolean {
-    return this.speedLockReason() !== null;
+  speedLimit(): SpeedLimit | null {
+    return speedLimit(this.state, this.slow);
   }
 
   onEvents(cb: (ev: GameEvent[]) => void): () => void {

@@ -20,6 +20,13 @@ import { emit, notify, type SimCtx } from './notices';
 
 const ST = BALANCE.staff;
 const MIN_PER_DAY = (BALANCE.closeHour - BALANCE.openHour) * 60;
+/**
+ * 「仕込みから閉店まで」の予定の退勤（店の営業時間に合わせて閉店まで。どの店の営業の分の合計より大きい）。
+ * 前は 11〜15時の 240分で表していて、営業時間の長い店で「仕込み〜19:30」のように出ていた（オーナーの指示 2026-11-13）
+ */
+export const SHIFT_TO_CLOSE = 48 * 60;
+/** 古いデータの「仕込みから閉店まで」の退勤 */
+const LEGACY_FULL_END = MIN_PER_DAY;
 /** 退勤が閉店（15:00）のときの退勤時刻。閉店作業まで残る */
 const UNTIL_CLOSE = 1e9;
 
@@ -63,9 +70,14 @@ export function patienceOf(e: Employee): number {
   return clamp01(ST.patience.mean - ST.patience.spread + 2 * ST.patience.spread * h);
 }
 
-/** 毎日・仕込みから閉店まで・休憩なし */
+/** 毎日・仕込みから閉店まで・休憩なし（閉店の時刻は、その日の店の営業時間） */
 export function fullDayShift(): ShiftDay {
-  return { start: 0, end: MIN_PER_DAY, breakAt: 0, breakLen: 0, fromPrep: true };
+  return { start: 0, end: SHIFT_TO_CLOSE, breakAt: 0, breakLen: 0, fromPrep: true };
+}
+
+/** 予定の退勤（開店からの分）。「仕込みから閉店まで」と、営業の終わりより後の予定は、その日の営業の終わり */
+export function shiftEndOf(sh: ShiftDay, openMin: number): number {
+  return isFullShift(sh) ? openMin : Math.min(sh.end, openMin);
 }
 
 /** 曜日ごとのシフト（7日分）。古いセーブは毎日・全時間。社員は休みの曜日以外は毎日・仕込みから閉店まで */
@@ -200,24 +212,36 @@ export function shiftProblem(sh: ShiftDay, openMin = MIN_PER_DAY): string | null
   const ok = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v % step === 0;
   if (!ok(sh.start) || !ok(sh.end) || !ok(sh.breakAt) || !ok(sh.breakLen)) return `時刻は${step}分刻みで指定してください`;
   if (typeof sh.fromPrep !== 'boolean') return 'シフトの形が正しくありません';
-  if (sh.start < 0 || sh.end > openMin || sh.end - sh.start < step) return '出勤から退勤まで30分以上、営業時間の中で指定してください';
+  if (sh.start < 0 || (sh.end > openMin && !isFullShift(sh)) || shiftEndOf(sh, openMin) - sh.start < step) return '出勤から退勤まで30分以上、営業時間の中で指定してください';
   if (sh.fromPrep && sh.start !== 0) return '仕込みから出勤するときは、開店から働きます';
   if (sh.breakLen < 0 || sh.breakLen > 60) return '休憩は60分までです';
-  if (sh.breakLen > 0 && (sh.breakAt <= sh.start || sh.breakAt + sh.breakLen >= sh.end)) return '休憩は勤務の途中に入れてください';
+  if (sh.breakLen > 0 && (sh.breakAt <= sh.start || sh.breakAt + sh.breakLen >= shiftEndOf(sh, openMin))) return '休憩は勤務の途中に入れてください';
   if (sh.midRest !== undefined && typeof sh.midRest !== 'boolean') return 'シフトの形が正しくありません';
+  if (sh.exact !== undefined && sh.exact !== true) return 'シフトの形が正しくありません';
   return null;
 }
 
 /** シフトの給与の対象時間（時間） */
 export function shiftPaidHours(sh: ShiftDay | null, openMin = MIN_PER_DAY): number {
   if (!sh) return 0;
-  const end = isFullShift(sh) ? openMin : Math.min(sh.end, openMin);
+  const end = shiftEndOf(sh, openMin);
   return Math.max(0, end - sh.start - (sh.breakLen > 0 ? sh.breakLen : 0)) / 60 + (sh.fromPrep ? ST.employment.prepPaidHours : 0);
 }
 
-/** 「仕込みから最後まで」のシフト（営業時間が変わっても閉店まで働く） */
+/**
+ * 「仕込みから最後まで」のシフト（営業時間が変わっても閉店まで働く）。
+ * 古いデータの 240分（11〜15時の閉店）も「閉店まで」（退勤の時刻どおりの印 exact があるものは除く）
+ */
 export function isFullShift(sh: ShiftDay): boolean {
-  return sh.fromPrep && sh.start === 0 && sh.end >= MIN_PER_DAY;
+  return sh.fromPrep && sh.start === 0 && !sh.exact && (sh.end >= SHIFT_TO_CLOSE || sh.end === LEGACY_FULL_END);
+}
+
+/** 時刻を決めた予定を残すときの形（「仕込みから・開店から240分」は古いデータの「閉店まで」と区別する印を付ける） */
+export function withExactEnd(sh: ShiftDay): ShiftDay {
+  const out = { ...sh };
+  delete out.exact;
+  if (out.fromPrep && out.start === 0 && out.end === LEGACY_FULL_END) out.exact = true;
+  return out;
 }
 
 /** 時給（アルバイト）。古いデータは日給から換算 */
@@ -376,7 +400,7 @@ export function attendanceText(e: Employee, s: GameState): string {
   if (!a || a.day !== s.day) return e.presentToday ? '勤務中' : '休み';
   const sh = a.shift;
   const th = todayHours(s);
-  const hours = sh ? `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start, th)}〜${shiftTimeText(Math.min(sh.end, openMinutesOf(th)), th, true)}` : '';
+  const hours = sh ? `${sh.fromPrep ? '仕込み' : shiftTimeText(sh.start, th)}〜${shiftTimeText(shiftEndOf(sh, openMinutesOf(th)), th, true)}` : '';
   switch (a.status) {
     case 'off':
       if (injuredOn(e, s.day)) return `けがの療養中（${e.injury!.until + 1}日目から出勤）`;
@@ -1056,15 +1080,17 @@ export function promoteLeader(s: GameState, ctx: SimCtx, employeeId: string): { 
 
 /** シフトの形を受け取った値から作る（余計な値は捨てる。その日だけの担当は日にちごとの予定だけ） */
 function cleanShift(shift: ShiftDay, withRole: boolean): ShiftDay {
-  return {
+  // 画面から来る予定は退勤の時刻どおり（「閉店まで」の印 SHIFT_TO_CLOSE はそのまま。240分は古いデータの「閉店まで」と区別する印を付ける）
+  const full = shift.fromPrep === true && shift.start === 0 && shift.end >= SHIFT_TO_CLOSE;
+  return withExactEnd({
     start: shift.start,
-    end: shift.end,
+    end: full ? SHIFT_TO_CLOSE : shift.end,
     breakAt: shift.breakLen > 0 ? shift.breakAt : 0,
     breakLen: shift.breakLen,
     fromPrep: shift.fromPrep,
     ...(shift.midRest ? { midRest: true } : {}),
     ...(withRole && shift.role ? { role: shift.role } : {}),
-  };
+  });
 }
 
 /** その日だけの担当に選べるか（シフトリーダーは昇格でなる役職なので、その日だけにはしない） */

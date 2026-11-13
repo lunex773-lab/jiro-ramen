@@ -10,7 +10,7 @@ import { activeStore } from './company';
 import { calendarDemand } from './calendar';
 import { clockMinuteAt, clockMinuteAtEnd, DEFAULT_HOURS, hourDemand, hoursDemandWeight, openMinutesOf, SEC_PER_MIN, storeHours, todayHours, shiftSpansBreak } from './hours';
 import { notify, type SimCtx } from './notices';
-import { fatigueOf, isFullShift, isPartTime, keepTodayPlan, logShiftChange, sameShift, shiftFor, shiftProblem, shiftsOf, WEEKDAY_LABEL, weekdayOf } from './staff';
+import { fatigueOf, fullDayShift, isFullShift, isPartTime, keepTodayPlan, logShiftChange, sameShift, shiftEndOf, shiftFor, shiftProblem, shiftsOf, WEEKDAY_LABEL, weekdayOf, withExactEnd } from './staff';
 
 const P = () => BALANCE.shiftPlan;
 const STEP = () => BALANCE.staff.shiftStepMin;
@@ -46,7 +46,7 @@ function remapShiftBody(sh: ShiftDay, from: StoreHours, to: StoreHours): ShiftDa
   const oldOpen = openMinutesOf(from);
   const newOpen = openMinutesOf(to);
   // 最後まで（社員と同じ「仕込みから閉店まで」・今日の営業の終わりまで）
-  if (isFullShift(sh) || (sh.start === 0 && sh.end >= oldOpen)) return { start: 0, end: newOpen, breakAt: 0, breakLen: 0, fromPrep: sh.fromPrep };
+  if (isFullShift(sh) || (sh.start === 0 && sh.end >= oldOpen)) return sh.fromPrep ? fullDayShift() : { start: 0, end: newOpen, breakAt: 0, breakLen: 0, fromPrep: false };
   const cs = clockMinuteAt(from, sh.start * SEC_PER_MIN);
   const ce = clockMinuteAtEnd(from, sh.end * SEC_PER_MIN);
   let start = snap(openMinuteAtClock(to, cs));
@@ -70,7 +70,8 @@ function remapShiftBody(sh: ShiftDay, from: StoreHours, to: StoreHours): ShiftDa
     out.breakAt = Math.max(start + STEP(), Math.min(end - sh.breakLen - STEP(), mid));
     out.breakLen = sh.breakLen;
   }
-  return shiftProblem(out, newOpen) ? { start: 0, end: newOpen, breakAt: 0, breakLen: 0, fromPrep: sh.fromPrep } : out;
+  if (shiftProblem(out, newOpen)) return sh.fromPrep ? fullDayShift() : { start: 0, end: newOpen, breakAt: 0, breakLen: 0, fromPrep: false };
+  return withExactEnd(out);
 }
 
 
@@ -153,7 +154,7 @@ function nextDayOfWeekday(today: number, weekday: number): number {
 
 /** シフトがその営業の分にかかるか（休憩を除く） */
 export function shiftCovers(sh: ShiftDay, minute: number, openMin: number): boolean {
-  const end = isFullShift(sh) || sh.end >= openMin ? openMin : sh.end;
+  const end = shiftEndOf(sh, openMin);
   if (minute < sh.start || minute >= end) return false;
   return !(sh.breakLen > 0 && minute >= sh.breakAt && minute < sh.breakAt + sh.breakLen);
 }
@@ -281,7 +282,7 @@ export function buildShifts(s: GameState, hours: StoreHours = storeHours(s), wit
       const e = cand[0];
       if (!e) break;
       const fromPrep = best.a === 0 && r[0]! > 0 && owner === 0;
-      week.get(e.id)![wd] = { start: best.a, end: best.b, breakAt: 0, breakLen: 0, fromPrep };
+      week.get(e.id)![wd] = withExactEnd({ start: best.a, end: best.b, breakAt: 0, breakLen: 0, fromPrep });
       days.set(e.id, days.get(e.id)! + 1);
       for (let m = best.a; m < best.b; m += step) r[Math.floor(m / step)]! -= 1;
     }

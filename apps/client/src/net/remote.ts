@@ -13,6 +13,8 @@ import {
   type GameState,
   type PeerInfo,
   type ServerMsg,
+  type EventSlowConfig,
+  type SpeedLimit,
 } from '@jiro/core';
 import type { ConnState, GameHost } from '../game/host';
 import type { Api } from './api';
@@ -48,7 +50,7 @@ export class RemoteHost implements GameHost {
   conn: ConnState = 'connecting';
   peers: PeerInfo[] = [];
   speed = 1;
-  slowOnEvents = true;
+  slow: EventSlowConfig = { on: true };
   state: GameState;
   layoutHolder: string | null = null;
   lastError = '';
@@ -301,7 +303,7 @@ export class RemoteHost implements GameHost {
   }
 
   /** 共同経営には倍速がない */
-  speedLockReason(): string | null {
+  speedLimit(): SpeedLimit | null {
     return null;
   }
 

@@ -82,8 +82,9 @@ export const STATUS_LABEL: Record<EquipmentStatus, string> = {
 
 /**
  * 設備を使う。状態が下がり、故障判定を行う。
- * 故障率 = 基本故障率 × (0.15 + 6 × 劣化度²)。劣化度 = 1 − 状態/100
- * 新品はほとんど壊れず、使い込むほど（メンテを怠るほど）急に壊れやすくなる。
+ * 状態が safeCondition（70%）以上なら故障しない（オーナーの指示 2026-11-13「90%でも故障する」）。
+ * それより下は 故障率 = 基本故障率 × 6.15 × 劣化度^1.5。劣化度 = (70 − 状態) / 70（70% → 0、0% → 1）
+ * 使い込むほど（メンテを怠るほど）急に壊れやすくなる。
  */
 export function useEquipment(s: GameState, ctx: SimCtx, e: Equipment, times = 1): void {
   const def = defOf(e);
@@ -92,9 +93,10 @@ export function useEquipment(s: GameState, ctx: SimCtx, e: Equipment, times = 1)
   if (def.wearPerUse > 0) e.condition = clamp(e.condition - def.wearPerUse * BALANCE.equipment.wearMult * times, 0, 100);
   if (e.status === 'repairing') return;
   let st = statusFromCondition(e.condition);
-  if (st !== 'broken' && def.failureBase > 0) {
-    const wear = 1 - e.condition / 100;
-    const p = 1 - Math.pow(1 - def.failureBase * (0.15 + 6 * wear * wear), times);
+  const safe = BALANCE.equipment.safeCondition;
+  if (st !== 'broken' && def.failureBase > 0 && e.condition < safe) {
+    const wear = (safe - e.condition) / safe;
+    const p = 1 - Math.pow(1 - def.failureBase * 6.15 * Math.pow(wear, 1.5), times);
     if (rand(s) < p) st = 'broken';
   }
   if (st !== e.status) {

@@ -46,7 +46,9 @@ describe('工事・準備の休業日', { timeout: 120_000 }, () => {
     expect(s.employees.every((e) => !e.presentToday)).toBe(true);
     expect(s.employees.every((e) => e.att?.status === 'closed')).toBe(true);
     // 期限が過ぎた分は廃棄（損益の廃棄に入る）
-    expect(stockOf(s, 'cabbage')).toBeLessThan(before);
+    // （朝の入荷で新しいキャベツが届くことがあるので、期限が過ぎた分が残っていないことで確かめる）
+    expect(s.inventory.filter((l) => l.itemId === 'cabbage' && l.expiresDay < s.day)).toHaveLength(0);
+    expect(before).toBeGreaterThan(0);
     expect(r.waste).toBeGreaterThan(0);
   });
 

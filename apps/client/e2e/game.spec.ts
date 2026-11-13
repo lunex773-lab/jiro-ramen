@@ -134,12 +134,12 @@ test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を
   await expect(panel.locator('[data-armory-weapon]')).toHaveCount(7);
   await shot(page, 'armory-buy');
   await panel.locator('[data-armory-verb="buy_weapon:pistol"]').click();
-  await expect(page.locator('.modal').last()).toContainText('¥2,000,000');
+  await expect(page.locator('.modal').last()).toContainText('¥1,000,000');
   await page.locator('.modal').last().getByRole('button', { name: '買う' }).click();
-  await expect.poll(async () => ((await state()) as unknown as { money: number }).money).toBe(3_000_000);
+  await expect.poll(async () => ((await state()) as unknown as { money: number }).money).toBe(4_000_000);
   await panel.locator('[data-armory-verb="buy_ammo:pistol"]').click();
   await page.locator('.modal').last().getByRole('button', { name: '買う' }).click();
-  await expect.poll(async () => ((await state()) as unknown as { money: number }).money).toBe(2_900_000);
+  await expect.poll(async () => ((await state()) as unknown as { money: number }).money).toBe(3_950_000);
   await expect(panel.locator('[data-armory-weapon="pistol"]')).toContainText('弾 1発');
   const take = panel.locator('[data-armory-verb="weapon:pistol"]');
   await expect(take).toBeEnabled();
@@ -147,9 +147,9 @@ test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を
   await expect(panel).toHaveCount(0);
   await expect(page.locator('.hud-hand')).toContainText('拳銃');
   // 倍速にしておく（襲うと等速に戻る。オーナーの指示 2026-11-11）。偶然の珍しいお客さん・クレームで等倍にならないよう、
-  // ここでは「イベントが起きたら等倍に戻す」を止める（事件の等倍は設定に関係なく起きる）
+  // ここでは「イベントが起きたら倍速を解除する」を止める（事件の等倍は設定に関係なく起きる）
   await page.evaluate(() => {
-    (window as unknown as { __jiro: { host: { slowOnEvents: boolean } } }).__jiro.host.slowOnEvents = false;
+    (window as unknown as { __jiro: { host: { slow: { on: boolean } } } }).__jiro.host.slow = { on: false };
   });
   const speed = page.locator('.hud .chip', { hasText: /^×\d$/ });
   await speed.click();
@@ -272,17 +272,43 @@ test('イベントが起きたら倍速を解除して等倍に戻し、終わ�
   await expect(speed).toHaveText('×1');
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('jiro.settings') ?? '{}').gameSpeed)).toBe(1);
   await shot(page, 'speed-event-lock');
-  // 設定で「イベントが起きたら等倍に戻す」をオフにすると、バズの間も倍速にできる
+  // 設定で解除したときの速さを2倍にすると、バズの間も×2までは上げられる（×3 は飛ばして ×1 へ。オーナーの指示 2026-11-13）
+  const closeSettings = async () => {
+    await page.getByRole('button', { name: '閉じる' }).last().click();
+    await expect(page.locator('.settings')).toHaveCount(0);
+    if ((await page.locator('.manage').count()) > 0) await press(page.locator('.manage .close, .manage [data-close]').first());
+    await expect(page.locator('.manage')).toHaveCount(0);
+  };
   await openSettings(page);
-  const toggle = page.locator('label.kv', { hasText: 'イベントが起きたら等倍に戻す' }).locator('input');
-  await expect(toggle).toBeChecked();
-  await toggle.uncheck();
-  await page.getByRole('button', { name: '閉じる' }).last().click();
-  await expect(page.locator('.settings')).toHaveCount(0);
-  if ((await page.locator('.manage').count()) > 0) await press(page.locator('.manage .close, .manage [data-close]').first());
-  await expect(page.locator('.manage')).toHaveCount(0);
+  await page.locator('[data-slow-speed]').selectOption('2');
+  await closeSettings();
   await speed.click();
   await expect(speed).toHaveText('×2');
+  await speed.click();
+  await expect(speed).toHaveText('×1');
+  await speed.click();
+  await expect(speed).toHaveText('×2');
+  // ×5 で遊んでいるときにバズが起きると ×2 まで下がる
+  await page.evaluate(() => {
+    (window as unknown as { __jiro: { host: { speed: number } } }).__jiro.host.speed = 5;
+  });
+  await expect(speed).toHaveText('×2');
+  // 解除するイベントから SNS のバズを外すと、バズの間も ×3 以上にできる
+  await openSettings(page);
+  await expect(page.locator('[data-slow-event]')).toHaveCount(8);
+  await page.locator('[data-slow-event="buzz"]').uncheck();
+  await closeSettings();
+  await speed.click();
+  await expect(speed).toHaveText('×3');
+  // 設定で「イベントが起きたら倍速を解除する」をオフにすると、どのイベントの間も倍速にできる
+  await openSettings(page);
+  await page.locator('[data-slow-event="buzz"]').check();
+  const toggle = page.locator('label.kv', { hasText: 'イベントが起きたら倍速を解除する' }).locator('input');
+  await expect(toggle).toBeChecked();
+  await toggle.uncheck();
+  await closeSettings();
+  await speed.click();
+  await expect(speed).toHaveText('×5');
 });
 
 test('経営メニューとレイアウト編集が開ける', async ({ page }) => {
@@ -1670,7 +1696,8 @@ test('会社: 12席・評判★4.0以上の店になると「会社」の画面�
     return { ok: r.ok, id: e.id };
   });
   expect(hired.ok).toBe(true);
-  await page.locator('.chip.menu').click();
+  // 閉店後で今日の日報がない日は「次の日へ」の画面が出る（そこから経営メニューを開く）
+  await page.getByRole('button', { name: /経営メニュー/ }).click();
   const tab = page.getByRole('button', { name: '会社', exact: true });
   await expect(tab).toBeVisible();
   await tab.click();
@@ -1739,6 +1766,16 @@ test('会社: 12席・評判★4.0以上の店になると「会社」の画面�
   expect(after.emps).toEqual([hired.id]);
   expect(after.homeSnap).toBe(true);
   await expect(body.locator(`.store-card[data-store="${st.branch}"]`)).toContainText('いまここ');
+  // 異動はどの店の従業員でもできる（今いる店の人も、ほかの店の人も一覧に出る。オーナーの指示 2026-11-13）
+  await expect(body.locator('[data-move-card]')).toContainText('佐藤 一郎');
+  // 出店したその日に新しい店へ移っても、次の日へ進める（オーナーの指示 2026-11-13: 進めなかった不具合）
+  await press(page.locator('.manage .close, .manage [data-close]').first());
+  await expect(page.locator('.manage')).toHaveCount(0);
+  const next = page.getByRole('button', { name: '翌日の仕込みへ →' });
+  await expect(next).toBeVisible();
+  const d0 = await page.evaluate(() => (window as unknown as CJ).__jiro.host.state.day);
+  await next.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as CJ).__jiro.host.state.day)).toBe(d0 + 1);
 });
 
 test('複数店舗: 日ごとの店舗別の売上（日 × 店の表と積み上げの棒）の数字は、会社の日報の店ごとの行と同じ（オーナーの指示 2026-11-12）', async ({ page }) => {

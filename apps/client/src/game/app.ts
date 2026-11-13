@@ -25,6 +25,7 @@ import {
   type GameState,
   type SaveStore,
   overdueShortfall,
+  storeReport,
 } from '@jiro/core';
 import { Sfx } from '../audio/sfx';
 import { World } from '../render/world';
@@ -37,12 +38,12 @@ import { TutorialPanel } from '../ui/tutorial';
 import { AccidentOverlay, accidentView } from '../ui/accident';
 import { RequestPrompt } from '../ui/request';
 import { showCriticReport } from '../ui/critic';
-import { bankruptScreen, helpScreen, resultScreen, settingsScreen, slotScreen, titleScreen } from '../ui/screens';
+import { bankruptScreen, helpScreen, noReportScreen, resultScreen, settingsScreen, slotScreen, titleScreen, type ResultCallbacks } from '../ui/screens';
 import { Controls } from './controls';
 import { nextHint } from './guide';
 import { LocalHost, type GameHost } from './host';
 import { isRotated, isStandalone, lockLandscape } from './orientation';
-import { loadSettings, saveSettings, type Settings } from './settings';
+import { loadSettings, saveSettings, slowConfigOf, type Settings } from './settings';
 import { findFocus, interactableBoxes } from './targeting';
 import { openLobby } from '../ui/lobby';
 import { MarketScreen, openMarketLobby } from '../ui/market';
@@ -188,7 +189,7 @@ export class App {
     this.sfx.setVolume(this.settings.volume);
     if (this.controls) this.controls.settings = { lookSensitivity: this.settings.lookSensitivity, invertY: this.settings.invertY };
     this.world?.setQuality(this.settings.quality);
-    if (this.host) this.host.slowOnEvents = this.settings.slowOnEvents;
+    if (this.host) this.host.slow = slowConfigOf(this.settings);
   }
 
   // ───────────────── 画面 ─────────────────
@@ -683,10 +684,11 @@ export class App {
     this.onLeaveGame = onLeave ?? null;
     this.host = host;
     // 倍速は前の日・前に遊んだときの速さを続ける（イベントで等倍に戻ったら等倍。オーナーの判断 2026-11-13）
-    host.slowOnEvents = this.settings.slowOnEvents;
+    host.slow = slowConfigOf(this.settings);
     if (host.mode === 'local') {
-      const sp = this.settings.gameSpeed;
-      host.speed = [1, 2, 3, 5].includes(sp) && !host.speedLockReason() ? sp : 1;
+      const sp = [1, 2, 3, 5].includes(this.settings.gameSpeed) ? this.settings.gameSpeed : 1;
+      const lim = host.speedLimit();
+      host.speed = lim ? Math.min(sp, lim.cap) : sp;
     }
     this.lastSpeed = host.speed;
     this.show(null);
@@ -952,8 +954,9 @@ export class App {
    */
   private trackSpeed(host: GameHost): void {
     if (host.mode !== 'local' || host.speed === this.lastSpeed) return;
-    const why = host.speed === 1 && this.lastSpeed > 1 ? host.speedLockReason() : null;
-    if (why) toast(this.uiLayer, `${why.replace(/（設定で変えられます）$/, '').replace(/は倍速にできません$/, '')}は等倍にします`, 'info', 2500);
+    // 珍しいことが起きて上限まで下がったとき（等倍か、設定で2倍）
+    const lim = host.speed < this.lastSpeed ? host.speedLimit() : null;
+    if (lim && host.speed === lim.cap) toast(this.uiLayer, `${lim.label}の間は${lim.cap <= 1 ? '等倍' : `×${lim.cap}`}にします`, 'info', 2500);
     this.lastSpeed = host.speed;
     if (this.settings.gameSpeed !== host.speed) {
       this.settings.gameSpeed = host.speed;
@@ -1225,12 +1228,12 @@ export class App {
     const host = this.host;
     if (!host) return;
     const s = host.state;
-    const r = s.history[s.history.length - 1];
-    if (!r) {
-      this.show(null);
-      return;
-    }
-    const screenEl = resultScreen(s, r, host.isHost, {
+    // 店を移った日は、入った店の今日の日報がないことがある（出店したばかりの店）。今日営業した店の日報を見せ、
+    // どれもなければ次の日へ進むボタンだけの画面にする（新しい店に移ると次の日へ進めなかった。オーナーの指示 2026-11-13）
+    const last = s.history[s.history.length - 1];
+    const r = last && last.day === s.day ? last : (s.company?.stores.map((x) => storeReport(s, x, s.day)).find((x) => !!x) ?? null);
+    const build = r ? (cb: ResultCallbacks) => resultScreen(s, r, host.isHost, cb) : (cb: ResultCallbacks) => noReportScreen(s, host.isHost, cb);
+    const screenEl = build({
         onNextDay: async () => {
           // 練習の日（営業0日目）の結果は残さず、1日目を新しく始める
           if (s.tutorial?.kind === 'basics') {

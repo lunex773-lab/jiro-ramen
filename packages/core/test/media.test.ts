@@ -1,6 +1,8 @@
 // 第2版 Phase 4: YouTuber・テレビ取材・芸能人のサイン（設計書 18-4）
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  CELEBRITIES,
+  TV_SHOWS,
   applyAction,
   arrivalRate,
   BALANCE,
@@ -319,5 +321,16 @@ describe('テレビ取材（12）', () => {
     expect(applyAction(s, 'p1', { type: 'expand' }, ctx).ok).toBe(true);
     expect(s.career.stage).toBe(1);
     expect(signsOf(s)).toHaveLength(2);
+  });
+});
+
+// オーナーの指示 2026-11-13: 有名人の名前のレパートリーを増やす（すべて架空）
+describe('テレビの出演者と番組の種類', () => {
+  it('出演者は30人以上・番組は10以上で、名前と id は重ならない（前からいる8人の id は残る）', () => {
+    expect(CELEBRITIES.length).toBeGreaterThanOrEqual(30);
+    expect(new Set(CELEBRITIES.map((c) => c.id)).size).toBe(CELEBRITIES.length);
+    expect(new Set(CELEBRITIES.map((c) => c.name)).size).toBe(CELEBRITIES.length);
+    for (const id of ['cel_menta', 'cel_mashiko', 'cel_abura', 'cel_karame', 'cel_ninniku', 'cel_tenchi', 'cel_wasshi', 'cel_chashu']) expect(CELEBRITIES.some((c) => c.id === id)).toBe(true);
+    expect(TV_SHOWS.length).toBeGreaterThanOrEqual(10);
   });
 });

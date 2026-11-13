@@ -47,6 +47,8 @@ import {
   createShopShell,
   createStool,
   tickModels,
+  ATTACK_SEC,
+  type AttackMotion,
   type BowlModel,
   type CharacterAct,
   type CharacterModel,
@@ -112,6 +114,14 @@ export class World {
   private dirt = new Map<string, THREE.Object3D>();
   private lost = new Map<string, THREE.Object3D>();
   private view: { kind: string; obj: THREE.Object3D; bowl: BowlModel | null } | null = null;
+  /** 自分のプレイヤーの id（武器を使う動きを一人称で見せるか、人物で見せるか） */
+  private myId = '';
+  /** 一人称の武器を使う動き（start は次のフレームの時刻） */
+  private fpAtk: { kind: AttackMotion; weaponId: string; start: number | null } | null = null;
+  /** 一人称で投げた爆弾（手からは消えるので、投げる動きの間だけ別に見せる） */
+  private fpThrow: { obj: THREE.Object3D; start: number | null } | null = null;
+  /** 銃口の火（一人称） */
+  private muzzle: THREE.Mesh | null = null;
   private bubbles = new Map<string, Bubble>();
   private tmpV = new THREE.Vector3();
   private bob = 0;
@@ -235,7 +245,24 @@ export class World {
 
   /** ゲームの出来事（武器庫の演出: 血しぶき・発砲・爆発） */
   onEvents(events: GameEvent[]): void {
+    // 武器を使う動き（オーナーの指示 2026-11-13）: 自分は一人称の手元、ほかの人は腕の動き
+    for (const ev of events) {
+      const kind = attackMotionOf(ev);
+      if (!kind || !ev.actorId) continue;
+      if (ev.actorId === this.myId) {
+        this.fpAtk = { kind, weaponId: ev.text ?? '', start: null };
+        if (kind === 'throw') this.startThrowGhost();
+      } else this.chars.get(ev.actorId)?.model.attack(kind);
+    }
     this.armoryFx.onEvents(events);
+  }
+
+  /** 投げた爆弾を一人称で見せる（手の爆弾はすぐに消えるので） */
+  private startThrowGhost(): void {
+    if (this.fpThrow) this.camera.remove(this.fpThrow.obj);
+    const obj = createHeldItem('weapon:bomb');
+    this.camera.add(obj);
+    this.fpThrow = { obj, start: null };
   }
 
   /** 爆発事故の状態（なければ null）。毎フレーム渡す */
@@ -856,6 +883,7 @@ export class World {
       this.view.bowl?.dispose();
       this.view = null;
     }
+    this.updateThrowGhost(t);
     if (kind === 'none') return;
     if (!this.view) {
       if (kind === 'bowl') {
@@ -876,9 +904,8 @@ export class World {
       o.position.set(0, -0.3 + 0.12 * k + Math.sin(this.bob * 2) * 0.006, -0.42);
       o.rotation.set(0.7, 0, 0);
     } else if (hand.kind === 'weapon') {
-      // 武器は前に向けて右手に構える（じろ1 5.12）
-      o.position.set(0.2, -0.24 + Math.sin(this.bob * 2) * 0.008, -0.42);
-      o.rotation.set(0.06, 0.1, 0);
+      // 武器は前に向けて右手に構える（じろ1 5.12）。使うと振る・刺す・撃つ（反動）の動き（オーナーの指示 2026-11-13）
+      this.weaponPose(o, hand.weaponId, t);
     } else {
       o.position.set(0.16, -0.36 + Math.sin(this.bob * 2) * 0.008, -0.48);
       o.rotation.set(0.35, 0, 0);
@@ -893,6 +920,78 @@ export class World {
       }
     }
     void t;
+  }
+
+  /** 一人称の武器の構えと、使ったときの動き */
+  private weaponPose(o: THREE.Object3D, weaponId: string, t: number): void {
+    const bob = Math.sin(this.bob * 2) * 0.008;
+    // 位置 x y z・回転 x y z（構え）
+    const rest: Kf = [0.2, -0.24 + bob, -0.42, 0.06, 0.1, 0];
+    let pose = rest;
+    let flash = false;
+    const a = this.fpAtk;
+    if (a && a.kind !== 'throw') {
+      if (a.start === null) a.start = t;
+      const k = (t - a.start) / ATTACK_SEC[a.kind];
+      if (k >= 1 || k < 0) this.fpAtk = null;
+      else if (a.kind === 'swing') {
+        // 右肩の上へ振りかぶって → 左下へ振り下ろす → 構えに戻る
+        pose = keyframes(k, [
+          [0, rest],
+          [0.3, [0.3, -0.1, -0.34, 1.35, -0.2, -0.45]],
+          [0.55, [-0.14, -0.34, -0.5, -0.55, 0.85, 0.65]],
+          [1, rest],
+        ]);
+      } else if (a.kind === 'stab') {
+        // 引いて → 前へ突き出す → 戻す
+        pose = keyframes(k, [
+          [0, rest],
+          [0.28, [0.22, -0.22, -0.3, 0.12, 0.08, 0]],
+          [0.48, [0.1, -0.19, -0.8, -0.04, 0.02, 0]],
+          [1, rest],
+        ]);
+      } else if (a.kind === 'shoot') {
+        // 撃った瞬間に銃口が跳ね上がり、手元へ下がる（銃口の火）
+        const kick = k < 0.12 ? k / 0.12 : Math.max(0, 1 - (k - 0.12) / 0.6);
+        pose = [rest[0], rest[1] + 0.02 * kick, rest[2] + 0.08 * kick, rest[3] + 0.5 * kick, rest[4], rest[5] - 0.05 * kick];
+        flash = k < 0.1;
+      }
+    }
+    o.position.set(pose[0], pose[1], pose[2]);
+    o.rotation.set(pose[3], pose[4], pose[5]);
+    if (flash && !this.muzzle) {
+      this.muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshBasicMaterial({ color: '#ffd27a', transparent: true, opacity: 0.95, depthWrite: false }));
+      this.muzzle.name = 'muzzle-flash';
+    }
+    if (this.muzzle) {
+      if (flash && this.muzzle.parent !== o) o.add(this.muzzle);
+      this.muzzle.position.set(0, 0.02, weaponId === 'shotgun' ? -0.45 : -0.17);
+      this.muzzle.scale.setScalar(weaponId === 'shotgun' ? 1.6 : 1);
+      this.muzzle.visible = flash;
+    }
+  }
+
+  /** 投げた爆弾（一人称）: 右上へ振りかぶって → 前へ放る */
+  private updateThrowGhost(t: number): void {
+    const g = this.fpThrow;
+    if (!g) return;
+    if (g.start === null) g.start = t;
+    const k = (t - g.start) / ATTACK_SEC.throw;
+    if (k >= 1 || k < 0) {
+      this.camera.remove(g.obj);
+      this.fpThrow = null;
+      this.fpAtk = this.fpAtk?.kind === 'throw' ? null : this.fpAtk;
+      return;
+    }
+    const p = keyframes(k, [
+      [0, [0.2, -0.24, -0.42, 0, 0, 0]],
+      [0.4, [0.3, -0.02, -0.46, 0.9, 0, -0.3]],
+      [0.7, [0.04, -0.02, -1.1, -0.6, 0, 0.2]],
+      [1, [0.0, -0.1, -1.6, -1.0, 0, 0.3]],
+    ]);
+    g.obj.position.set(p[0], p[1], p[2]);
+    g.obj.rotation.set(p[3], p[4], p[5]);
+    g.obj.visible = k < 0.8;
   }
 
   /** カメラ（一人称） */
@@ -926,6 +1025,7 @@ export class World {
     this.syncUfo(s, t);
     this.syncBowls(s, myId);
     this.syncDirtAndLost(s);
+    this.myId = myId;
     this.syncViewModel(s, s.players.find((p) => p.id === myId), t);
     this.armoryFx.update(s, dt, t);
     this.updateTutorialMarker(s, t);
@@ -1153,6 +1253,31 @@ function makeTutorialMarker(): THREE.Group {
     g.add(m);
   }
   return g;
+}
+
+/** 位置 x y z・回転 x y z */
+type Kf = [number, number, number, number, number, number];
+
+/** 時刻 k（0..1）の姿勢（区切りの間はなめらかにつなぐ） */
+function keyframes(k: number, frames: [number, Kf][]): Kf {
+  for (let i = 1; i < frames.length; i++) {
+    const [t1, b] = frames[i]!;
+    const [t0, a] = frames[i - 1]!;
+    if (k <= t1) {
+      const u = t1 > t0 ? (k - t0) / (t1 - t0) : 1;
+      const e = u * u * (3 - 2 * u);
+      return a.map((v, j) => v + (b[j]! - v) * e) as Kf;
+    }
+  }
+  return frames[frames.length - 1]![1];
+}
+
+/** 武器を使ったときの動きの種類（武器のイベントでなければ null） */
+function attackMotionOf(ev: GameEvent): AttackMotion | null {
+  if (ev.type === 'weaponSwing') return ev.text === 'knife' ? 'stab' : 'swing';
+  if (ev.type === 'gunshot') return 'shoot';
+  if (ev.type === 'bombThrow') return 'throw';
+  return null;
 }
 
 function heldKind(h: Hand): HeldKind | null {

@@ -283,16 +283,15 @@ export class Hud {
                 class: 'chip',
                 title: 'ゲーム速度',
                 onclick: () => {
-                  // 爆発事故・人を襲った事件・珍しいことが起きている間は倍速にできない（等速で見せる）
-                  const why = this.host.speedLockReason();
-                  if (why) {
-                    this.host.speed = 1;
-                    this.lastTopKey = '';
-                    toast(this.root, why, 'info', 2200);
-                    return;
+                  // 爆発事故・人を襲った事件の間は等倍。珍しいことが起きている間は設定の速さ（等倍か2倍）まで
+                  const lim = this.host.speedLimit();
+                  // ×1 → ×2 → ×3 → ×5 → ×1（オーナーの指示で5倍速を足した）。上限を超える速さは飛ばして ×1 へ
+                  let next = nextSpeed(this.host.speed);
+                  if (lim && next > lim.cap) {
+                    next = 1;
+                    toast(this.root, lim.reason, 'info', 2200);
                   }
-                  // ×1 → ×2 → ×3 → ×5 → ×1（オーナーの指示で5倍速を足した）
-                  this.host.speed = nextSpeed(this.host.speed);
+                  this.host.speed = next;
                   this.lastTopKey = '';
                 },
               },
@@ -321,7 +320,7 @@ export class Hud {
 
   private updateTop(s: GameState): void {
     const buzz = buzzLeftMinutes(s);
-    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}|${buzz}|${this.host.speedLockReason() ?? ''}`;
+    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}|${buzz}|${this.host.speedLimit()?.reason ?? ''}`;
     if (key === this.lastTopKey) return;
     this.lastTopKey = key;
     const t = (this.topParts ??= this.buildTop());
@@ -347,11 +346,11 @@ export class Hud {
     t.buzz.hidden = buzz === null;
     if (this.host.mode === 'local') {
       t.speed.textContent = `×${this.host.speed}`;
-      const why = this.host.speedLockReason();
+      const lim = this.host.speedLimit();
       // 爆発事故・武器の事件は押せない。珍しいことの間は押すと理由を出す
-      (t.speed as HTMLButtonElement).disabled = !!why && speedLocked(s);
-      t.speed.classList.toggle('locked', !!why);
-      t.speed.title = why ?? 'ゲーム速度';
+      (t.speed as HTMLButtonElement).disabled = !!lim?.hard && speedLocked(s);
+      t.speed.classList.toggle('locked', !!lim);
+      t.speed.title = lim?.reason ?? 'ゲーム速度';
     }
     else {
       t.speed.className = `chip conn ${this.host.conn}`;

@@ -1269,6 +1269,11 @@ details.help:not([open]) > .help-body { display: none; }
 .mbar.tone-bad .mbar-fill { background: var(--bad); }
 .mbar.tone-info .mbar-fill { background: var(--info); }
 .kv.compact { padding: 3px 0; font-size: 13px; }
+/* 設定: 倍速を解除するイベント（オーナーの指示 2026-11-13） */
+.slow-events { padding: 4px 0 6px 10px; border-left: 3px solid var(--line); margin: 2px 0 4px; }
+.slow-events .row.wrap { gap: 6px; }
+.chip-check { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; min-height: 32px; }
+.chip-check input { margin: 0; }
 .dash-title { margin: 0 0 8px; font-weight: 800; color: var(--yellow); font-size: 15px; }
 
 /* シフト表（曜日 × 1時間。いる人数 / 必要な人数の目安。オーナーの指示 2026-11-11） */

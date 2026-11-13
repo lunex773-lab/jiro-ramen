@@ -248,3 +248,59 @@ describe('営業の終わりで確定したあとに店を移る（2店舗で売
     for (const r of s.company.history) expect(r.netSales, `会社 ${r.day}日目`).toBeGreaterThanOrEqual(0);
   });
 });
+
+// オーナーの指示 2026-11-13: 新店舗を出した日にその店へ移っても次の日へ進める。従業員はどの店からでもすぐ異動できる
+describe('出店した日に新しい店へ移る・どの店からでも異動', () => {
+  it('出店したその日に新しい店へ入っても、次の日へ進めて、その店で営業できる', { timeout: 60_000 }, () => {
+    const { s, ctx, cook } = readyCompany(221);
+    const home = activeStore(s);
+    const mgr2 = addBot(s, 'cook', 0.7, 6000);
+    expect(applyAction(s, 'p1', { type: 'assignManager', storeId: home.id, employeeId: mgr2.id }, ctx).ok).toBe(true);
+    expect(applyAction(s, 'p1', { type: 'openStore', propertyId: 'residential', managerId: cook.id }, ctx).ok).toBe(true);
+    const branch = s.company.stores[1]!;
+    const day = s.day;
+    expect(applyAction(s, 'p1', { type: 'enterStore', storeId: branch.id }, ctx).ok).toBe(true);
+    // 入った店にはまだ日報がない（画面は「次の日へ」だけを出す）
+    expect(storeReport(s, branch, day)).toBeNull();
+    const r = nextDay(s, ctx);
+    expect(r.ok, r.reason).toBe(true);
+    expect(s.day).toBe(day + 1);
+    expect(s.company.activeStoreId).toBe(branch.id);
+    // 工事・準備の日がなければその店で営業できる（あれば休業の日として閉店後まで進む）
+    for (let i = 0; i < 5 && s.closedForConstruction > 0 && s.phase === 'closed'; i++) expect(nextDay(s, ctx).ok).toBe(true);
+    if (s.phase === 'prep') {
+      applyAction(s, 'p1', { type: 'openShop' }, ctx);
+      runDay(s, ctx);
+    }
+    expect(s.phase).toBe('closed');
+    expect(nextDay(s, ctx).ok).toBe(true);
+    expect(validateState(s)).toEqual([]);
+  });
+
+  it('いない店の従業員を、今いる店へも・ほかの店へもすぐに異動できる（店長は外れ、シフトは異動先の営業時間に合わせる）', { timeout: 60_000 }, () => {
+    const { s, ctx, cook } = readyCompany(222);
+    const home = activeStore(s);
+    const part = addBot(s, 'server', 0.7, 0);
+    part.profile.employment = 'part';
+    expect(applyAction(s, 'p1', { type: 'openStore', propertyId: 'residential', managerId: cook.id }, ctx).ok).toBe(true);
+    const branch = s.company.stores[1]!;
+    // 支店の営業時間を夜だけにする
+    expect(applyAction(s, 'p1', { type: 'setStoreHours', storeId: branch.id, hours: { sessions: [{ open: 17 * 60, close: 22 * 60 }], closedDays: [] } }, ctx).ok).toBe(true);
+    expect(applyAction(s, 'p1', { type: 'enterStore', storeId: branch.id }, ctx).ok).toBe(true);
+    // 今いるのは支店。本店（いない店）のアルバイトを支店へ呼ぶ
+    expect(home.snapshot!.employees.some((e) => e.id === part.id)).toBe(true);
+    const r = applyAction(s, 'p1', { type: 'transferEmployee', employeeId: part.id, toStoreId: branch.id }, ctx);
+    expect(r.ok, r.reason).toBe(true);
+    expect(s.employees.some((e) => e.id === part.id)).toBe(true);
+    expect(home.snapshot!.employees.some((e) => e.id === part.id)).toBe(false);
+    // 支店の店長（社員）を本店へ戻す → 支店の店長は外れ、本店の従業員になる
+    expect(branch.managerId).toBe(cook.id);
+    expect(applyAction(s, 'p1', { type: 'transferEmployee', employeeId: cook.id, toStoreId: home.id, asManager: true }, ctx).ok).toBe(true);
+    expect(branch.managerId).toBeNull();
+    expect(home.managerId).toBe(cook.id);
+    expect(home.snapshot!.employees.some((e) => e.id === cook.id)).toBe(true);
+    // 同じ店へは移せない・営業中は移せない
+    expect(applyAction(s, 'p1', { type: 'transferEmployee', employeeId: cook.id, toStoreId: home.id }, ctx).ok).toBe(false);
+    expect(validateState(s)).toEqual([]);
+  });
+});

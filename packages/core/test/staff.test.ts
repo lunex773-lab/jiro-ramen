@@ -1,6 +1,7 @@
 // 第2版 Phase 2: 従業員の雇用形態・シフト・勤怠・辛抱・成長・履歴（設計書 18-2）
 import { describe, expect, it } from 'vitest';
 import {
+  isFullShift,
   applyAction,
   argueChance,
   attendanceChances,
@@ -100,7 +101,7 @@ describe('雇用形態と採用', () => {
     expect(n).toBeGreaterThanOrEqual(BALANCE.staff.wishDaysMin);
     expect(n).toBeLessThanOrEqual(BALANCE.staff.wishDaysMax);
     shiftsOf(e).forEach((x, i) => {
-      if (wish[i]) expect(x && x.fromPrep && x.start === 0 && x.end === 240).toBe(true);
+      if (wish[i]) expect(x && isFullShift(x)).toBe(true);
       else expect(x).toBeNull();
     });
     // 通常の採用は、採用の2日後から出勤する（仕込み中に雇っても今日は来ない。オーナーの判断 14 の補足）
@@ -137,7 +138,7 @@ describe('雇用形態と採用', () => {
     e.presentToday = true;
     s.employees.push(e);
     expect(e.profile.employment).toBeUndefined();
-    expect(shiftsOf(e).every((x) => x?.fromPrep && x.end === 240)).toBe(true);
+    expect(shiftsOf(e).every((x) => !!x && isFullShift(x))).toBe(true);
     expect(diligenceOf(e)).toBeCloseTo(0.4 + BALANCE.staff.employment.fullTimeDiligenceBonus);
     // 辛抱は ID から決まった値（何度読んでも同じ・範囲内）
     expect(patienceOf(e)).toBe(patienceOf(e));
@@ -542,7 +543,7 @@ describe('成長と昇格', () => {
     expect(e.profile.wage).toBe(wage);
     expect(wage).toBeGreaterThan(dailyWageOf({ ...e, profile: { ...e.profile, employment: 'part' } }));
     expect(diligenceOf(e)).toBeCloseTo(d0 + BALANCE.staff.employment.fullTimeDiligenceBonus);
-    expect(shiftsOf(e).every((x) => x?.fromPrep && x.end === 240)).toBe(true);
+    expect(shiftsOf(e).every((x) => !!x && isFullShift(x))).toBe(true);
     expect(applyAction(s, 'p1', { type: 'promote', employeeId: e.id }, ctx).ok).toBe(false);
     expect(recordOf(e).log.some((l) => l.kind === 'promoted')).toBe(true);
     // 翌日の給与は日給

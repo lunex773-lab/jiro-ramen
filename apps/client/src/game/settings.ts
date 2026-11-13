@@ -1,5 +1,7 @@
 // 設定（端末ごと）。localStorage が使えない環境でも既定値で動く。
 
+import type { EventSlowConfig, SlowEventKey } from '@jiro/core';
+
 export interface Settings {
   sound: boolean;
   volume: number;
@@ -16,8 +18,12 @@ export interface Settings {
   /** 「ホーム画面に追加すると全画面で遊べる」を案内したか */
   homeTipShown: boolean;
   lastSlot: number;
-  /** 店で珍しいことが起きたら倍速を解除して等倍に戻し、終わるまで等倍にする（オーナーの判断 2026-11-13。初期はオン） */
+  /** 店で珍しいことが起きたら倍速を解除し、終わるまでその速さにする（オーナーの判断 2026-11-13。初期はオン） */
   slowOnEvents: boolean;
+  /** 倍速を解除しないイベント（false にした種類。ない種類は解除する。オーナーの指示 2026-11-13） */
+  slowEvents: Partial<Record<SlowEventKey, boolean>>;
+  /** 解除したときの速さ（1 = 等倍、2 = 2倍。もともと遅いときはそのまま） */
+  slowSpeed: number;
   /** 最後のゲーム速度（次の日・次に始めたときもそのまま。イベントで等倍に戻ったら等倍） */
   gameSpeed: number;
 }
@@ -37,15 +43,25 @@ export const DEFAULT_SETTINGS: Settings = {
   homeTipShown: false,
   lastSlot: 1,
   slowOnEvents: true,
+  slowEvents: {},
+  slowSpeed: 1,
   gameSpeed: 1,
 };
+
+/** 倍速の解除の設定（GameHost に渡す形） */
+export function slowConfigOf(s: Settings): EventSlowConfig {
+  return { on: s.slowOnEvents, events: { ...(s.slowEvents ?? {}) }, speed: s.slowSpeed === 2 ? 2 : 1 };
+}
 
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
     const v = JSON.parse(raw) as Partial<Settings>;
-    return { ...DEFAULT_SETTINGS, ...v };
+    const out = { ...DEFAULT_SETTINGS, ...v };
+    if (!out.slowEvents || typeof out.slowEvents !== 'object') out.slowEvents = {};
+    if (out.slowSpeed !== 2) out.slowSpeed = 1;
+    return out;
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

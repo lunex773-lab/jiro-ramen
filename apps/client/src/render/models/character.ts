@@ -21,6 +21,15 @@ export type { HeldKind };
  */
 export type CharacterAct = 'dance' | 'imitate' | 'nose' | 'surprise' | 'laugh' | 'scared' | 'film' | 'annoyed' | 'tell' | 'fly' | 'argue';
 
+/**
+ * 武器を使う動き（オーナーの指示 2026-11-13）: swing = バット・鉄パイプ・日本刀を振る、stab = 包丁で刺す、
+ * shoot = 銃を撃つ（腕を伸ばして反動）、throw = 爆弾を投げる
+ */
+export type AttackMotion = 'swing' | 'stab' | 'shoot' | 'throw';
+
+/** 動きの長さ（秒） */
+export const ATTACK_SEC: Record<AttackMotion, number> = { swing: 0.45, stab: 0.32, shoot: 0.3, throw: 0.55 };
+
 /** 見た目の演出（金色覚醒の光と逆立つ髪。0..1） */
 export interface CharacterFx {
   golden: number;
@@ -40,6 +49,8 @@ export interface CharacterModel extends Disposable {
   setAct(act: CharacterAct | null): void;
   /** 見た目の演出（金色覚醒） */
   setFx(fx: CharacterFx | null): void;
+  /** 武器を使う動きを1回する（次の update から ATTACK_SEC 秒） */
+  attack(kind: AttackMotion): void;
   /** 手に持つ物を自前で付けたいとき用の取り付け点（胸の前, 高さ約1.0m） */
   heldAnchor: THREE.Object3D;
 }
@@ -928,6 +939,8 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
   const seatHipsY = 0.62 + 0.075 * s + J.hipDown + 0.005;
   let eatM: EatMotion | null = null;
   let act: CharacterAct | null = null;
+  // 武器を使う動き（start は次の update の時刻で決める）
+  let atk: { kind: AttackMotion; start: number | null } | null = null;
   // 金色覚醒（必要になったときに作る）
   let gold: { hair: THREE.Group; spikes: THREE.Mesh; aura: AuraModel; on: boolean } | null = null;
   let goldPower = 0;
@@ -1112,6 +1125,7 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       setRot(target, B.foreR, -0.12 - Math.max(0, -sw) * 0.4, 0, 0);
     }
     if (act && pose !== 'down') applyAct(act, pose, t);
+    if (atk && pose !== 'down') applyAttack(t);
     if (pose === 'down') {
       // 床に倒れて動かない（体ごと倒すのは update で行う）
       target.rot.fill(0);
@@ -1128,6 +1142,61 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       setRot(target, B.head, 0, 0.5, 0.3);
     }
     chopsticks.visible = pose === 'eat' && (eatM?.chopsticks ?? true);
+  }
+
+  /** 武器を使う動き（右腕。振るときは両手で、体もひねる） */
+  function applyAttack(t: number): void {
+    if (!atk) return;
+    if (atk.start === null) atk.start = t;
+    const k = (t - atk.start) / ATTACK_SEC[atk.kind];
+    if (k >= 1 || k < 0) {
+      atk = null;
+      return;
+    }
+    const ease = (x: number) => x * x * (3 - 2 * x);
+    switch (atk.kind) {
+      case 'swing': {
+        // 振りかぶって（右上へ）→ 斜めに振り下ろす → 振り抜いた形で少し止まる
+        const up = k < 0.35 ? ease(k / 0.35) : 1;
+        const down = k < 0.35 ? 0 : ease(Math.min(1, (k - 0.35) / 0.35));
+        const ax = -0.4 - 2.3 * up + 2.1 * down;
+        const az = 0.2 + 0.5 * up - 0.95 * down;
+        setRot(target, B.armR, ax, 0, az);
+        setRot(target, B.foreR, -0.9 + 0.65 * down, 0, 0);
+        setRot(target, B.armL, ax + 0.25, 0, -az * 0.6);
+        setRot(target, B.foreL, -1.0 + 0.5 * down, 0, 0);
+        setRot(target, B.spine, 0.05 + 0.2 * down, 0.45 * up - 0.75 * down, 0);
+        break;
+      }
+      case 'stab': {
+        // 引いて → 前へ突き出す
+        const back = k < 0.3 ? ease(k / 0.3) : 1 - ease(Math.min(1, (k - 0.3) / 0.2));
+        const thrust = k < 0.3 ? 0 : k < 0.55 ? ease((k - 0.3) / 0.25) : 1 - ease((k - 0.55) / 0.45);
+        setRot(target, B.armR, -0.45 - 1.1 * thrust + 0.25 * back, 0, 0.15);
+        setRot(target, B.foreR, -1.5 + 1.4 * thrust - 0.1 * back, 0, 0);
+        setRot(target, B.spine, 0.08 + 0.18 * thrust, -0.25 * thrust + 0.15 * back, 0);
+        break;
+      }
+      case 'shoot': {
+        // 腕をまっすぐ伸ばして構え、撃った瞬間に跳ね上がる
+        const kick = k < 0.15 ? k / 0.15 : Math.max(0, 1 - (k - 0.15) / 0.5);
+        setRot(target, B.armR, -1.5 - 0.35 * kick, 0, 0.05);
+        setRot(target, B.foreR, -0.05 - 0.2 * kick, 0, 0);
+        setRot(target, B.armL, -1.35, 0, -0.35);
+        setRot(target, B.foreL, -0.45, 0, 0);
+        break;
+      }
+      case 'throw': {
+        // 上から後ろへ振りかぶって → 前へ投げる
+        const wind = k < 0.4 ? ease(k / 0.4) : 1;
+        const rel = k < 0.4 ? 0 : ease(Math.min(1, (k - 0.4) / 0.3));
+        setRot(target, B.armR, -0.6 - 2.3 * wind + 1.6 * rel, 0, 0.3 - 0.2 * rel);
+        setRot(target, B.foreR, -1.3 + 1.1 * rel, 0, 0);
+        setRot(target, B.armL, -1.0 + 0.6 * rel, 0, -0.3);
+        setRot(target, B.spine, 0.05 + 0.25 * rel, 0.35 * wind - 0.55 * rel, 0);
+        break;
+      }
+    }
   }
 
   /** 姿勢に重ねる動き（上半身。踊りは腰も） */
@@ -1266,7 +1335,8 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
     heldAnchor,
     update(pose, t, dt, speed = 1) {
       computePose(pose, t, speed);
-      apply(first || pose === 'down' ? 1 : clamp(dt * 12, 0, 1));
+      // 武器を使う動きは速いので、なめらかにする量を減らす
+      apply(first || pose === 'down' ? 1 : clamp(dt * (atk ? 30 : 12), 0, 1));
       first = false;
       // 倒れた人は体ごと床に寝かせる（位置は呼び出し側が毎フレーム足元に置き直す）
       if (pose === 'down') {
@@ -1288,6 +1358,9 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
     },
     setAct(a) {
       act = a;
+    },
+    attack(kind) {
+      atk = { kind, start: null };
     },
     setFx(fx) {
       const on = !!fx && fx.golden > 0;
