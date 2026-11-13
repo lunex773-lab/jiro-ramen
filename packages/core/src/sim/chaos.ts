@@ -19,7 +19,7 @@ import { LEGEND_KINDS } from '../data/fame';
 import { stageOf } from '../geometry';
 
 /** 店の中・外にいる客（帰った・帰る途中は除く） */
-const GONE = new Set(['leaving', 'left', 'abandoned']);
+const GONE = new Set(['leaving', 'left', 'abandoned', 'dead']);
 
 export function ensureChaos(s: GameState): ChaosState {
   const ev = ensureEvents(s);
@@ -300,7 +300,7 @@ interface ChaosHandler {
   update(s: GameState, dt: number, ctx: SimCtx, run: ChaosRun, c: Customer | null): boolean;
 }
 
-const gone = (c: Customer | null) => !c || c.state === 'left' || c.state === 'abandoned';
+const gone = (c: Customer | null) => !c || c.state === 'left' || c.state === 'abandoned' || c.state === 'dead';
 
 const HANDLERS: Record<ChaosKind, ChaosHandler> = {
   // UFO: 店の前の通りに降り、宇宙人が客として並んで食べ、帰りも UFO に乗って帰る

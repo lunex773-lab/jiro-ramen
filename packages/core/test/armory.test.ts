@@ -1,6 +1,6 @@
 // 隠し扉と武器庫（じろ1 5.12。オーナーの判断: 本物の武器・血の表現あり・罰は軽い）
 import { describe, expect, it } from 'vitest';
-import { applyAction, ARMORY_DOOR_ID, ARMORY_RACK_ID, armoryDoorPos, BALANCE, isWalkable, listVerbs, stageOf, step, WEAPONS, type GameState, type SimCtx } from '../src';
+import { applyAction, ARMORY_DOOR_ID, ARMORY_RACK_ID, armoryDoorPos, BALANCE, isWalkable, listVerbs, stageOf, step, victimPos, WEAPONS, type GameState, type SimCtx } from '../src';
 import { makePlayer } from '../src/state';
 import { newGame, run, seatCustomer } from './helpers';
 
@@ -13,6 +13,14 @@ function atDoor(s: GameState, id = 'p1') {
 
 function interact(s: GameState, ctx: SimCtx, targetId: string, verb: string, id = 'p1') {
   return applyAction(s, id, { type: 'interact', targetId, verb }, ctx);
+}
+
+/** 照準を客（席の客は席）に向けて、手の武器を使う（FPS 式。オーナーの判断 2026-11-13） */
+function shootAt(s: GameState, ctx: SimCtx, customerId: string, id = 'p1', pitch = 0) {
+  const p = s.players.find((x) => x.id === id)!;
+  const c = s.customers.find((x) => x.id === customerId)!;
+  const t = victimPos(s, c);
+  return applyAction(s, id, { type: 'useWeapon', yaw: Math.atan2(t.x - p.pos.x, t.z - p.pos.z), pitch }, ctx);
 }
 
 /** 営業中の店（8席に2人座っている）で、武器を買って（銃は弾も2発）持つ */
@@ -65,63 +73,133 @@ describe('隠し扉と武器庫', () => {
   });
 });
 
-describe('客を襲う（罰は軽い: 評判 −0.4・警察が来てその日の営業は終わる）', () => {
-  it('武器を持つと席の客に「斬る」が出る。襲われた客は血を流して逃げ、見ていた客も逃げ、新しい客は来ない', () => {
+describe('武器は FPS 式（オーナーの判断 2026-11-13）: 照準の先の人に当たり、客は血を流して死ぬ。警察が来るまでは何人でも', () => {
+  it('人に向けた「襲う」ボタンは出ない。武器を持つと照準の先に使え、当たった客は血を流して死に、閉店まで倒れたまま。見ていた客は逃げ、新しい客は来ない', () => {
     const { s, ctx } = armed('katana');
     const seat = s.seats[0]!;
     const p = s.players[0]!;
     p.pos = { x: 2, z: 2.3 };
     const rep = s.reputation;
-    expect(listVerbs(s, 'p1', seat.id).some((v) => v.verb === 'attack' && v.label === '日本刀で斬る' && v.enabled)).toBe(true);
-    expect(interact(s, ctx, seat.id, 'attack').ok).toBe(true);
+    expect(listVerbs(s, 'p1', seat.id).some((v) => v.verb === 'attack')).toBe(false);
+    const r = shootAt(s, ctx, 'ctest0');
+    expect(r.ok).toBe(true);
+    expect((r.data as { hit: string | null }).hit).toBe('ctest0');
     const victim = s.customers.find((c) => c.id === 'ctest0')!;
-    expect(victim.hurt).toBe(true);
-    expect(victim.state).toBe('leaving');
+    expect(victim.state).toBe('dead');
+    expect(victim.dead).toBeDefined();
     expect(s.customers.find((c) => c.id === 'ctest1')!.state).toBe('leaving');
     expect(s.dirt.some((d) => d.kind === 'blood')).toBe(true);
-    expect(s.reputation).toBeCloseTo(rep - BALANCE.armory.reputationPenalty, 5);
+    // 最初の事件の −0.4 ＋ 死者1人の −0.1
+    expect(s.reputation).toBeCloseTo(rep - BALANCE.armory.reputationPenalty - BALANCE.armory.deathPenalty, 5);
+    expect(s.incident?.deaths).toBe(1);
     expect(s.orders.filter((o) => o.status === 'waiting')).toHaveLength(0);
-    // 新しい客は来ない
+    // 新しい客は来ない。死んだ客は倒れたまま残る
     run(s, ctx, 5);
-    expect(s.customers.filter((c) => !c.hurt && c.state !== 'leaving' && c.state !== 'left')).toHaveLength(0);
+    expect(s.customers.filter((c) => c.state !== 'leaving' && c.state !== 'left' && c.state !== 'dead')).toHaveLength(0);
+    expect(s.customers.find((c) => c.id === 'ctest0')?.state).toBe('dead');
   });
 
-  it('警察が来ると武器を取り上げ、扉を閉め、その日の営業は終わって精算になる。2回目の事件で評判はもう下がらない', () => {
+  it('外れることがある（照準の先に人がいなければ当たらない）。近接は外れても事件にならない', () => {
+    const { s, ctx } = armed('katana', 57);
+    s.players[0]!.pos = { x: 2, z: 2.3 };
+    const r = applyAction(s, 'p1', { type: 'useWeapon', yaw: 0, pitch: 0 }, ctx);
+    expect(r.ok).toBe(true);
+    expect((r.data as { hit: string | null }).hit).toBeNull();
+    expect(s.incident ?? null).toBeNull();
+  });
+
+  it('警察が来るまでは何人でも撃てる（逃げている客にも）。死者1人ごとに評判が −0.1（合計 −1.5 まで）。警察が来ると使えない', () => {
     const { s, ctx } = armed('pistol', 53);
     const p = s.players[0]!;
-    p.pos = { x: 6, z: 2.3 };
+    // 1人目の席の正面（2人目の席は射線に入らない）
+    const sp0 = victimPos(s, s.customers.find((c) => c.id === 'ctest0')!);
+    p.pos = { x: sp0.x, z: sp0.z + 2.5 };
     const rep = s.reputation;
-    expect(interact(s, ctx, s.seats[0]!.id, 'attack').ok).toBe(true);
-    expect(interact(s, ctx, 'ctest1', 'attack').ok).toBe(false); // もう逃げている
-    expect(s.reputation).toBeCloseTo(rep - BALANCE.armory.reputationPenalty, 5);
+    expect(shootAt(s, ctx, 'ctest0').ok).toBe(true);
+    expect(s.customers.find((c) => c.id === 'ctest0')!.state).toBe('dead');
+    // 2人目は逃げ始めている（銃声で事件）。続けて使える間隔を待ってから撃つ
+    run(s, ctx, 0.5);
+    const second = s.customers.find((c) => c.id === 'ctest1')!;
+    expect(second.state).toBe('leaving');
+    expect(shootAt(s, ctx, 'ctest1').ok).toBe(true);
+    expect(second.state).toBe('dead');
+    expect(s.incident?.deaths).toBe(2);
+    expect(s.reputation).toBeCloseTo(rep - BALANCE.armory.reputationPenalty - 2 * BALANCE.armory.deathPenalty, 5);
     let guard = 0;
-    while (s.phase !== 'closed' && guard++ < 5000) step(s, 0.1, ctx);
+    while (!s.incident?.police && guard++ < 400) step(s, 0.1, ctx);
     expect(s.incident?.police).toBe(true);
+    const r = applyAction(s, 'p1', { type: 'useWeapon', yaw: 0, pitch: 0 }, ctx);
+    expect(r.ok).toBe(false);
+    while (s.phase !== 'closed' && guard++ < 5000) step(s, 0.1, ctx);
     expect(p.hand.kind).toBe('none');
     expect(s.armory!.doorOpen).toBe(false);
     expect(s.phase).toBe('closed');
-    expect(s.notices.find((n) => n.code === 'incident')?.text).toContain('逮捕');
+    expect(s.notices.find((n) => n.code === 'incident')?.text).toContain('死者 2人');
+  });
+
+  it('評判の下がり方には上限がある（1日の事件で −1.5 まで）', () => {
+    const { s, ctx } = armed('pistol', 58);
+    const rep = s.reputation;
+    s.armory!.ammo = { pistol: 30 };
+    for (let i = 2; i < 20; i++) seatCustomer(s, i % s.seats.length === 0 ? 2 : i % s.seats.length);
+    const p = s.players[0]!;
+    p.pos = { x: 6, z: 2.3 };
+    let kills = 0;
+    for (let i = 0; i < 40 && kills < 16; i++) {
+      const c = s.customers.find((x) => x.state !== 'dead' && x.state !== 'left' && x.state !== 'abandoned');
+      if (!c) break;
+      p.pos = { x: victimPos(s, c).x, z: victimPos(s, c).z + 1.5 };
+      const r = shootAt(s, ctx, c.id);
+      if (r.ok && (r.data as { hit: string | null }).hit) kills++;
+      run(s, ctx, 0.4);
+    }
+    expect(s.incident!.penalty!).toBeLessThanOrEqual(BALANCE.armory.penaltyCap + 1e-9);
+    expect(rep - s.reputation).toBeLessThanOrEqual(BALANCE.armory.penaltyCap + 1e-9);
   });
 
   it('包丁は近くでないと届かない。拳銃は離れていても撃てる。散弾銃は近くの客にも当たる', () => {
     const k = armed('knife', 54);
     k.s.players[0]!.pos = { x: 5, z: 2.3 };
-    expect(interact(k.s, k.ctx, k.s.seats[0]!.id, 'attack').reason).toBe('遠すぎます');
+    const kr = shootAt(k.s, k.ctx, 'ctest0');
+    expect(kr.ok).toBe(true);
+    expect((kr.data as { hit: string | null }).hit).toBeNull();
     const g = armed('shotgun', 55);
     g.s.players[0]!.pos = { x: 3, z: 3 };
-    expect(interact(g.s, g.ctx, g.s.seats[0]!.id, 'attack').ok).toBe(true);
+    expect(shootAt(g.s, g.ctx, 'ctest0').ok).toBe(true);
     // 隣の席（0.8m）の客にも当たる
-    expect(g.s.customers.filter((c) => c.hurt)).toHaveLength(2);
+    expect(g.s.customers.filter((c) => c.state === 'dead')).toHaveLength(2);
   });
 
-  it('爆弾は投げると手から離れ、少しあとに爆発して近くの客がけがをする', () => {
+  it('爆弾は投げると手から離れ、少しあとに爆発して近くの客が死ぬ', () => {
     const { s, ctx } = armed('bomb', 56);
     s.players[0]!.pos = { x: 3, z: 3 };
-    expect(interact(s, ctx, s.seats[0]!.id, 'attack').ok).toBe(true);
+    expect(shootAt(s, ctx, 'ctest0').ok).toBe(true);
     expect(s.players[0]!.hand.kind).toBe('none');
-    expect(s.customers.filter((c) => c.hurt)).toHaveLength(0);
+    expect(s.customers.filter((c) => c.state === 'dead')).toHaveLength(0);
     run(s, ctx, 2.5);
-    expect(s.customers.filter((c) => c.hurt).length).toBeGreaterThanOrEqual(1);
+    expect(s.customers.filter((c) => c.state === 'dead').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('共同経営の仲間に当たると5秒倒れて動けない（死なない）', () => {
+    const { s, ctx } = armed('pistol', 59);
+    const guest = makePlayer(s, 'p2', 'ゲスト', false);
+    guest.connected = true;
+    s.players.push(guest);
+    const p = s.players[0]!;
+    p.pos = { x: 5, z: 4 };
+    guest.pos = { x: 5, z: 6 };
+    const r = applyAction(s, 'p1', { type: 'useWeapon', yaw: 0, pitch: 0 }, ctx);
+    expect((r.data as { hit: string | null }).hit).toBe('p2');
+    expect(guest.downUntil).toBeCloseTo(s.t + BALANCE.armory.playerDownSec, 5);
+    const before = { ...guest.pos };
+    expect(applyAction(s, 'p2', { type: 'move', x: before.x + 0.3, z: before.z, yaw: 1 }, ctx, 100).ok).toBe(true);
+    expect(guest.pos).toEqual(before);
+    expect(applyAction(s, 'p2', { type: 'interact', targetId: s.seats[0]!.id, verb: 'ask_call' }, ctx).ok).toBe(false);
+    expect(guest.yaw).not.toBe(1);
+    run(s, ctx, BALANCE.armory.playerDownSec + 0.2);
+    // 5秒たつと、また動ける（向きが変わる）
+    expect(applyAction(s, 'p2', { type: 'move', x: guest.pos.x, z: guest.pos.z, yaw: 1 }, ctx, 100).ok).toBe(true);
+    expect(guest.yaw).toBe(1);
   });
 });
 
@@ -167,14 +245,14 @@ describe('武器を買う（じろ2: 改修設計書05。値段は案の2倍。�
     expect(interact(s, ctx, ARMORY_RACK_ID, 'buy_weapon:pistol').ok).toBe(true);
     expect(interact(s, ctx, ARMORY_RACK_ID, 'weapon:pistol').ok).toBe(true);
     s.players[0]!.pos = { x: 6, z: 2.3 };
-    const r = interact(s, ctx, s.seats[0]!.id, 'attack');
+    const r = shootAt(s, ctx, 'ctest0');
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('弾がありません');
     atDoor(s);
     expect(interact(s, ctx, ARMORY_RACK_ID, 'buy_ammo:pistol').ok).toBe(true);
     expect(s.armory!.ammo).toEqual({ pistol: 1 });
     s.players[0]!.pos = { x: 6, z: 2.3 };
-    expect(interact(s, ctx, s.seats[0]!.id, 'attack').ok).toBe(true);
+    expect(shootAt(s, ctx, 'ctest0').ok).toBe(true);
     expect(s.armory!.ammo).toEqual({ pistol: 0 });
   });
 
@@ -192,20 +270,20 @@ describe('武器を買う（じろ2: 改修設計書05。値段は案の2倍。�
     seatCustomer(s, 0);
     expect(interact(s, ctx, ARMORY_RACK_ID, 'weapon:bomb').ok).toBe(true);
     s.players[0]!.pos = { x: 3, z: 3 };
-    expect(interact(s, ctx, s.seats[0]!.id, 'attack').ok).toBe(true);
+    expect(shootAt(s, ctx, 'ctest0').ok).toBe(true);
     expect(s.armory!.bombStock).toBe(1);
   });
 
   it('警察は手の武器を取り上げるが、買った武器は武器庫に残る。事件はイベントの記録に残る', () => {
     const { s, ctx } = armed('katana', 63);
     s.players[0]!.pos = { x: 2, z: 2.3 };
-    expect(interact(s, ctx, s.seats[0]!.id, 'attack').ok).toBe(true);
+    expect(shootAt(s, ctx, 'ctest0').ok).toBe(true);
     let guard = 0;
     while (s.phase !== 'closed' && guard++ < 5000) step(s, 0.1, ctx);
     expect(s.players[0]!.hand.kind).toBe('none');
     expect(s.armory!.owned).toContain('katana');
     const rec = s.events!.log!.find((r) => r.kind === 'incident')!;
     expect(rec).toMatchObject({ state: 'done', day: s.day, company: s.shopName });
-    expect(rec.result).toContain('けが人');
+    expect(rec.result).toContain('死者 1人');
   });
 });

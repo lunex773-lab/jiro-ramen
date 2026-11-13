@@ -20,7 +20,7 @@ import { emit, type SimCtx } from './notices';
 import { currentTutorialStep, inBasicsTutorial, tutorialAction, updateTutorial, type TutorialOp } from './tutorial';
 import { accidentHalted, EVENT_KINDS } from './events';
 import { accidentFainted, resetAccident } from './accident';
-import { isArrested } from './armory';
+import { isArrested, playerDowned, useWeapon } from './armory';
 import { forceEvent } from './visitors';
 import { promote, promoteLeader, setDateShift, setRestDays, setShift, type DateShiftMode } from './staff';
 import { autoShifts } from './shift-plan';
@@ -33,6 +33,8 @@ import { assignManager, enterStore, openStore, renameShop, renameStore, setStore
 export type Action =
   | { type: 'move'; x: number; z: number; yaw: number }
   | { type: 'interact'; targetId: Id; verb: string; args?: Args }
+  /** 手に持った武器を照準の先へ使う（撃つ・振る・投げる）。FPS 式（オーナーの判断 2026-11-13）。yaw は +Z が 0、pitch は上が正 */
+  | { type: 'useWeapon'; yaw: number; pitch: number }
   | { type: 'cancelWork' }
   | { type: 'openShop' }
   | { type: 'nextDay' }
@@ -116,7 +118,7 @@ export type ActionType = Action['type'];
  * 共同経営でゲスト（ホスト以外のプレイヤー）ができる操作。ゲストは店で働く従業員と同じ扱いで、
  * 歩くことと店の業務（調理・接客・配膳・下げる・清掃・クレーム対応など、動詞の操作）だけができる（第2版 2-1）
  */
-export const GUEST_ACTIONS: ReadonlySet<ActionType> = new Set<ActionType>(['move', 'interact', 'cancelWork']);
+export const GUEST_ACTIONS: ReadonlySet<ActionType> = new Set<ActionType>(['move', 'interact', 'cancelWork', 'useWeapon']);
 
 /**
  * 共同経営でホストだけが実行できる操作 = ゲストの操作以外のすべて（開店・発注・採用・設備・レイアウト・値段・資金・店の設定など）。
@@ -172,6 +174,11 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
     if (a.type === 'move') return { ok: true, corrected: { ...player.pos } };
     return fail('警察に取り押さえられています');
   }
+  // 共同経営の仲間の武器に当たって倒れている間（5秒）は、動けず何もできない
+  if (playerDowned(s, actorId)) {
+    if (a.type === 'move') return { ok: true, corrected: { ...player.pos } };
+    return fail('倒れていて動けません');
+  }
   switch (a.type) {
     case 'move': {
       if (!isNum(a.x) || !isNum(a.z) || !isNum(a.yaw)) return fail('不正な位置');
@@ -197,6 +204,12 @@ function applyActionInner(s: GameState, actorId: Id, a: Action, ctx: SimCtx, now
       const args = sanitizeArgs(a.args);
       const r = interact(s, actorId, a.targetId, a.verb, args, ctx);
       return r.ok ? { ok: true, data: { started: !!r.started } } : fail(r.reason ?? '操作できません');
+    }
+    case 'useWeapon': {
+      if (!isNum(a.yaw) || !isNum(a.pitch)) return fail('不正な操作');
+      if (player.work) return fail('作業中です');
+      const r = useWeapon(s, ctx, player, a.yaw, Math.max(-1.5, Math.min(1.5, a.pitch)));
+      return r.ok ? { ok: true, data: { hit: r.hit } } : fail(r.reason);
     }
     case 'cancelWork': {
       const actor = getActor(s, actorId);

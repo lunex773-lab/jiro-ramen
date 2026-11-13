@@ -831,6 +831,8 @@ export function updateEmployees(s: GameState, dt: number, ctx: SimCtx): void {
   for (const e of s.employees) {
     // 出勤前・休憩中・退勤後・欠勤（状態は staff.ts の出勤の処理が決める）
     if (!e.presentToday) continue;
+    // 撃たれてけがをして倒れている（その日の営業が終わるまで動かない）
+    if (e.down) continue;
     // 火事に気づいたら仕事の手を止めて火の方を見る（店からは出ない）
     if (accidentPanic(s) && !e.work && e.pos.z >= 0.05) {
       const acc = s.events!.accident!;

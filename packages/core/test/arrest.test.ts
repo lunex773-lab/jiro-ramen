@@ -19,7 +19,10 @@ import {
   speedLocked,
   stageOf,
   step,
+  victimPos,
   WEAPONS,
+  type Customer,
+  type Employee,
   type GameState,
   type SimCtx,
 } from '../src';
@@ -27,6 +30,14 @@ import { addBot, newGame, run, seatCustomer } from './helpers';
 
 function interact(s: GameState, ctx: SimCtx, targetId: string, verb: string, id = 'p1') {
   return applyAction(s, id, { type: 'interact', targetId, verb }, ctx);
+}
+
+/** 照準を人（客は id。席の客は席）に向けて手の武器を使う（FPS 式。オーナーの判断 2026-11-13） */
+function shootAt(s: GameState, ctx: SimCtx, target: string | Customer | Employee, id = 'p1') {
+  const p = s.players.find((x) => x.id === id)!;
+  const v = typeof target === 'string' ? s.customers.find((x) => x.id === target)! : target;
+  const t = victimPos(s, v);
+  return applyAction(s, id, { type: 'useWeapon', yaw: Math.atan2(t.x - p.pos.x, t.z - p.pos.z), pitch: 0 }, ctx);
 }
 
 /** 営業中の店で、武器を買って持つ（店員が1人いる） */
@@ -57,31 +68,41 @@ function untilClosed(s: GameState, ctx: SimCtx, max = 200): number {
 }
 
 describe('店員を襲う（けがをした店員は1週間療養する）', () => {
-  it('武器を持つと店員にも「斬る」が出る。襲われた店員は血を流して店の外へ逃げ、その日は戻らない', () => {
+  it('照準の先の店員に当たると、血を流してその場に倒れ（その日の営業が終わるまで）、その日は働かない（オーナーの判断 2026-11-13）', () => {
     const { s, ctx, e } = armed('katana');
     s.players[0]!.pos = { x: 3, z: 2.7 };
-    const v = listVerbs(s, 'p1', e.id).find((x) => x.verb === 'attack');
-    expect(v?.enabled).toBe(true);
-    expect(v?.label).toBe('日本刀で斬る');
-    expect(interact(s, ctx, e.id, 'attack').ok).toBe(true);
+    expect(listVerbs(s, 'p1', e.id).some((x) => x.verb === 'attack')).toBe(false);
+    const r = shootAt(s, ctx, e);
+    expect((r.data as { hit: string | null }).hit).toBe(e.id);
     expect(e.injury).toEqual({ day: s.day, until: s.day + BALANCE.armory.injuryDays });
-    expect(e.commute?.kind).toBe('injured');
+    expect(e.down).toBeDefined();
+    expect(e.commute ?? null).toBeNull();
     expect(e.att?.status).toBe('left');
     expect(s.dirt.some((d) => d.kind === 'blood')).toBe(true);
     expect(s.incident?.staffVictims).toBe(1);
     expect(s.incident?.victims).toBe(1);
+    expect(s.incident?.deaths ?? 0).toBe(0);
     expect(s.notices.some((n) => n.code === `injured:${e.id}` && n.text.includes('療養'))).toBe(true);
     expect(e.record?.log.some((l) => l.kind === 'injured')).toBe(true);
-    // 逃げた店員はもう襲えない
-    expect(listVerbs(s, 'p1', e.id).find((x) => x.verb === 'attack')?.enabled ?? false).toBe(false);
-    run(s, ctx, 15);
+    // 倒れたまま（歩いて出て行かない）。もう一度当たることはない
+    const at = { ...e.pos };
+    run(s, ctx, 3);
+    expect(e.presentToday).toBe(true);
+    expect(e.pos).toEqual(at);
+    const again = shootAt(s, ctx, e);
+    expect((again.data as { hit: string | null } | undefined)?.hit ?? null).not.toBe(e.id);
+    // 営業が終わると運ばれていく
+    untilClosed(s, ctx);
     expect(e.presentToday).toBe(false);
+    expect(nextDay(s, ctx).ok).toBe(true);
+    expect(e.down).toBeUndefined();
   });
 
   it('けがをした翌日から7日は出勤しない（シフトがあっても）。8日目から戻る', () => {
     const { s, ctx, e } = armed('katana', 82);
     s.players[0]!.pos = { x: 3, z: 2.7 };
-    expect(interact(s, ctx, e.id, 'attack').ok).toBe(true);
+    expect(shootAt(s, ctx, e).ok).toBe(true);
+    expect(e.down).toBeDefined();
     const day0 = s.day;
     untilClosed(s, ctx);
     expect(s.phase).toBe('closed');
@@ -100,13 +121,13 @@ describe('店員を襲う（けがをした店員は1週間療養する）', () 
     const c = g.s.customers.find((x) => x.id === 'ctest0')!;
     g.e.pos = { x: c.pos.x + 0.4, z: c.pos.z + 0.3 };
     g.s.players[0]!.pos = { x: c.pos.x, z: c.pos.z + 1.6 };
-    expect(interact(g.s, g.ctx, g.s.seats[0]!.id, 'attack').ok).toBe(true);
+    expect(shootAt(g.s, g.ctx, 'ctest0').ok).toBe(true);
     expect(g.e.injury).toBeDefined();
     const b = armed('bomb', 84);
     const c2 = b.s.customers.find((x) => x.id === 'ctest0')!;
     b.e.pos = { x: c2.pos.x + 0.8, z: c2.pos.z + 0.5 };
     b.s.players[0]!.pos = { x: c2.pos.x, z: c2.pos.z + 2 };
-    expect(interact(b.s, b.ctx, b.s.seats[0]!.id, 'attack').ok).toBe(true);
+    expect(shootAt(b.s, b.ctx, 'ctest0').ok).toBe(true);
     run(b.s, b.ctx, (WEAPONS.bomb!.fuse ?? 2) + 0.5);
     expect(b.e.injury).toBeDefined();
     expect(b.s.incident?.staffVictims).toBe(1);
@@ -118,7 +139,7 @@ describe('襲うと等速に戻り、20秒後に警察が来て逮捕され、�
     const { s, ctx } = armed('katana', 85);
     expect(speedLocked(s)).toBe(false);
     s.players[0]!.pos = { x: 2, z: 2.3 };
-    expect(interact(s, ctx, s.seats[0]!.id, 'attack').ok).toBe(true);
+    expect(shootAt(s, ctx, 'ctest0').ok).toBe(true);
     expect(speedLocked(s)).toBe(true);
   });
 
@@ -126,7 +147,7 @@ describe('襲うと等速に戻り、20秒後に警察が来て逮捕され、�
     const { s, ctx } = armed('katana', 86);
     const p = s.players[0]!;
     p.pos = { x: 2, z: 2.3 };
-    expect(interact(s, ctx, s.seats[0]!.id, 'attack').ok).toBe(true);
+    expect(shootAt(s, ctx, 'ctest0').ok).toBe(true);
     const inc = s.incident!;
     expect(inc.attackerId).toBe('p1');
     expect(inc.policeAt - inc.startT).toBe(20);
@@ -149,7 +170,7 @@ describe('襲うと等速に戻り、20秒後に警察が来て逮捕され、�
     const mv = applyAction(s, 'p1', { type: 'move', x: p.pos.x + 0.3, z: p.pos.z, yaw: 0 }, ctx, 100);
     expect(mv.ok).toBe(true);
     expect(p.pos).toEqual(before);
-    expect(interact(s, ctx, s.seats[1]!.id, 'attack').ok).toBe(false);
+    expect(applyAction(s, 'p1', { type: 'useWeapon', yaw: 0, pitch: 0 }, ctx).ok).toBe(false);
     // 段階を順に通る
     const phases: string[] = [];
     let t = 0;
@@ -177,7 +198,7 @@ describe('襲うと等速に戻り、20秒後に警察が来て逮捕され、�
       const { s, ctx } = armed('pistol', where === 'kitchen' ? 87 : 88);
       const p = s.players[0]!;
       p.pos = where === 'kitchen' ? { x: 6.5, z: 4.6 } : { x: armoryDoorPos(stageOf(s)).x + 0.6, z: 1.2 };
-      expect(interact(s, ctx, 'ctest0', 'attack').ok).toBe(true);
+      expect(shootAt(s, ctx, 'ctest0').ok).toBe(true);
       run(s, ctx, 20.5);
       const a = arrestOf(s)!;
       let t = 0;
@@ -195,7 +216,7 @@ describe('襲うと等速に戻り、20秒後に警察が来て逮捕され、�
   it('閉店の時刻を過ぎても、逮捕が終わるまで精算しない。暗くなったら客も店員もいなくなってすぐ精算', () => {
     const { s, ctx, e } = armed('katana', 89);
     s.players[0]!.pos = { x: 2, z: 2.3 };
-    expect(interact(s, ctx, s.seats[0]!.id, 'attack').ok).toBe(true);
+    expect(shootAt(s, ctx, 'ctest0').ok).toBe(true);
     // 閉店の直前にする
     s.openT = Math.max(s.openT, 1e9);
     run(s, ctx, 21);

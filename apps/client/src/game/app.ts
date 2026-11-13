@@ -2,6 +2,8 @@
 
 import {
   arrestOf,
+  playerDowned,
+  WEAPONS,
   BALANCE,
   createGame,
   incidentToday,
@@ -673,6 +675,7 @@ export class App {
       onMenu: () => this.openManage(),
       onOpenShop: () => void this.openShop(),
       onHelp: () => this.showHelp(() => this.show(null)),
+      onFire: () => this.fireWeapon(),
     });
     this.hud.attachHint(this.hintEl);
     this.tutorial = new TutorialPanel(this.uiLayer, host, {
@@ -714,6 +717,8 @@ export class App {
     c.onPrimary = (down) => this.hud?.pressIndex(0, down);
     c.onVerbKey = (i, down) => this.hud?.pressIndex(i, down);
     c.onCancel = () => void host.act({ type: 'cancelWork' });
+    c.onFire = () => this.fireWeapon();
+    c.fireMode = () => host.state.players.find((p) => p.id === host.playerId)?.hand.kind === 'weapon';
     c.onMenu = () => (this.manage?.isOpen ? this.closeManage() : this.openManage());
     c.onPause = () => (this.manage?.isOpen ? this.closeManage() : this.openManage());
     const me = host.state.players.find((p) => p.id === host.playerId);
@@ -914,6 +919,24 @@ export class App {
     return r.ok;
   }
 
+  /**
+   * 手に持った武器を照準の先へ使う（撃つ・振る・投げる。FPS 式。オーナーの判断 2026-11-13）。
+   * 今の位置を先に送ってから、向き（yaw）と上下（pitch）で使う。銃は撃つと反動で少し上を向く
+   */
+  private fireWeapon(): void {
+    const host = this.host;
+    const c = this.controls;
+    if (!host || !c || !c.enabled) return;
+    const me = host.state.players.find((p) => p.id === host.playerId);
+    if (!me || me.hand.kind !== 'weapon') return;
+    const w = WEAPONS[me.hand.weaponId];
+    host.move(this.localPos.x, this.localPos.z, c.yaw);
+    void host.act({ type: 'useWeapon', yaw: c.yaw, pitch: c.pitch }).then((r) => {
+      if (!r.ok && r.reason && r.reason !== '少し待ってください') toast(this.uiLayer, r.reason, 'warn', 1600);
+    });
+    if (w?.kind === 'gun') c.pitch = Math.min(1.2, c.pitch + (w.spread ? 0.06 : 0.03));
+  }
+
   // ───────────────── 毎フレーム ─────────────────
 
   private frame(dt: number, t: number, interval: number): void {
@@ -931,7 +954,9 @@ export class App {
     // 逮捕（オーナーの指示 2026-11-11）: 警察に取り押さえられた人は動けず、何もできない
     const arrest = arrestOf(s);
     const arrestedMe = !!arrest && arrest.attackerId === host.playerId;
-    c.enabled = !blocking && av.awake && !arrestedMe;
+    // 共同経営で仲間の武器に当たって倒れている間（5秒）は動けない
+    const downedMe = playerDowned(s, host.playerId);
+    c.enabled = !blocking && av.awake && !arrestedMe && !downedMe;
     this.setAccidentMode(acc?.stage === 'destroyed');
     this.setArrestMode(arrestedMe);
     // シングルプレイではメニュー中は時間を止める
@@ -989,7 +1014,9 @@ export class App {
     // 横バウンスの客が店にいる間は、オリジナルのダンス曲を流す（じろ7 6-5）
     this.guard('dance', () => this.sfx.setDance(s.phase !== 'closed' && s.customers.some((x) => x.special?.kind === 'dancer' && x.state !== 'leaving' && x.state !== 'left' && x.state !== 'abandoned')));
     world.setAccident(acc);
-    world.setCameraFx(av.shake, av.eyeY, av.roll);
+    // 倒れている間は床から見上げる
+    if (downedMe) world.setCameraFx(0, 0.32, 0.55);
+    else world.setCameraFx(av.shake, av.eyeY, av.roll);
     world.setCamera(this.localPos.x, this.localPos.z, c.yaw, c.pitch, moving, dt);
     // 注視対象（自分の位置はローカル予測を使う）。1 秒に 10 回で足りる（HUD の更新も同じ間隔）
     this.focusAcc += dt;

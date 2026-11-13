@@ -359,7 +359,7 @@ function decideTv(s: GameState, ctx: SimCtx, accept: boolean): void {
 }
 
 function crewLeave(s: GameState, c: Customer): void {
-  if (c.state === 'left' || c.state === 'leaving' || c.state === 'abandoned') return;
+  if (c.state === 'left' || c.state === 'leaving' || c.state === 'abandoned' || c.state === 'dead') return;
   c.state = 'leaving';
   c.stateTime = 0;
   const st = stageOf(s);
@@ -430,7 +430,7 @@ function updateTv(s: GameState, dt: number, ctx: SimCtx): void {
     }
   }
   // 完了・失敗
-  const gone = (c: Customer) => c.state === 'leaving' || c.state === 'left' || c.state === 'abandoned';
+  const gone = (c: Customer) => c.state === 'leaving' || c.state === 'left' || c.state === 'abandoned' || c.state === 'dead';
   if (performers.length === 2 && performers.every((p) => gone(p) && p.special?.ate)) {
     finishTv(s, ctx, tv, true);
   } else if (performers.length < 2 || performers.some((p) => gone(p) && !p.special?.ate)) {

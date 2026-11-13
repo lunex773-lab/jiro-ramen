@@ -76,7 +76,7 @@ export function startBreak(s: GameState, ctx: SimCtx): void {
 /** 店内の客がいなくなったか */
 export function allCustomersGone(s: GameState): boolean {
   // 店の前でタバコを吸っている客は店の外なので待たない
-  return s.customers.every((c) => c.state === 'left' || c.state === 'abandoned' || c.state === 'smoking' || c.state === 'crew' || c.forLostItem !== null);
+  return s.customers.every((c) => c.state === 'left' || c.state === 'abandoned' || c.state === 'dead' || c.state === 'smoking' || c.state === 'crew' || c.forLostItem !== null);
 }
 
 /** 今いる店の1日の家賃（広さ × 立地 × 場所の人口） */
@@ -515,6 +515,8 @@ export function startNextDay(s: GameState, ctx: SimCtx, takeSnapshot = true): { 
     p.pos = { x: st.playerSpawn.x, z: st.playerSpawn.z };
     p.hand = { kind: 'none' };
     p.work = null;
+    // 前の日に武器に当たって倒れた時刻（営業の秒は毎日0から数え直すので消す）
+    delete p.downUntil;
   }
   // 常連は時間が経つと少しずつ離れる
   for (const r of s.regulars) if (s.day - r.lastVisitDay > 5) r.loyalty = Math.max(0, r.loyalty - 0.03);

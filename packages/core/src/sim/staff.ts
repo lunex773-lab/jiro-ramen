@@ -540,6 +540,8 @@ export function rollCall(s: GameState, ctx: SimCtx): void {
     pruneDateShifts(e, s.day);
     // 療養が終わった人は今日から出勤できる
     if (e.injury && s.day > e.injury.until) delete e.injury;
+    // 前の日に撃たれて倒れていた人（療養中で今日は来ない）
+    delete e.down;
     e.pos = { x: st.staffSpawn.x + 0.2, z: st.staffSpawn.z + 0.2 };
     e.hand = { kind: 'none' };
     e.work = null;
@@ -624,6 +626,12 @@ export function sendStaffHome(s: GameState, ctx: SimCtx): boolean {
   let staying = 0;
   for (const e of s.employees) {
     if (!e.presentToday) continue;
+    // 撃たれて倒れている店員は、営業が終わったら運ばれていく（歩いて帰らない）
+    if (e.down) {
+      e.presentToday = false;
+      e.commute = null;
+      continue;
+    }
     if (!(e.commute && e.commute.kind === 'leave')) {
       if (e.conduct?.kind) e.conduct.kind = null;
       leaveFloor(s, e, ctx, 'leave');
@@ -725,6 +733,8 @@ export function updateAttendance(s: GameState, dt: number, ctx: SimCtx): void {
   const t = s.openT;
   const overtime = afterHoursService(s);
   for (const e of s.employees) {
+    // 撃たれて倒れている店員は、その日の営業が終わるまでそのまま
+    if (e.down) continue;
     const a = ensureAttendance(s, e);
     if (a.status === 'off' || a.status === 'absent' || a.status === 'closed') continue;
     // 中休み（2つ目以降の枠の前の仕込みの時間）: 「中休みは休む」の人は、次の枠の開店まで店を出る（オーナーの指示 2026-11-11）。

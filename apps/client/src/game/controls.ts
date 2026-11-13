@@ -37,6 +37,10 @@ export class Controls {
   onCancel: (() => void) | null = null;
   onMenu: (() => void) | null = null;
   onPause: (() => void) | null = null;
+  /** 武器を使う（F キー・武器を持っているときの左クリック。FPS 式） */
+  onFire: (() => void) | null = null;
+  /** 武器を持っているか（持っていれば左クリックで武器を使う） */
+  fireMode: (() => boolean) | null = null;
 
   constructor(
     private root: HTMLElement,
@@ -62,6 +66,7 @@ export class Controls {
       if (this.keys.has(k)) return;
       this.keys.add(k);
       if (k === 'e' || k === ' ') this.onPrimary?.(true);
+      else if (k === 'f') this.onFire?.();
       else if (k >= '1' && k <= '6') this.onVerbKey?.(Number(k) - 1, true);
       else if (k === 'q') this.onCancel?.();
       else if (k === 'tab' || k === 'm') {
@@ -91,7 +96,11 @@ export class Controls {
         this.canvas.requestPointerLock?.();
         return;
       }
-      if (e.button === 0) this.onPrimary?.(true);
+      if (e.button === 0) {
+        // 武器を持っているときの左クリックは、照準の先へ武器を使う
+        if (this.fireMode?.()) this.onFire?.();
+        else this.onPrimary?.(true);
+      }
     });
     this.listen(window, 'mouseup', (e) => {
       if (!this.enabled || this.isTouch) return;

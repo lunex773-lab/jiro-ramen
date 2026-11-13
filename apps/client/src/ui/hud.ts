@@ -34,6 +34,8 @@ import {
   SEC_PER_MIN,
   todayHours,
   WEAPONS,
+  ammoOf,
+  weaponUseProblem,
   speedLocked,
   PREP_RECIPES,
   prepAmountText,
@@ -50,6 +52,8 @@ export interface HudCallbacks {
   onMenu(): void;
   onOpenShop(): void;
   onHelp(): void;
+  /** 手に持った武器を照準の先へ使う（FPS 式。オーナーの判断 2026-11-13） */
+  onFire?(): void;
 }
 
 export function clockText(s: GameState): string {
@@ -93,6 +97,12 @@ export class Hud {
   private workFill: HTMLElement;
   private workLabel: HTMLElement;
   private hand: HTMLElement;
+  /** 武器を持っている間いつも出る「撃つ・振る・投げる」ボタン（FPS 式） */
+  private fireBtn: HTMLButtonElement;
+  private fireIcon: HTMLElement;
+  private fireLabel: HTMLElement;
+  private fireBadge: HTMLElement;
+  private lastFireKey = '';
   private cta: HTMLElement;
   private crosshair: HTMLElement;
   /** 上部中央（初心者向けの案内） */
@@ -140,12 +150,27 @@ export class Hud {
     this.workLabel = h('div', { class: 'work-label' });
     this.workBar = h('div', { class: 'work-bar' }, this.workLabel, h('div', { class: 'work-track' }, this.workFill));
     this.hand = h('div', { class: 'hud-hand' });
+    this.fireIcon = h('span', { class: 'fire-icon', 'aria-hidden': 'true' });
+    this.fireLabel = h('span', { class: 'fire-label', 'aria-hidden': 'true' });
+    this.fireBadge = h('span', { class: 'fire-badge', 'aria-hidden': 'true' });
+    this.fireBtn = h('button', { class: 'fire-btn', 'data-fire': '', hidden: true }, this.fireIcon, this.fireLabel, this.fireBadge) as HTMLButtonElement;
+    this.fireBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.fireBtn.classList.contains('disabled')) return;
+      this.fireBtn.classList.add('pressed');
+      this.cb.onFire?.();
+    });
+    const fireUp = () => this.fireBtn.classList.remove('pressed');
+    this.fireBtn.addEventListener('pointerup', fireUp);
+    this.fireBtn.addEventListener('pointercancel', fireUp);
+    this.fireBtn.addEventListener('pointerleave', fireUp);
     this.cta = h('div', { class: 'hud-cta' });
     // 横向きの画面: 上に状態の行、左の列に伝票と通知、上部中央に手に持っている物、右の列に詳細と丸い操作ボタン（右手の親指で押す）、
     // 下に案内の帯（小さく横長。チュートリアルの案内も同じ場所）と開店ボタン。左半分は移動スティック用に空けておく
     const left = h('div', { class: 'hud-left' }, this.rail, this.notices);
     this.center = h('div', { class: 'hud-center' }, this.hand);
-    const right = h('div', { class: 'hud-right' }, this.detail, this.actions);
+    const right = h('div', { class: 'hud-right' }, this.detail, this.fireBtn, this.actions);
     this.el = h('div', { class: 'hud' }, this.top, left, this.center, right, this.crosshair, this.focusLabel, this.focusReason, this.workBar, this.cta);
     // HUD 上のタッチを 3D 操作に渡さない
     for (const el of [this.top, this.rail, this.detail, this.actions, this.cta, this.notices]) {
@@ -185,7 +210,32 @@ export class Hud {
     this.updateNotices(s);
     this.updateFocus(s);
     this.updateHand(s);
+    this.updateFire(s);
     this.updateCta(s);
+  }
+
+  /** 武器を持っている間の「撃つ・振る・投げる」ボタン（照準の先へ使う。弾の数・使えない理由も出す） */
+  private updateFire(s: GameState): void {
+    const me = this.me();
+    const w = me && me.hand.kind === 'weapon' ? WEAPONS[me.hand.weaponId] : undefined;
+    const show = !!me && !!w && (s.phase === 'prep' || s.phase === 'open' || s.phase === 'closing');
+    const ammo = w?.kind === 'gun' ? ammoOf(s, w.id) : null;
+    const reason = show && me ? weaponUseProblem(s, me) : null;
+    // 続けて使える間隔の待ちは押せないことにしない（押しても次の間隔まで出ないだけ）
+    const blocked = reason !== null && reason !== '少し待ってください';
+    const key = `${show}|${w?.id ?? ''}|${ammo ?? ''}|${blocked ? reason : ''}`;
+    if (key === this.lastFireKey) return;
+    this.lastFireKey = key;
+    this.fireBtn.hidden = !show;
+    if (!show || !w) return;
+    const icon = w.kind === 'gun' ? '🔫' : w.kind === 'bomb' ? '💣' : w.id === 'knife' ? '🔪' : w.id === 'katana' ? '🗡️' : '🏏';
+    this.fireIcon.textContent = icon;
+    this.fireLabel.textContent = w.verb;
+    this.fireBadge.textContent = ammo !== null ? `弾${ammo}` : '';
+    this.fireBtn.classList.toggle('disabled', blocked);
+    const label = `${w.name}で${w.verb}（照準の先へ）`;
+    this.fireBtn.setAttribute('aria-label', label);
+    this.fireBtn.title = blocked ? `${label}: ${reason}` : `${label}${this.root.closest('.touch') ? '' : '（F キー・左クリック）'}`;
   }
 
   private me() {

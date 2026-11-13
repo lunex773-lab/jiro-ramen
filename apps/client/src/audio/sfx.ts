@@ -383,6 +383,13 @@ export class Sfx {
           this.noise(0.12, 500, 1, 0.25, 'lowpass');
           this.tone(90, 0.15, 'sine', 0.2, -40);
           break;
+        case 'weaponSwing':
+          // 振る音（空を切る）
+          this.noise(0.18, 1200, 0.8, 0.12, 'bandpass');
+          break;
+        case 'playerDown':
+          this.tone(220, 0.4, 'sine', 0.2, -120);
+          break;
         case 'gunshot':
           this.noise(0.25, 1800, 0.6, 0.45, 'bandpass');
           this.tone(70, 0.2, 'sine', 0.35, -40);

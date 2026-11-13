@@ -11,7 +11,7 @@ export const MAX_MSG_BYTES = 8 * 1024;
 export const MAX_HOST_INIT_BYTES = 1024 * 1024;
 
 export const ACTION_TYPES = [
-  'move', 'interact', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
+  'move', 'interact', 'useWeapon', 'cancelWork', 'openShop', 'nextDay', 'orderStock', 'setAutoOrder', 'buyEquipment',
   'sellEquipment', 'repair', 'maintenance', 'place', 'store', 'buySeat', 'seatOffset', 'buyBowls', 'hire', 'hireTemp',
   'fire', 'setRole', 'setPriority', 'setShift', 'setRestDays', 'setDateShift', 'appointDeputy', 'finalizeDay', 'setAutoOrderMode', 'setAutoOrderItem', 'promote', 'promoteLeader', 'setPrepTarget', 'setPrepPlan', 'setPrepSchedule', 'answerRequest', 'expand', 'setPrice', 'pauseMenu', 'takeLoan', 'payArrears', 'rename', 'renameStore', 'giveUp',
   'accidentReset', 'openStore', 'setStoreLocation', 'enterStore', 'assignManager', 'transferEmployee', 'setStorePolicy', 'setStoreHours', 'autoShifts', 'setCompanyPolicy',
@@ -138,6 +138,8 @@ type FieldRules = Record<string, (v: unknown) => boolean>;
 const RULES: Record<AcceptedActionType, FieldRules> = {
   move: { x: isNum, z: isNum, yaw: isNum },
   interact: { targetId: isId, verb: isStr(32), args: isArgs },
+  // 武器を照準の先へ使う（FPS 式。向き・上下の角度）
+  useWeapon: { yaw: isNum, pitch: isNum },
   cancelWork: {},
   openShop: {},
   nextDay: {},

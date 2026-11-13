@@ -402,6 +402,47 @@ input, select { font: inherit; }
 .hud-detail .slot-sub { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hud-detail .slot .mini { flex: 0 0 auto; margin-left: auto; }
 .slot .mini { min-height: 30px; padding: 4px 10px; }
+/* 武器を持っている間いつも出る「撃つ・振る・投げる」ボタン（FPS 式。オーナーの判断 2026-11-13）。右手の親指の位置の大きな赤い丸 */
+.fire-btn {
+  pointer-events: auto;
+  position: relative;
+  flex: 0 0 auto;
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 210, 200, 0.55);
+  background: radial-gradient(circle at 40% 35%, #e0473a, #8f1d14 70%);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+}
+.fire-btn[hidden] { display: none; }
+.fire-btn.pressed { transform: scale(0.92); filter: brightness(1.25); }
+.fire-btn.disabled { filter: grayscale(0.8) brightness(0.7); }
+.fire-icon { font-size: 28px; line-height: 1; }
+.fire-label { font-size: 12px; font-weight: 700; line-height: 1; }
+.fire-badge {
+  position: absolute;
+  top: -4px;
+  left: -6px;
+  min-width: 22px;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: #1e1813;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  font-size: 11px;
+  font-weight: 700;
+}
+.fire-badge:empty { display: none; }
 .hud-actions {
   flex: 0 0 auto;
   display: flex;

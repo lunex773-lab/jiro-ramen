@@ -319,7 +319,7 @@ export function expectedTicket(s: GameState): number {
 }
 
 function activeCustomers(s: GameState): number {
-  return s.customers.filter((c) => c.state !== 'left' && c.state !== 'abandoned').length;
+  return s.customers.filter((c) => c.state !== 'left' && c.state !== 'abandoned' && c.state !== 'dead').length;
 }
 
 /** 来店処理（ポアソン到着を累積値で近似。乱数は状態に保存されるので決定的） */
@@ -565,6 +565,8 @@ export function updateCustomers(s: GameState, dt: number, ctx: SimCtx): void {
   const frozen = !!acc && acc.stage === 'warning' && acc.t >= BALANCE.events.explosion.noticeSec;
 
   for (const c of s.customers) {
+    // 撃たれて死んだ客は、その日の営業が終わるまで倒れたまま（動かない）
+    if (c.state === 'dead') continue;
     if (frozen && c.pos.z >= 0.05) continue;
     c.stateTime += dt;
     switch (c.state) {

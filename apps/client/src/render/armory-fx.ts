@@ -124,9 +124,11 @@ export class ArmoryFx {
           if (ev.pos) this.blood(ev.pos.x, ev.pos.z);
           break;
         case 'gunshot': {
+          // 弾道: 撃った人から弾の行き先（当たった人・外れたら照準の先）まで
           const a = [...s.players, ...s.employees].find((x) => x.id === ev.actorId);
-          const c = s.customers.find((x) => x.id === ev.targetId) ?? s.employees.find((x) => x.id === ev.targetId);
-          if (a && c) this.tracer(a.pos.x, a.pos.z, c.pos.x, c.pos.z);
+          const c = s.customers.find((x) => x.id === ev.targetId) ?? s.employees.find((x) => x.id === ev.targetId) ?? s.players.find((x) => x.id === ev.targetId);
+          const end = ev.pos ?? c?.pos;
+          if (a && end) this.tracer(a.pos.x, a.pos.z, end.x, end.z);
           break;
         }
         case 'bombBlast':

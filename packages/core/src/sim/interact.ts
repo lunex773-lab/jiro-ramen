@@ -10,7 +10,7 @@ import { NOODLE_SOURCES, INGREDIENTS } from '../data/ingredients';
 import { PREP_RECIPES, type PrepRecipe } from '../data/prep';
 import { accessPoint, armoryDoorPos, equipmentCenter, seatKitchenPoint, seatPos, stageOf } from '../geometry';
 import { WEAPONS, WEAPON_IDS } from '../data/weapons';
-import { ammoOf, ARMORY_DOOR_ID, ARMORY_RACK_ID, armoryDoorProblem, armoryOf, attack, attackable, staffAttackable, buyAmmo, buyWeapon, incidentToday, returnWeapon, takeWeapon, toggleArmoryDoor, weaponOf, weaponOwned } from './armory';
+import { ammoOf, ARMORY_DOOR_ID, ARMORY_RACK_ID, armoryDoorProblem, armoryOf, buyAmmo, buyWeapon, incidentToday, returnWeapon, takeWeapon, toggleArmoryDoor, weaponOwned } from './armory';
 import type {
   Bowl,
   Customer,
@@ -1169,33 +1169,6 @@ const VERBS: VerbDef[] = [
       returnWeapon(s, a);
     },
   },
-  {
-    id: 'attack',
-    match: (t) => t.kind === 'customer' || t.kind === 'staff' || (t.kind === 'seat' && !!t.seat.customerId),
-    phases: ['prep', 'open', 'closing'],
-    skill: 'general',
-    visible: (_s, a) => a.hand.kind === 'weapon',
-    reach: (a) => (a.hand.kind === 'weapon' ? (WEAPONS[a.hand.weaponId]?.reach ?? 0) : 0),
-    plan: (s, a, t) => {
-      const w = weaponOf(a);
-      if (!w) return no('襲う', '武器を持っていません');
-      const label = w.kind === 'gun' ? `${w.name}で${w.verb}（弾${ammoOf(s, w.id)}発）` : `${w.name}で${w.verb}`;
-      if (t.kind === 'staff') {
-        if (t.e === a || !staffAttackable(t.e)) return no(label, '襲える人がいません');
-      } else {
-        const c = t.kind === 'customer' ? t.c : s.customers.find((x) => x.id === (t as { seat: Seat }).seat.customerId);
-        if (!c || !attackable(c)) return no(label, '襲える客がいません');
-      }
-      if (w.kind === 'gun' && ammoOf(s, w.id) <= 0) return no(label, '弾がありません（武器庫で買えます）');
-      return ok(label, 0, 1);
-    },
-    applyUnit: (s, a, t, _args, ctx) => {
-      const w = weaponOf(a);
-      const v = t.kind === 'staff' ? t.e : t.kind === 'customer' ? t.c : s.customers.find((x) => x.id === (t as { seat: Seat }).seat.customerId);
-      if (w && v) attack(s, ctx, a, v, w);
-    },
-  },
-
   // ── 床の汚れ ──
   {
     id: 'mop',

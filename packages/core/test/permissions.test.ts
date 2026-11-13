@@ -30,8 +30,9 @@ describe('共同経営の権限（第2版 2-1・2-3）', () => {
     expect(applyAction(s, 'g1', { type: 'interact', targetId: o.seatId, verb: 'ask_call' }, ctx).ok).toBe(true);
   });
 
-  it('ゲストの操作は 歩く・作業・作業をやめる だけで、それ以外（新しい操作も）はホストのみ', () => {
-    expect([...GUEST_ACTIONS].sort()).toEqual(['cancelWork', 'interact', 'move']);
+  it('ゲストの操作は 歩く・作業・作業をやめる・武器を使う だけで、それ以外（新しい操作も）はホストのみ', () => {
+    // 武器を使う（FPS 式。2026-11-13）は、前の「襲う」（作業の一つ）と同じくゲストもできる。武器を持てるのはホストだけ（武器庫の扉）
+    expect([...GUEST_ACTIONS].sort()).toEqual(['cancelWork', 'interact', 'move', 'useWeapon']);
     for (const t of ['openShop', 'nextDay', 'hire', 'place', 'accidentReset', 'setPrice'] as ActionType[]) expect(isHostOnly(t)).toBe(true);
   });
 });

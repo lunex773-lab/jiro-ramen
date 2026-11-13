@@ -9,15 +9,14 @@
 //     画面が暗くなって、その日の営業は終わる（精算へ）
 import { BALANCE } from '../data/balance';
 import { WEAPONS, type WeaponDef } from '../data/weapons';
-import { alleyRect, policeCarDoor, policeCarPos, policeCarSeat, policeDoorFront, policeSpawn, stageOf, zoneAt } from '../geometry';
-import type { ArmoryState, ArrestState, Customer, GameState, IncidentState, Officer, Player, Employee, Vec2 } from '../types';
+import { alleyRect, policeCarDoor, policeCarPos, policeCarSeat, policeDoorFront, policeSpawn, seatKitchenPoint, seatPos, stageOf, zoneAt } from '../geometry';
+import type { ArmoryState, ArrestState, Customer, GameState, IncidentState, Officer, Player, Employee, Seat, Vec2 } from '../types';
 import { dist, newId } from '../util';
 import { addDirt, startLeaving } from './customers';
 import { spend } from './economy';
 import { emit, notify, type SimCtx } from './notices';
 import { finishEvent, recordEvent } from './events';
 import { cancelWork, dropHand } from './interact';
-import { startLeave } from './commute';
 import { ensureAttendance, logStaff } from './staff';
 import { staffRoute } from './walk';
 
@@ -25,7 +24,7 @@ export const ARMORY_DOOR_ID = 'armory_door';
 export const ARMORY_RACK_ID = 'armory_rack';
 
 const A = () => BALANCE.armory;
-const GONE: Customer['state'][] = ['leaving', 'left', 'abandoned'];
+const GONE: Customer['state'][] = ['leaving', 'left', 'abandoned', 'dead'];
 
 export function armoryOf(s: GameState): ArmoryState {
   return (s.armory ??= { doorOpen: false, bombs: [] });
@@ -103,92 +102,281 @@ export function weaponOf(a: Player | Employee): WeaponDef | null {
   return a.hand.kind === 'weapon' ? (WEAPONS[a.hand.weaponId] ?? null) : null;
 }
 
-/** 襲える客（逃げている客・テレビのスタッフは除く） */
+/**
+ * 武器が当たる客（店にいる人・並んでいる人・逃げている途中の人。帰った客・死んだ客は除く）。
+ * FPS 式（オーナーの判断 2026-11-13）: 警察が来るまでは、逃げている客にも当てられる
+ */
 export function attackable(c: Customer): boolean {
-  return !GONE.includes(c.state) && c.state !== 'crew' && !c.hurt;
+  return c.state !== 'left' && c.state !== 'abandoned' && c.state !== 'dead';
 }
 
-/** 襲える店員（店にいる人。けがをして逃げている人は除く） */
+/** 武器が当たる店員（店にいる人。撃たれて倒れている人・けがをして逃げている人は除く） */
 export function staffAttackable(e: Employee): boolean {
-  return e.presentToday && e.commute?.kind !== 'injured';
+  return e.presentToday && !e.down && e.commute?.kind !== 'injured';
 }
 
-type Victim = Customer | Employee;
+/** 武器が当たる共同経営の仲間（つながっていて、倒れていない人。自分は除く） */
+function playerAttackable(s: GameState, p: Player, attacker: Player | Employee): boolean {
+  return p.id !== attacker.id && p.connected && !((p.downUntil ?? -1) > s.t) && !isArrested(s, p.id);
+}
+
+/** 共同経営の仲間が武器に当たって倒れているか（倒れている間は動けず何もできない） */
+export function playerDowned(s: GameState, id: string): boolean {
+  const p = s.players.find((x) => x.id === id);
+  return !!p && (p.downUntil ?? -1) > s.t;
+}
+
+type Victim = Customer | Employee | Player;
+
+const SEATED: Customer['state'][] = ['seated', 'eating', 'complaint', 'afterMeal'];
+
+/** 人のいる位置（席に座っている客は席の位置。画面でもそこに座っている） */
+export function victimPos(s: GameState, v: Victim): Vec2 {
+  if ((v as Customer).seatId !== undefined && SEATED.includes((v as Customer).state)) {
+    const seat = s.seats.find((x) => x.id === (v as Customer).seatId);
+    if (seat) return seatPos(s, seat);
+  }
+  return v.pos;
+}
 const isStaff = (v: Victim): v is Employee => (v as Employee).kind === 'employee';
+const isPlayer = (v: Victim): v is Player => (v as Player).kind === 'player';
 
 /** 今日の事件（客を襲った日） */
 export function incidentToday(s: GameState): IncidentState | null {
   return s.incident && s.incident.day === s.day ? s.incident : null;
 }
 
-/** 客・店員を襲う。爆弾は投げて、少しあとに爆発する */
-export function attack(s: GameState, ctx: SimCtx, a: Player | Employee, target: Victim, w: WeaponDef): void {
-  if (w.kind === 'bomb') {
-    armoryOf(s).bombs.push({ id: newId(s, 'bomb'), pos: { x: target.pos.x, z: target.pos.z }, at: s.t + (w.fuse ?? 2) });
-    a.hand = { kind: 'none' };
-    emit(ctx, { type: 'bombThrow', actorId: a.id, targetId: target.id, pos: { ...target.pos } });
-    startIncident(s, ctx, 0, a.id);
-    return;
-  }
-  if (w.kind === 'gun') {
-    // 撃つと弾が1発減る（弾がなければ撃てない。interact の plan でも確かめる）
-    const ar = armoryOf(s);
-    const left = ar.ammo?.[w.id] ?? 0;
-    if (left <= 0) return;
-    ar.ammo = { ...(ar.ammo ?? {}), [w.id]: left - 1 };
-  }
-  const hits: Victim[] = [target];
-  if (w.spread) {
-    for (const c of s.customers) if (c !== target && attackable(c) && dist(c.pos, target.pos) <= w.spread) hits.push(c);
-    for (const e of s.employees) if (e !== target && e !== a && staffAttackable(e) && dist(e.pos, target.pos) <= w.spread) hits.push(e);
-  }
-  emit(ctx, { type: w.kind === 'gun' ? 'gunshot' : 'weaponHit', actorId: a.id, targetId: target.id, text: w.id });
-  // 先に事件にする（客が逃げ出す）。けがをした店員の数はそのあと数える
-  startIncident(s, ctx, 0, a.id);
-  for (const v of hits) hurtVictim(s, ctx, v);
+// ───────────────────────── FPS 式の武器（オーナーの判断 2026-11-13） ─────────────────────────
+// 武器を持つと、照準の先（向き yaw・上下 pitch）へ「撃つ・振る・投げる」。当たった客は血を流して死に（その日の営業が終わるまで倒れたまま）、
+// 店員はけがをしてその場に倒れ（1週間療養）、共同経営の仲間は5秒倒れる。警察が来るまでは何人にでも使える。
+
+/** 武器を使える間隔（営業の秒） */
+function cooldownOf(w: WeaponDef): number {
+  const c = A().cooldown;
+  return w.kind === 'melee' ? c.melee : w.kind === 'gun' ? (w.spread ? c.shotgun : c.gun) : 0;
 }
 
-function hurtVictim(s: GameState, ctx: SimCtx, v: Victim): void {
+/** 武器を使えるか（使えなければ理由）。持っていない・営業の日でない・警察が来た・弾がない・続けて使えない */
+export function weaponUseProblem(s: GameState, a: Player | Employee): string | null {
+  const w = weaponOf(a);
+  if (!w) return '武器を持っていません';
+  if (s.phase !== 'prep' && s.phase !== 'open' && s.phase !== 'closing') return '営業の日にだけ使えます';
+  if (incidentToday(s)?.police) return '警察が来ています';
+  if (w.kind === 'gun' && ammoOf(s, w.id) <= 0) return '弾がありません（武器庫で買えます）';
+  const last = s.armory?.lastUse?.[a.id];
+  if (last !== undefined && s.t >= last && s.t - last < cooldownOf(w)) return '少し待ってください';
+  return null;
+}
+
+/** 近接の武器の届く距離（手の届く距離 ＋ 武器の長さ）。銃と爆弾は武器の距離 */
+export function weaponRange(w: WeaponDef): number {
+  return w.kind === 'melee' ? BALANCE.player.reach + w.reach : w.reach;
+}
+
+/**
+ * 照準の先で最初に当たる人（いなければ null）。向き yaw は +Z が 0（sin・cos）、pitch は上が正。
+ * 床や天井を狙うと、そこまでの距離で止まる。近接は前の扇形、銃は狙った線の近く（少しだけ吸い付く）
+ */
+export function aimTarget(s: GameState, a: Player | Employee, w: WeaponDef, yaw: number, pitch: number): { v: Victim; along: number } | null {
+  const cfg = A().aim;
+  const dir = { x: Math.sin(yaw), z: Math.cos(yaw) };
+  let maxD = weaponRange(w);
+  if (w.kind !== 'melee') {
+    if (pitch < -0.04) maxD = Math.min(maxD, cfg.eyeY / Math.tan(-pitch) + 0.8);
+    else if (pitch > 0.3) maxD = Math.min(maxD, (cfg.ceilingY - cfg.eyeY) / Math.tan(pitch) + 0.6);
+  }
+  const people: Victim[] = [
+    ...s.customers.filter(attackable),
+    ...s.employees.filter((e) => e !== a && staffAttackable(e)),
+    ...s.players.filter((p) => playerAttackable(s, p, a)),
+  ];
+  let best: { v: Victim; along: number } | null = null;
+  for (const v of people) {
+    const vp = victimPos(s, v);
+    const rx = vp.x - a.pos.x;
+    const rz = vp.z - a.pos.z;
+    const along = rx * dir.x + rz * dir.z;
+    if (along <= 0.05 || along > maxD + 0.3) continue;
+    const perp = Math.abs(rx * dir.z - rz * dir.x);
+    const tol = w.kind === 'melee' ? cfg.meleeBase + along * cfg.meleePerM : cfg.gunBase + along * cfg.gunPerM;
+    if (perp > tol) continue;
+    if (!best || along < best.along) best = { v, along };
+  }
+  return best;
+}
+
+/**
+ * 武器を使う（撃つ・振る・投げる）。当たった人の id（外れたら null）を返す。使えなければ理由。
+ * 銃は外れても弾が1発減り、銃声で事件になる。近接は当たったときだけ事件になる。爆弾は投げると事件になり、少しあとに爆発する
+ */
+export function useWeapon(s: GameState, ctx: SimCtx, a: Player | Employee, yaw: number, pitch: number): { ok: true; hit: string | null } | { ok: false; reason: string } {
+  const bad = weaponUseProblem(s, a);
+  if (bad) return { ok: false, reason: bad };
+  const w = weaponOf(a)!;
+  const ar = armoryOf(s);
+  ar.lastUse = { ...(ar.lastUse ?? {}), [a.id]: s.t };
+  a.yaw = yaw;
+  const hit = aimTarget(s, a, w, yaw, pitch);
+  if (w.kind === 'bomb') {
+    const dir = { x: Math.sin(yaw), z: Math.cos(yaw) };
+    const far = Math.max(1.2, Math.min(w.reach, pitch < -0.04 ? A().aim.eyeY / Math.tan(-pitch) : w.reach));
+    const pos = hit ? { ...victimPos(s, hit.v) } : { x: a.pos.x + dir.x * far, z: a.pos.z + dir.z * far };
+    ar.bombs.push({ id: newId(s, 'bomb'), pos, at: s.t + (w.fuse ?? 2) });
+    a.hand = { kind: 'none' };
+    emit(ctx, { type: 'bombThrow', actorId: a.id, targetId: hit?.v.id, pos: { ...pos } });
+    startIncident(s, ctx, 0, a.id);
+    return { ok: true, hit: null };
+  }
+  // 当たる人（散弾銃は近くの人にも）。座っていた席は、事件で客が逃げ出す前に覚えておく（死んだ客は席のそばの通路に倒れる）
+  const hits: Victim[] = [];
+  if (hit) {
+    hits.push(hit.v);
+    const hp = victimPos(s, hit.v);
+    if (w.spread) {
+      for (const c of s.customers) if (c !== hit.v && attackable(c) && dist(victimPos(s, c), hp) <= w.spread) hits.push(c);
+      for (const e of s.employees) if (e !== hit.v && e !== a && staffAttackable(e) && dist(e.pos, hp) <= w.spread) hits.push(e);
+      for (const p of s.players) if (p !== hit.v && playerAttackable(s, p, a) && dist(p.pos, hp) <= w.spread) hits.push(p);
+    }
+  }
+  const seats = seatsOf(s, hits);
+  if (w.kind === 'gun') {
+    ar.ammo = { ...(ar.ammo ?? {}), [w.id]: Math.max(0, ammoOf(s, w.id) - 1) };
+    // 弾の行き先（当たった人・外れたら照準の先の届く所まで。画面の弾道に使う）
+    const end = hit ? { ...victimPos(s, hit.v) } : { x: a.pos.x + Math.sin(yaw) * weaponRange(w), z: a.pos.z + Math.cos(yaw) * weaponRange(w) };
+    emit(ctx, { type: 'gunshot', actorId: a.id, targetId: hit?.v.id, text: w.id, pos: end });
+    // 銃声で店は大騒ぎになる（外れても）
+    startIncident(s, ctx, 0, a.id);
+  } else {
+    emit(ctx, { type: 'weaponSwing', actorId: a.id, targetId: hit?.v.id, text: w.id });
+    if (!hit) return { ok: true, hit: null };
+    emit(ctx, { type: 'weaponHit', actorId: a.id, targetId: hit.v.id, text: w.id });
+    startIncident(s, ctx, 0, a.id);
+  }
+  if (!hit) return { ok: true, hit: null };
+  for (const v of hits) {
+    const vp = seats.get(v.id)?.pos ?? victimPos(s, v);
+    hurtVictim(s, ctx, v, Math.atan2(vp.x - a.pos.x, vp.z - a.pos.z), seats.get(v.id)?.seat);
+  }
+  return { ok: true, hit: hit.v.id };
+}
+
+/** 当たる客が座っている席と位置（事件で逃げ出す前に覚えておく） */
+function seatsOf(s: GameState, vs: Victim[]): Map<string, { seat: Seat; pos: Vec2 }> {
+  const out = new Map<string, { seat: Seat; pos: Vec2 }>();
+  for (const v of vs) {
+    const c = v as Customer;
+    if (isStaff(v) || isPlayer(v) || !c.seatId || !SEATED.includes(c.state)) continue;
+    const seat = s.seats.find((x) => x.id === c.seatId);
+    if (seat) out.set(c.id, { seat, pos: seatPos(s, seat) });
+  }
+  return out;
+}
+
+/** 前の版の「人に向けて襲う」（テスト・古い呼び出し用）: その人を狙って武器を使う */
+export function attack(s: GameState, ctx: SimCtx, a: Player | Employee, target: Customer | Employee, w: WeaponDef): void {
+  void w;
+  const tp = victimPos(s, target);
+  const yaw = Math.atan2(tp.x - a.pos.x, tp.z - a.pos.z);
+  useWeapon(s, ctx, a, yaw, 0);
+}
+
+function hurtVictim(s: GameState, ctx: SimCtx, v: Victim, fall: number, seat?: Seat): void {
   const inc = incidentToday(s);
+  if (isPlayer(v)) {
+    knockDownPlayer(s, ctx, v);
+    return;
+  }
   if (inc) inc.victims += 1;
   if (isStaff(v)) {
     if (inc) inc.staffVictims = (inc.staffVictims ?? 0) + 1;
-    hurtStaff(s, ctx, v);
-  } else hurt(s, ctx, v);
+    hurtStaff(s, ctx, v, fall);
+  } else kill(s, ctx, v, fall, seat);
 }
 
 const SCREAMS = ['ぎゃあっ！', '痛いっ！', '助けて！', 'うわあっ！'];
 
-/** 襲われた客: 血を流して逃げる */
-function hurt(s: GameState, ctx: SimCtx, c: Customer): void {
+/**
+ * 当たった客: 血を流して倒れ、死ぬ。その日の営業が終わるまで床に倒れたまま（オーナーの判断 2026-11-13）。
+ * 死者1人ごとに評判を下げる（最初の事件の分に足して、上限まで）
+ */
+function kill(s: GameState, ctx: SimCtx, c: Customer, fall: number, seatAt?: Seat): void {
+  const o = c.orderId ? s.orders.find((x) => x.id === c.orderId) : undefined;
+  if (o && o.status === 'waiting') o.status = 'cancelled';
+  s.queue = s.queue.filter((id) => id !== c.id);
+  s.insideQueue = s.insideQueue.filter((id) => id !== c.id);
+  // 席にいた客は、椅子から通路の側（カウンターと反対）へ倒れる（席は空ける）。席は事件で逃げ出す前のもの
+  const seat = seatAt ?? (c.seatId && SEATED.includes(c.state) ? s.seats.find((x) => x.id === c.seatId) : undefined);
+  if (seat) {
+    const p = seatPos(s, seat);
+    const k = seatKitchenPoint(s, seat);
+    const dx = p.x - k.x;
+    const dz = p.z - k.z;
+    const len = Math.hypot(dx, dz) || 1;
+    c.pos = { x: p.x + (dx / len) * 0.75, z: p.z + (dz / len) * 0.75 };
+    fall = Math.atan2(dx, dz);
+  }
+  if (seat && seat.customerId === c.id) seat.customerId = null;
+  if (c.seatId) {
+    const own = s.seats.find((x) => x.id === c.seatId);
+    if (own && own.customerId === c.id) own.customerId = null;
+  }
+  c.state = 'dead';
+  c.stateTime = 0;
+  c.path = [];
   c.hurt = true;
+  c.dead = { t: s.t, yaw: fall };
   c.say = SCREAMS[(s.nextId + c.appearance) % SCREAMS.length]!;
-  c.sayUntil = s.t + 4;
-  addDirt(s, { x: c.pos.x, z: c.pos.z }, 'blood', 'dining');
+  c.sayUntil = s.t + 2;
+  addDirt(s, { x: c.pos.x, z: c.pos.z }, 'blood', zoneAt(s, c.pos) === 'kitchen' ? 'kitchen' : 'dining');
   emit(ctx, { type: 'hurt', targetId: c.id, pos: { ...c.pos } });
-  flee(s, ctx, c);
+  emit(ctx, { type: 'kill', targetId: c.id, pos: { ...c.pos } });
+  const inc = incidentToday(s);
+  if (inc) {
+    inc.deaths = (inc.deaths ?? 0) + 1;
+    const applied = inc.penalty ?? A().reputationPenalty;
+    const extra = Math.max(0, Math.min(A().deathPenalty, A().penaltyCap - applied));
+    if (extra > 0) {
+      s.reputation = Math.max(1, s.reputation - extra);
+      inc.penalty = applied + extra;
+    }
+  }
 }
 
 /**
- * 襲われた店員: 血を流して、持っている物を置いて店の外へ逃げる。その日はもう戻らず、翌日から1週間療養する
- * （シフトがあっても出勤しない。staff.ts の shiftFor）
+ * 当たった店員: けがをして、その場に倒れる（その日の営業が終わるまで動かない）。翌日から1週間療養する
+ * （シフトがあっても出勤しない。staff.ts の shiftFor）。オーナーの判断 2026-11-13「店員は怪我をして倒れる」
  */
-function hurtStaff(s: GameState, ctx: SimCtx, e: Employee): void {
+function hurtStaff(s: GameState, ctx: SimCtx, e: Employee, fall: number): void {
   const until = s.day + BALANCE.armory.injuryDays;
   e.injury = { day: s.day, until };
-  e.say = { text: SCREAMS[(s.nextId + e.profile.name.length) % SCREAMS.length]!, until: s.t + 4, kind: 'event' };
+  e.say = { text: SCREAMS[(s.nextId + e.profile.name.length) % SCREAMS.length]!, until: s.t + 3, kind: 'event' };
   addDirt(s, { x: e.pos.x, z: e.pos.z }, 'blood', zoneAt(s, e.pos) === 'kitchen' ? 'kitchen' : 'dining');
   emit(ctx, { type: 'hurt', targetId: e.id, pos: { ...e.pos } });
   if (e.work) cancelWork(s, e, ctx, 'けがをした');
   if (e.hand.kind !== 'none') dropHand(s, e, ctx);
   e.hand = { kind: 'none' };
   if (e.conduct?.kind) e.conduct.kind = null;
-  // その日の出勤はここまで（働いた時間はここで止まる。戻ってこない）
+  // その日の出勤はここまで（働いた時間はここで止まる）。その場に倒れたまま
   const att = ensureAttendance(s, e);
   if (att.status !== 'closed') att.status = 'left';
-  startLeave(s, e, 'injured');
-  logStaff(s, e, 'injured', `武器で襲われてけがをした（${until}日目まで療養）`);
-  notify(s, ctx, `injured:${e.id}`, 'danger', `${e.profile.name}さんがけがをしました。${until}日目まで（1週間）療養して休みます`);
+  e.commute = null;
+  e.ai.path = [];
+  e.ai.steps = [];
+  e.ai.taskId = null;
+  e.ai.state = 'off';
+  e.ai.note = 'けがをして倒れている';
+  e.down = { t: s.t, yaw: fall };
+  logStaff(s, e, 'injured', `武器で撃たれてけがをした（${until}日目まで療養）`);
+  notify(s, ctx, `injured:${e.id}`, 'danger', `${e.profile.name}さんがけがをして倒れました。${until}日目まで（1週間）療養して休みます`);
+}
+
+/** 当たった共同経営の仲間: 5秒倒れる（動けず何もできない。作業は止まる） */
+function knockDownPlayer(s: GameState, ctx: SimCtx, p: Player): void {
+  if (p.work) cancelWork(s, p, ctx, '倒れた');
+  p.downUntil = s.t + A().playerDownSec;
+  emit(ctx, { type: 'hurt', targetId: p.id, pos: { ...p.pos } });
+  emit(ctx, { type: 'playerDown', targetId: p.id, value: A().playerDownSec });
+  notify(s, ctx, `down:${p.id}`, 'danger', `${p.name}さんが武器に当たって倒れました（${A().playerDownSec}秒動けません）`);
 }
 
 /** 逃げる（注文は取り消し。食券は提供のときに払うので返金はない） */
@@ -209,7 +397,7 @@ function flee(s: GameState, ctx: SimCtx, c: Customer): void {
 function startIncident(s: GameState, ctx: SimCtx, victims: number, attackerId: string | null): void {
   let inc = incidentToday(s);
   if (!inc) {
-    inc = { day: s.day, startT: s.t, policeAt: s.t + A().policeDelay, police: false, victims: 0, staffVictims: 0 };
+    inc = { day: s.day, startT: s.t, policeAt: s.t + A().policeDelay, police: false, victims: 0, staffVictims: 0, deaths: 0, penalty: A().reputationPenalty };
     if (attackerId) inc.attackerId = attackerId;
     inc.eventId = recordEvent(s, 'incident', { state: 'happening' }).id;
     s.incident = inc;
@@ -218,7 +406,7 @@ function startIncident(s: GameState, ctx: SimCtx, victims: number, attackerId: s
     emit(ctx, { type: 'incident' });
   }
   inc.victims += victims;
-  for (const c of s.customers) if (c.state !== 'crew') flee(s, ctx, c);
+  for (const c of s.customers) if (c.state !== 'crew' && c.state !== 'dead') flee(s, ctx, c);
 }
 
 /** 投げた爆弾の爆発と、警察の到着・逮捕（step から毎回呼ぶ） */
@@ -338,6 +526,17 @@ function standPoints(target: Vec2, from: Vec2): Vec2[] {
 }
 
 /** パトカーが止まった: 襲った人は動けなくなり、警察官が扉を開けて降りて、歩いて来る */
+/** 事件の被害（死者・けが人）の文 */
+function victimsText(inc: IncidentState): string {
+  const deaths = inc.deaths ?? 0;
+  const staff = inc.staffVictims ?? 0;
+  const hurt = Math.max(0, inc.victims - deaths);
+  const parts: string[] = [];
+  if (deaths > 0) parts.push(`死者 ${deaths}人`);
+  parts.push(`けが人 ${hurt}人${staff > 0 ? `（うち店員 ${staff}人）` : ''}`);
+  return parts.join('・');
+}
+
 function policeArrive(s: GameState, ctx: SimCtx, inc: IncidentState): void {
   inc.police = true;
   const st = stageOf(s);
@@ -359,7 +558,7 @@ function policeArrive(s: GameState, ctx: SimCtx, inc: IncidentState): void {
     officerSay(s, officers[0], '警察だ！動くな！', 4);
     officerSay(s, officers[1], '武器を捨てなさい！', 4);
   } else officerSay(s, officers[0], '通報のあった店はここか', 4);
-  notify(s, ctx, 'incident', 'danger', `警察が来ました（けが人 ${inc.victims}人${inc.staffVictims ? `・うち店員 ${inc.staffVictims}人` : ''}）`);
+  notify(s, ctx, 'incident', 'danger', `警察が来ました（${victimsText(inc)}）`);
   emit(ctx, { type: 'police' });
 }
 
@@ -475,7 +674,7 @@ function updateArrest(s: GameState, dt: number, ctx: SimCtx, inc: IncidentState,
 
 /** 暗くなったら、その日の営業は終わり（残っている客・店員は帰ったことにして、すぐ精算へ） */
 function finishIncident(s: GameState, ctx: SimCtx, inc: IncidentState): void {
-  if (inc.eventId) finishEvent(s, inc.eventId, `けが人 ${inc.victims}人${inc.staffVictims ? `（うち店員 ${inc.staffVictims}人）` : ''}・逮捕されてその日の営業は終わり`);
+  if (inc.eventId) finishEvent(s, inc.eventId, `${victimsText(inc)}・逮捕されてその日の営業は終わり`);
   const ar = s.armory;
   if (ar) {
     ar.doorOpen = false;
@@ -501,7 +700,7 @@ function finishIncident(s: GameState, ctx: SimCtx, inc: IncidentState): void {
     e.ai.state = 'off';
     if (e.att && e.att.day === s.day && e.att.status !== 'closed' && e.att.status !== 'off' && e.att.status !== 'absent') e.att.status = 'left';
   }
-  notify(s, ctx, 'incident', 'danger', `逮捕され、今日の営業は終わりです（けが人 ${inc.victims}人${inc.staffVictims ? `・うち店員 ${inc.staffVictims}人` : ''}）`);
+  notify(s, ctx, 'incident', 'danger', `逮捕され、今日の営業は終わりです（${victimsText(inc)}）`);
   emit(ctx, { type: 'arrestEnd' });
 }
 
@@ -509,15 +708,17 @@ function explode(s: GameState, ctx: SimCtx, pos: Vec2): void {
   const r = WEAPONS.bomb?.radius ?? 2.5;
   emit(ctx, { type: 'bombBlast', pos: { ...pos } });
   const hits: Victim[] = [];
-  for (const c of s.customers) {
-    // 逃げている途中の客も巻き込む（店を出た客・テレビのスタッフは除く）
-    if (c.hurt || c.state === 'crew' || c.state === 'left' || dist(c.pos, pos) > r) continue;
-    hits.push(c);
-  }
+  // 逃げている途中の客も巻き込む（帰った客・死んだ客は除く）
+  for (const c of s.customers) if (attackable(c) && dist(victimPos(s, c), pos) <= r) hits.push(c);
   for (const e of s.employees) if (staffAttackable(e) && dist(e.pos, pos) <= r) hits.push(e);
+  for (const p of s.players) if (p.connected && !((p.downUntil ?? -1) > s.t) && !isArrested(s, p.id) && dist(p.pos, pos) <= r && p.id !== incidentToday(s)?.attackerId) hits.push(p);
   addDirt(s, { x: pos.x, z: pos.z }, 'blood', 'dining');
+  const seats = seatsOf(s, hits);
   startIncident(s, ctx, 0, null);
-  for (const v of hits) hurtVictim(s, ctx, v);
+  for (const v of hits) {
+    const vp = seats.get(v.id)?.pos ?? victimPos(s, v);
+    hurtVictim(s, ctx, v, Math.atan2(vp.x - pos.x, vp.z - pos.z), seats.get(v.id)?.seat);
+  }
 }
 
 /** 新しい客が来ないか（事件の日は来ない） */

@@ -574,6 +574,15 @@ export class World {
         c.model.update('down', t, dt);
         continue;
       }
+      // 武器で撃たれて死んだ客: 倒れた所に横たわったまま（その日の営業が終わるまで。オーナーの判断 2026-11-13）
+      if (cu.state === 'dead') {
+        this.placeChar(c, cu.pos.x, cu.pos.z, cu.dead?.yaw ?? 0, dt, false);
+        c.model.setHeld(null);
+        c.model.setEat(null);
+        c.model.setFx(null);
+        c.model.update('down', t, dt);
+        continue;
+      }
       // 火事に気づいたら、店の中の客は立ち上がって火の方を見る（店からは出ない）
       const panic = this.panicAt(cu.pos);
       if (panic !== null) {
@@ -654,6 +663,13 @@ export class World {
         c.model.update('down', t, dt);
         continue;
       }
+      // 撃たれてけがをした店員: その場に倒れたまま（その日の営業が終わるまで）
+      if (e.down) {
+        this.placeChar(c, e.pos.x, e.pos.z, e.down.yaw, dt, false);
+        c.model.setHeld(null);
+        c.model.update('down', t, dt);
+        continue;
+      }
       const panicE = e.work ? null : this.panicAt(e.pos);
       const cm = e.commute;
       const holdYaw = e.ai.state === 'working' || !!e.work || cm?.phase === 'greet' || cm?.phase === 'wash';
@@ -689,6 +705,12 @@ export class World {
       c.model.setLabel(p.name);
       this.placeChar(c, p.pos.x, p.pos.z, p.yaw, dt, true);
       const cuffs = cuffed === p.id;
+      // 仲間の武器に当たって倒れている（5秒）
+      if ((p.downUntil ?? -1) > s.t) {
+        c.model.setHeld(null);
+        c.model.update('down', t, dt);
+        continue;
+      }
       c.model.setHeld(cuffs ? 'handcuffs' : heldKind(p.hand));
       // 手錠をかけられた人は両手を前に出したまま（止まっているときは足を動かさない）
       const pose: CharacterPose = p.work ? 'work' : cuffs ? 'carry' : c.moving > 0 ? (p.hand.kind !== 'none' ? 'carry' : 'walk') : 'stand';

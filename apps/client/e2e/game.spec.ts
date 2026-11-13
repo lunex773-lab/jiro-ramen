@@ -94,7 +94,7 @@ test('設備を見ると操作ボタンが出て、丼を取って並べられ�
   await shot(page, '04-assembly');
 });
 
-test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を持って席の客を襲うと血が出て客が逃げ、等速に戻り、警察が来て逮捕され、暗くなってその日の営業が終わる（じろ1 5.12・2026-11-11）', async ({ page }) => {
+test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を持つと出る「撃つ」ボタンで照準の先の客を撃つと血を流して死に、ほかの客は逃げ、等速に戻り、警察が来て逮捕され、暗くなってその日の営業が終わる（じろ1 5.12・2026-11-11）', async ({ page }) => {
   // 警察が来るまで20秒・逮捕の流れ（歩いて来る〜暗くなる）があるので長め
   test.setTimeout(180_000);
   await startNewGame(page);
@@ -150,13 +150,18 @@ test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を
   const speed = page.locator('.hud .chip', { hasText: /^×\d$/ });
   await speed.click();
   await expect(speed).toHaveText('×2');
-  // 席の客を撃つ
+  // FPS 式（オーナーの判断 2026-11-13）: 武器を持つと「撃つ」ボタンがいつも出る（人に向けた「襲う」ボタンは出ない）
+  const fire = page.locator('[data-fire]');
+  await expect(fire).toBeVisible();
+  await expect(fire).toContainText('撃つ');
+  await expect(fire).toContainText('弾1');
+  // 席の客に照準を合わせて撃つ。当たった客は血を流して死に、倒れたまま残る
   const rep = (await state()).reputation;
   await faceId(seated!);
-  const shoot = page.locator('.act[aria-label^="拳銃で撃つ"]');
-  await expect(shoot).toBeVisible();
-  await press(shoot);
-  await expect.poll(async () => (await state()).customers.some((c) => c.hurt)).toBe(true);
+  await expect(page.locator('.act[aria-label^="拳銃で撃つ"]')).toHaveCount(0);
+  await press(fire);
+  await expect.poll(async () => (await state()).customers.some((c) => c.state === 'dead')).toBe(true);
+  await expect(fire).toContainText('弾0');
   const s1 = await state();
   expect(s1.dirt.some((d) => d.kind === 'blood')).toBe(true);
   expect(s1.reputation).toBeLessThan(rep);

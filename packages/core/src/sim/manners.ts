@@ -305,7 +305,7 @@ function relieveVictims(s: GameState, victims: { id: Id; comfort: number; cleanl
   const f = firstT !== null && s.t - firstT <= quickWithin ? quick : slow;
   for (const v of victims) {
     const c = s.customers.find((x) => x.id === v.id);
-    if (!c || c.state === 'left' || c.state === 'abandoned') continue;
+    if (!c || c.state === 'left' || c.state === 'abandoned' || c.state === 'dead') continue;
     c.sat.comfort = clamp01(c.sat.comfort + v.comfort * f);
     c.sat.cleanliness = clamp01(c.sat.cleanliness + v.cleanliness * f);
     // 店がすぐ対応してくれた

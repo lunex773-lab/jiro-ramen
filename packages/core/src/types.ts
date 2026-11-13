@@ -133,6 +133,8 @@ export interface Player extends ActorBase {
   isHost: boolean;
   /** 最後に位置を受け付けたsim時刻（サーバーの速度検証用） */
   lastMoveAt: number;
+  /** 共同経営で仲間の武器に当たって倒れている間（この営業の秒まで。動けず何もできない） */
+  downUntil?: number;
 }
 
 /** 担当。prep（仕込み担当）はオーナーの判断で追加（拡張して杯数が増えたときに仕込みを専門にする） */
@@ -409,6 +411,8 @@ export interface Employee extends ActorBase {
    * day にけがをして店を出て、until の日まで療養して出勤しない（day + 1 〜 day + 7）
    */
   injury?: { day: number; until: number };
+  /** 武器で撃たれて倒れている（その日の営業が終わるまで床に倒れたまま。働かない。オーナーの判断 2026-11-13） */
+  down?: { t: number; yaw: number };
 }
 
 export interface TaskStep {
@@ -483,6 +487,8 @@ export interface ArmoryState {
   ammo?: Record<string, number>;
   /** 爆弾の数（武器庫にある分） */
   bombStock?: number;
+  /** 人ごとに最後に武器を使った営業の秒（連続で使える間隔） */
+  lastUse?: Record<Id, number>;
 }
 
 export interface IncidentState {
@@ -496,6 +502,10 @@ export interface IncidentState {
   eventId?: Id;
   /** 襲われてけがをした店員の数（victims に含む） */
   staffVictims?: number;
+  /** 死んだ客の数（victims に含む。オーナーの判断 2026-11-13） */
+  deaths?: number;
+  /** この事件で下げた評判の合計（最初の事件の分＋死者1人ごと。上限あり） */
+  penalty?: number;
   /** 最初に襲った人（逮捕される人） */
   attackerId?: Id;
   /** パトカーがサイレンを鳴らして走って来た（警察が来る少し前） */
@@ -602,7 +612,9 @@ export type CustomerState =
   | 'crew'
   | 'leaving'
   | 'left'
-  | 'abandoned';
+  | 'abandoned'
+  /** 武器で撃たれて死んだ（その日の営業が終わるまで床に倒れたまま。オーナーの判断 2026-11-13） */
+  | 'dead';
 
 export interface SatisfactionParts {
   taste: number;
@@ -667,6 +679,8 @@ export interface Customer {
   look?: CustomerLook | null;
   /** 武器で襲われた（じろ1 5.12。逃げる・血の表現） */
   hurt?: boolean;
+  /** 死んだとき（営業の秒と、倒れた向き）。state は 'dead' */
+  dead?: { t: number; yaw: number };
   /** SNS を見て来た客 */
   fromBuzz?: boolean;
   /** 吹き出しの種類（小声） */
