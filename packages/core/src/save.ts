@@ -177,6 +177,12 @@ export const MIGRATIONS: Record<number, (s: Record<string, unknown>) => Record<s
     s.schema = 2;
     return s;
   },
+  // 2 → 3（じろ7）: 珍客イベント（events.chaos）・知名度と伝説（fame）・客の新しい性格は、ない古いデータでも読み込んだあとに補う作りなので、
+  // 中身は変えずに版だけ上げる（古い版のゲームが新しいセーブを読んで、知らない項目を落として上書きするのを防ぐ）
+  2: (s) => {
+    s.schema = 3;
+    return s;
+  },
 };
 
 export function migrate(raw: Record<string, unknown>): Record<string, unknown> {

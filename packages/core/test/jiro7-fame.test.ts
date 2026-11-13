@@ -309,3 +309,28 @@ describe('共通市場の確かめ方（じろ7 Phase 8）', () => {
     expect(arrivalBound(prev, cold, 1)).toBeLessThanOrEqual(arrivalBound(prev, prev, 1) + 1e-9);
   });
 });
+
+describe('セーブの版（じろ7 Phase 8）', () => {
+  it('前の版（schema 2）のセーブは中身を変えずに今の版になり、珍客・知名度の状態はあとから補われる。新しい版のセーブは前の版では読めない', async () => {
+    const { SCHEMA_VERSION, migrate, stateChecksum } = await import('../src');
+    const { s, ctx } = newGame(10);
+    const old = clone(s) as unknown as Record<string, unknown>;
+    old.schema = 2;
+    delete old.fame;
+    const file = { ...makeSaveFile(s, 1, null, 0), schema: 2, state: old, checksum: stateChecksum(old as unknown as GameState) };
+    const r = parseSave(JSON.stringify(file));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.migrated).toBe(true);
+    expect(r.save.state.schema).toBe(SCHEMA_VERSION);
+    expect(r.save.state.money).toBe(s.money);
+    expect(r.save.state.fame).toBeUndefined();
+    // 営業すれば補われる
+    const st = r.save.state;
+    st.day = 5;
+    expect(applyAction(st, 'p1', { type: 'openShop' }, ctx).ok).toBe(true);
+    for (let i = 0; i < 40; i++) step(st, 0.5, ctx);
+    expect(st.events?.chaos).toBeTruthy();
+    expect(() => migrate({ ...old, schema: SCHEMA_VERSION + 1 })).toThrow();
+  });
+});
