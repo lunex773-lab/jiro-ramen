@@ -1,7 +1,11 @@
 // 企業間の貸し借りと銀行の融資の上限のサーバー（じろ2: 改修設計書04）
+import { autoPlayDay, type GameState } from '@jiro/core';
+import { evictDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { callJson, newPlayer, type TestPlayer } from './helpers';
+
+const stub = (id: string) => env.MARKETS.get(env.MARKETS.idFromName(id));
 
 async function create(p: TestPlayer, companyName: string, settings?: Record<string, unknown>) {
   const r = await callJson<{ marketId: string; code: string }>('/api/v1/market/create', { token: p.token, body: { name: `${companyName}の市場`, companyName, settings } });
@@ -12,7 +16,7 @@ async function create(p: TestPlayer, companyName: string, settings?: Record<stri
 type Credit = { id: string; status: string; principal: number; lenderId: string; borrowerId: string };
 type View = {
   companies: { id: string; name: string; kind: string }[];
-  mine: { companyId: string; state: { money: number; loans: { principal: number }[] }; credits: Credit[] } | null;
+  mine: { companyId: string; state: GameState; progress: { stateVersion: number }; credits: Credit[] } | null;
 };
 const view = (p: TestPlayer, id: string) => callJson<View>(`/api/v1/market/${id}`, { token: p.token });
 let seq = 0;
@@ -75,5 +79,42 @@ describe('企業間の貸し借り（サーバー）', () => {
     expect((await act(50_000)).body.ok).toBe(true);
     expect((await view(a, m.marketId)).body.mine!.state.loans.map((l) => l.principal)).toEqual([150_000, 50_000]);
     expect((await act(600_000)).status).toBe(400);
+  });
+
+  it('貸し手が端末で営業中に承認された貸し出しは、貸し手の日の確定でお金が動き、サーバーを読み直しても借り手のお金は残る', async () => {
+    const a = await newPlayer('営業中の貸し手');
+    const b = await newPlayer('待つ借り手');
+    const m = await create(a, '営業貸し亭', { aiFill: false, maxCompanies: 4 });
+    expect((await callJson('/api/v1/market/join', { token: b.token, body: { code: m.code, companyName: '待ち借り軒' } })).status).toBe(200);
+    const vb = await view(b, m.marketId);
+    const borrowerId = vb.body.mine!.companyId;
+    const b0 = vb.body.mine!.state.money;
+    // 貸し手が端末で1日を始める（営業中）
+    const va = await view(a, m.marketId);
+    const token = `tok-lend-${Date.now().toString(36)}`;
+    const st = await callJson<{ ok: boolean; ticket: { gameDate: number; demand: Record<string, number> } }>(`/api/v1/market/${m.marketId}/day/start`, {
+      token: a.token,
+      body: { token, baseVersion: va.body.mine!.progress.stateVersion },
+    });
+    expect(st.status, JSON.stringify(st.body)).toBe(200);
+    const o = await credit(a, m.marketId, { op: 'offer', borrowerId, amount: 100_000, days: 5, dailyRate: 0 });
+    expect(o.body.ok, JSON.stringify(o.body)).toBe(true);
+    // 貸し手が営業中なので、承認してもお金はまだ動かない
+    const ok = await credit(b, m.marketId, { op: 'accept', creditId: o.body.creditId! });
+    expect(ok.body).toMatchObject({ ok: true, status: 'approved' });
+    expect((await view(b, m.marketId)).body.mine!.state.money).toBe(b0);
+    // 貸し手がその日を確定して送ると、お金が動く
+    const s = va.body.mine!.state;
+    autoPlayDay(s, st.body.ticket.gameDate, st.body.ticket.demand, { allowLoan: false });
+    const c = await callJson<{ ok: boolean }>(`/api/v1/market/${m.marketId}/day/commit`, { token: a.token, body: { token, state: s } });
+    expect(c.body.ok, JSON.stringify(c.body)).toBe(true);
+    const after = await view(b, m.marketId);
+    expect(after.body.mine!.credits.map((x) => x.status)).toEqual(['active']);
+    expect(after.body.mine!.state.money).toBe(b0 + 100_000);
+    // サーバー（Durable Object）がメモリから消えて保存から読み直しても、借り手のお金は残っている
+    await evictDurableObject(stub(m.marketId));
+    const reloaded = await view(b, m.marketId);
+    expect(reloaded.body.mine!.credits.map((x) => x.status)).toEqual(['active']);
+    expect(reloaded.body.mine!.state.money).toBe(b0 + 100_000);
   });
 });

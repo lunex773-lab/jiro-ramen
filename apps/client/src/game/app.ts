@@ -377,6 +377,11 @@ export class App {
     }
     this.startGame(new MarketHost(r.state, me?.id ?? 'p1', session));
     this.marketPlay = { session, api, auth, marketId };
+    session.onStale = () => {
+      if (this.marketPlay?.session !== session) return;
+      toast(this.uiLayer, 'サーバーの会社の状態が新しくなっていたため、読み直します（企業間の貸し借りのお金など）', 'info', 4000);
+      void this.startMarketPlay(api, auth, marketId);
+    };
     // 送信待ちだった日を送った結果
     if (r.sentPending && !r.sentPending.ok) toast(this.uiLayer, `送信待ちだった日は受け取られませんでした（${r.sentPending.reason ?? ''}）。サーバーの状態から続けます`, 'warn', 6000);
     else if (r.sentPending?.gameDate) toast(this.uiLayer, `送信待ちだった${r.sentPending.gameDate}日目を送りました`, 'good', 3000);

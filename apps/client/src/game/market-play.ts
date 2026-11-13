@@ -29,6 +29,11 @@ export class MarketHost extends LocalHost {
       // その日の条件をまだもらっていない（前の日を送ったあと、0時の計算中だった など）: ここでもらう
       if (this.session.hasPending()) return { ok: false, reason: '前の日をサーバーへ送れていないため、まだ開店できません（送信待ち）' };
       const t = await this.session.startTicket();
+      if (!t.ok && t.code === 'stale') {
+        // サーバーの会社の状態が新しくなっている（企業間の貸し借りのお金が入った・0時の計算など）: 読み直す
+        this.session.onStale?.();
+        return { ok: false, reason: 'サーバーの会社の状態が新しくなったため、読み直します' };
+      }
       if (!t.ok) return { ok: false, reason: t.code === 'sync_pending' || t.code === 'syncing' ? '0時の計算中です。終わってから開店できます' : t.message };
       prepareState(this.state, t.ticket);
     }
@@ -79,6 +84,8 @@ export class MarketSession {
   cpBlocked: string | null = null;
   /** 確定した最後の営業日 */
   committedDay: number | null = null;
+  /** サーバーの会社の状態が端末より新しいとわかったとき（読み直す。App が入れる） */
+  onStale: (() => void) | null = null;
 
   constructor(
     readonly api: Api,

@@ -228,6 +228,20 @@ export class MarketRoom extends DurableObject<Env> {
     for (const c of this.market?.companies ?? []) this.dirtyCompanies.add(c.id);
   }
 
+  /** 企業ごとの状態の版（操作のあとで、状態が変わった企業を見つけるため） */
+  private versions(): Map<string, number> {
+    return new Map((this.market?.companies ?? []).map((c) => [c.id, c.progress.stateVersion]));
+  }
+
+  /**
+   * 操作の前と版が変わった企業を保存の対象にする。日の確定や操作で、操作した人以外の会社のお金が動くことがある
+   * （企業間の貸し借り: 貸し手の日の確定で、承認済みの貸し出しのお金が借り手に入る など）。
+   * 前は操作した人の会社だけを保存していたため、サーバーが読み直すと借り手に入ったお金が消えていた
+   */
+  private markChanged(before: Map<string, number>): void {
+    for (const c of this.market?.companies ?? []) if (before.get(c.id) !== c.progress.stateVersion) this.dirtyCompanies.add(c.id);
+  }
+
   /** 変わった部分を1つのトランザクションで保存する */
   private save(): void {
     if (!this.market || !this.meta || this.destroyed) return;
@@ -463,11 +477,13 @@ export class MarketRoom extends DurableObject<Env> {
       const cache = this.cids.get(playerId) ?? new RidCache(100);
       const prev = cache.get(body.cid);
       if (prev) return json({ ...prev, duplicate: true });
+      const before = this.versions();
       const r: ActionResult = marketAction(m, playerId, body.action as unknown as Action, now);
       cache.set(body.cid, r);
       this.cids.set(playerId, cache);
       const c = playerCompany(m, playerId);
       if (c) this.dirtyCompanies.add(c.id);
+      this.markChanged(before);
       this.save();
       return json(r);
     }
@@ -504,8 +520,11 @@ export class MarketRoom extends DurableObject<Env> {
       const body = safeJsonParse(await req.text());
       if (!isObj(body) || typeof body.token !== 'string' || !isObj(body.state)) return json({ error: 'bad_request', message: '形式が不正です' }, 400);
       const c = playerCompany(m, playerId);
+      const before = this.versions();
       const r = commitDay(m, playerId, now, body.token, body.state as unknown as GameState);
       if (c) this.dirtyCompanies.add(c.id);
+      // 日の確定で、営業中に承認された貸し出し・返済のお金が相手の会社にも入る
+      this.markChanged(before);
       this.save();
       // 0時の締めを待っていたなら、この日が届いたので先へ進める
       if (m.sync && m.sync.status !== 'done') await this.advanceSync(now);
