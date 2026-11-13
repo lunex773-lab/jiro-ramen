@@ -14,7 +14,7 @@ import { fillNewStore } from '../state';
 import type { DayReport, DayStats, Employee, GameState, Id, StoreEntry, StorePolicy } from '../types';
 import { clamp, newId } from '../util';
 import { activeStore, DEFAULT_POLICY, ensureCompany, putStore, storeReport, takeStore } from './company';
-import { cash, emptyDayStats, foldIntoLastReport, recordPL } from './economy';
+import { cash, emptyDayStats, foldIntoLastReport, recordPL, STAT_MONEY } from './economy';
 import { addLot, consume, packPriceOf, stockOf } from './inventory';
 import { emit, notify, type SimCtx } from './notices';
 import { runManagerDay } from './manager';
@@ -290,8 +290,16 @@ export function enterStore(s: GameState, ctx: SimCtx, storeId: Id): { ok: boolea
   const c = s.company;
   const target = c.stores.find((x) => x.id === storeId)!;
   if (target.openedDay < s.day && !storeReport(s, target, s.day)) runManagerDay(s, target, s.day, ctx);
-  // 閉店のあとに動いたお金は今の店の日報へ
-  foldIntoLastReport(s);
+  // その日の結果を営業の終わりに確定したか（共通市場）。確定したあとは、その日の日報は書き換えない
+  const finalized = s.finalizedDay === s.day && !!s.finalizeBase;
+  // 確定のあとに動いたお金（次の日の日報に回す分。店を何度移っても足していく）
+  const carry: Record<string, number> = {};
+  if (finalized) {
+    for (const k of STAT_MONEY) carry[k] = ((s.today[k] as number | undefined) ?? 0) - (s.finalizeBase![k] ?? 0);
+  } else {
+    // 閉店のあとに動いたお金は今の店の日報へ
+    foldIntoLastReport(s);
+  }
   const cur = activeStore(s);
   cur.snapshot = takeStore(s);
   putStore(s, target.snapshot!);
@@ -299,6 +307,11 @@ export function enterStore(s: GameState, ctx: SimCtx, storeId: Id): { ok: boolea
   c.activeStoreId = target.id;
   // 次の日へ進むときの日報の足し込み（foldIntoLastReport）を、この店の今日の日報から始める
   s.today = statsOf(storeReport(s, target, s.day));
+  // 確定した日なら、次の日へ回す分の基準を入った店の日報に合わせる（前の店の基準のままだと、
+  // 次の日の売上などが「入った店 − 前の店」になってマイナスになる。2店舗で売上が −19,000円 になった不具合）
+  if (finalized) {
+    s.finalizeBase = Object.fromEntries(STAT_MONEY.map((k) => [k, ((s.today[k] as number | undefined) ?? 0) - (carry[k] ?? 0)]));
+  }
   // 店長が翌日の仕込みを済ませておく（仕入れた分は今日の日報に入る）
   prepForEntry(s);
   s.prepSnapshot = null;

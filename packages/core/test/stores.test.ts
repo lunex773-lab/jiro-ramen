@@ -9,6 +9,7 @@ import {
   parseSave,
   makeSaveFile,
   PROPERTIES,
+  STAT_MONEY,
   storeReport,
   validateState,
   type GameState,
@@ -198,5 +199,52 @@ describe('店に入る（切り替え）', () => {
       return JSON.stringify(s.company.history);
     };
     expect(run()).toBe(run());
+  });
+});
+
+describe('営業の終わりで確定したあとに店を移る（2店舗で売上がマイナスになった不具合）', () => {
+  it('確定のあとに別の店へ入っても、次の日の売上などはマイナスにならず、確定した日報は書き換わらない', { timeout: 60_000 }, () => {
+    const { s, ctx, cook } = readyCompany(210);
+    const home = activeStore(s);
+    const mgr2 = addBot(s, 'cook', 0.7, 6000);
+    expect(applyAction(s, 'p1', { type: 'assignManager', storeId: home.id, employeeId: mgr2.id }, ctx).ok).toBe(true);
+    expect(applyAction(s, 'p1', { type: 'openStore', propertyId: 'residential', managerId: cook.id }, ctx).ok).toBe(true);
+    const branch = s.company.stores[1]!;
+    playDay(s, ctx);
+    playDay(s, ctx);
+    const noNegative = () => {
+      for (const k of STAT_MONEY) expect((s.today[k] as number) ?? 0, `${k} が負`).toBeGreaterThanOrEqual(0);
+    };
+    for (let round = 0; round < 2; round++) {
+      // 共通市場と同じく、営業の終わりで結果を確定する
+      expect(s.today.sales).toBeGreaterThan(0);
+      expect(applyAction(s, 'p1', { type: 'finalizeDay' }, ctx).ok).toBe(true);
+      const day = s.day;
+      const from = activeStore(s);
+      const to = from.id === home.id ? branch : home;
+      const fromReport = JSON.stringify(storeReport(s, from, day));
+      const toReport = JSON.stringify(storeReport(s, to, day));
+      // 閉店後の事務作業（仕入れ）→ 店を移る
+      const ord = applyAction(s, 'p1', { type: 'orderStock', itemId: 'soy', packs: 1, express: false }, ctx);
+      expect(ord.ok, ord.reason).toBe(true);
+      expect(applyAction(s, 'p1', { type: 'enterStore', storeId: to.id }, ctx).ok).toBe(true);
+      expect(nextDay(s, ctx).ok).toBe(true);
+      // 確定した日の店の日報はどちらも書き換わらない
+      expect(JSON.stringify(storeReport(s, from, day))).toBe(fromReport);
+      expect(JSON.stringify(storeReport(s, to, day))).toBe(toReport);
+      // 次の日の始まり: 売上は0、閉店後の仕入れ・店長の仕込みはこの日の仕入れに入る
+      expect(s.today.sales).toBe(0);
+      expect(s.today.purchases).toBeGreaterThan(0);
+      noNegative();
+      // その日を営業すると、日報の売上 = 実際の売上（マイナスにならない）
+      applyAction(s, 'p1', { type: 'openShop' }, ctx);
+      runDay(s, ctx);
+      noNegative();
+      expect(s.today.sales).toBeGreaterThan(0);
+      expect(validateState(s)).toEqual([]);
+    }
+    nextDay(s, ctx);
+    for (const r of s.history) expect(r.sales, `${r.day}日目`).toBeGreaterThanOrEqual(0);
+    for (const r of s.company.history) expect(r.netSales, `会社 ${r.day}日目`).toBeGreaterThanOrEqual(0);
   });
 });
