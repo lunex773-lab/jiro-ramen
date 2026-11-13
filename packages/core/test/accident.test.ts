@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  accidentChecks,
   accidentHalted,
   applyAction,
   BALANCE,
@@ -9,7 +10,9 @@ import {
   listVerbs,
   makeSaveFile,
   nextDay,
+  openDurationOf,
   parseSave,
+  SEC_PER_MIN,
   step,
   type GameState,
   type SimCtx,
@@ -109,6 +112,35 @@ describe('爆発事故の抽選', () => {
     expect(st.draws - draws0).toBe(2000);
     expect(fired / 2000).toBeGreaterThan(0.26);
     expect(fired / 2000).toBeLessThan(0.34);
+  });
+
+  it('ゲーム内の10分ごとに抽選し、1日の合計は営業時間に関係なく設定の確率（オーナーの判断 2026-11-13）', () => {
+    setBal(X, 'firstChancePerDay', 0.01);
+    const { s } = day2(85);
+    const { times, perCheck } = accidentChecks(s);
+    const slot = 10 * SEC_PER_MIN;
+    // 開店から10分・20分…閉店の前まで
+    expect(times[0]).toBeCloseTo(slot, 6);
+    times.forEach((t, i) => expect(t).toBeCloseTo(slot * (i + 1), 6));
+    expect(times[times.length - 1]!).toBeLessThan(openDurationOf(s));
+    // n 回のどれかで当たる確率 = 1日の確率
+    expect(1 - Math.pow(1 - perCheck, times.length)).toBeCloseTo(0.01, 10);
+    // 10分ごとに1%にはしない（4時間で約21%/日になるため）
+    expect(perCheck).toBeLessThan(0.001);
+    // 当たった日は、どれかの10分の時刻に起きる
+    setBal(X, 'firstChancePerDay', 0.5);
+    let fired = 0;
+    for (let d = 0; d < 400; d++) {
+      s.day += 1;
+      s.prepSnapshot!.day = s.day;
+      drawAccident(s);
+      const plan = s.events!.accidentPlan;
+      if (!plan) continue;
+      fired++;
+      expect(times.some((t) => Math.abs(t - plan.atOpenT) < 1e-6)).toBe(true);
+    }
+    expect(fired / 400).toBeGreaterThan(0.42);
+    expect(fired / 400).toBeLessThan(0.58);
   });
 
   it('初期設定は 0.001%（営業日単位）', () => {

@@ -2,9 +2,12 @@
 //
 // 営業日・抽選の定義:
 //   - 1営業日 = nextDay で仕込み（prep）が始まってから、閉店の精算まで
-//   - 抽選は「開店の操作（openShop）の中で1日1回だけ」。抽選した日を events.accidentDrawDay に記録し、同じ日に二度抽選しない。
-//     開店のあとに保存して読み直しても、開店の操作は二度と行われないので再抽選しない
-//   - 当たったら、その日の営業中の時刻を決めて予約する（accidentPlan）
+//   - 抽選はゲーム内の営業時間の10分ごと（オーナーの判断 2026-11-13）。1回の確率は、その日の営業時間の10分の数から逆算し、
+//     1日の合計がいつも accidentChance（初回 1.0%）になるようにする（10分ごとに1%では4時間で約21%/日になり上がりすぎるため）。
+//     10分ごとの抽選は「開店の操作（openShop）の中で」その日の分をまとめて行う（events の乱数は1日1回だけ使い、
+//     その値を種にした別の乱数で各10分を引く。ほかのイベントの乱数の並びを変えない）。抽選した日を events.accidentDrawDay に記録し、
+//     同じ日に二度抽選しない。開店のあとに保存して読み直しても、開店の操作は二度と行われないので再抽選しない
+//   - 当たったら、最初に当たった10分の時刻に起きるように予約する（accidentPlan）
 //
 // 仕込み開始時点の控え（prepSnapshot）:
 //   - nextDay で仕込みが始まる瞬間と、新しいキャリアの1日目に作る。それ以外（事故のあとの探索中を含む）では作らない
@@ -14,13 +17,13 @@
 // 復元（resetAccident）は控えの値で丸ごと置き換える（足し引きしない）ので、二重に実行しても経済の値は変わらない。
 // 事故が起きているときだけ受け付け、復元すると事故の記録が消えるので、2回目の要求は何もせずに失敗する。
 
-import { openDurationOf } from './hours';
+import { openDurationOf, SEC_PER_MIN } from './hours';
 import { BALANCE } from '../data/balance';
 import { STAGES } from '../data/stages';
 import { equipmentCenter } from '../geometry';
 import { FIRE_LINES } from '../data/events';
 import type { AccidentState, GameState, Id, ShopEvents } from '../types';
-import { dist, newId, randRange } from '../util';
+import { dist, newId, rand } from '../util';
 import { defOf } from './equipment';
 import { ensureEvents, evRand, finishEvent, noteDraw, noteFire, restoreEvent, takeForced } from './events';
 import { dropHand } from './interact';
@@ -75,7 +78,23 @@ export function accidentChance(s: GameState): number {
   return first ? X.firstChancePerDay : X.chancePerDay;
 }
 
-/** 開店の操作の中で1日1回だけ呼ぶ */
+/**
+ * その日の10分ごとの抽選の時刻（営業の秒。開店から10分・20分…閉店の前まで）と、1回の確率。
+ * 1回の確率 p は、1日の確率 P と抽選の回数 n から 1 − (1 − P)^(1/n)（n 回のどれかで当たる確率が P になる）
+ */
+export function accidentChecks(s: GameState): { times: number[]; perCheck: number } {
+  const slot = X.checkEveryMin * SEC_PER_MIN;
+  const open = openDurationOf(s);
+  const times: number[] = [];
+  for (let t = slot; t < open - 1e-6; t += slot) times.push(t);
+  // 営業が10分より短い日は、真ん中で1回
+  if (times.length === 0) times.push(open / 2);
+  const P = accidentChance(s);
+  const perCheck = P >= 1 ? 1 : 1 - Math.pow(1 - P, 1 / times.length);
+  return { times, perCheck };
+}
+
+/** 開店の操作の中で1日1回だけ呼ぶ（その日の10分ごとの抽選をまとめて行う） */
 export function drawAccident(s: GameState): void {
   const ev = ensureEvents(s);
   if (ev.accidentDrawDay === s.day) return;
@@ -83,12 +102,18 @@ export function drawAccident(s: GameState): void {
   ev.accidentPlan = null;
   if (accidentBlocked(s)) return;
   const forced = takeForced(s, 'explosion');
-  if (!forced) {
-    noteDraw(s, 'explosion');
-    if (evRand(s) >= accidentChance(s)) return;
+  if (forced) {
+    ev.accidentPlan = { id: newId(s, 'ev'), day: s.day, atOpenT: 3 };
+    ev.forced.push('explosion'); // 発生したときに「強制」として記録する
+    return;
   }
-  ev.accidentPlan = { id: newId(s, 'ev'), day: s.day, atOpenT: forced ? 3 : randRange(ev, X.atFrom, X.atTo) * openDurationOf(s) };
-  if (forced) ev.forced.push('explosion'); // 発生したときに「強制」として記録する
+  noteDraw(s, 'explosion');
+  // events の乱数は1日1回だけ使い、その値を種にして10分ごとに引く
+  const local = { rng: Math.floor(evRand(s) * 4294967296) >>> 0 };
+  const { times, perCheck } = accidentChecks(s);
+  const at = times.find(() => rand(local) < perCheck);
+  if (at === undefined) return;
+  ev.accidentPlan = { id: newId(s, 'ev'), day: s.day, atOpenT: at };
 }
 
 /** テスト用の強制発生（営業中ならすぐに予兆、仕込み中なら開店の3秒後） */
