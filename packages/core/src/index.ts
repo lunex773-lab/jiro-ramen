@@ -26,6 +26,7 @@ export * from './sim/store-manager';
 export * from './sim/shift-plan';
 export * from './sim/prep-control';
 export * from './sim/armory';
+export * from './sim/speed';
 export * from './data/weapons';
 export * from './sim/equipment';
 export * from './sim/cooking';

@@ -280,7 +280,7 @@ export interface InGameSettings {
 export function settingsScreen(st: Settings, onChange: (s: Settings) => void, onClose: () => void, inGame?: InGameSettings): HTMLElement {
   const cur = { ...st };
   const update = () => onChange({ ...cur });
-  const toggle = (label: string, key: 'sound' | 'voice' | 'invertY' | 'showFps') =>
+  const toggle = (label: string, key: 'sound' | 'voice' | 'invertY' | 'showFps' | 'slowOnEvents') =>
     h(
       'label',
       { class: 'kv' },
@@ -327,6 +327,8 @@ export function settingsScreen(st: Settings, onChange: (s: Settings) => void, on
       ),
       h('p', { class: 'note' }, '動きが重いときは、描画の細かさを自動で下げます（画質はその上限です）。'),
       toggle('動作の重さを表示（fps）', 'showFps'),
+      toggle('イベントが起きたら等倍に戻す', 'slowOnEvents'),
+      h('p', { class: 'note' }, 'オンにすると、珍客・YouTuber・テレビ取材・覆面調査員・珍しいお客さん・SNS のバズ・クレームなどが起きたときに倍速を解除し、終わるまで等倍にします。爆発の火事・武器の事件の間は、この設定に関係なく等倍です。何も起きなければ、倍速は次の日もそのまま続きます。'),
       h(
         'label',
         { class: 'kv' },

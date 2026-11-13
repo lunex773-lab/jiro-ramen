@@ -48,6 +48,7 @@ export class RemoteHost implements GameHost {
   conn: ConnState = 'connecting';
   peers: PeerInfo[] = [];
   speed = 1;
+  slowOnEvents = true;
   state: GameState;
   layoutHolder: string | null = null;
   lastError = '';
@@ -297,6 +298,11 @@ export class RemoteHost implements GameHost {
   onStatus(cb: () => void): () => void {
     this.statusCbs.add(cb);
     return () => this.statusCbs.delete(cb);
+  }
+
+  /** 共同経営には倍速がない */
+  speedLockReason(): string | null {
+    return null;
   }
 
   dispose(): void {

@@ -101,6 +101,8 @@ export class App {
   private raf = 0;
   private lastT = 0;
   private lastPhase = '';
+  /** 前のフレームのゲーム速度（等倍に戻ったことに気づくため） */
+  private lastSpeed = 1;
   private pausedForMenu = false;
   /** 共通市場の企業を端末で営業している（会社の状態はサーバー。端末のスロットには保存しない） */
   private marketPlay: { session: MarketSession; api: Api; auth: Auth; marketId: string } | null = null;
@@ -185,6 +187,7 @@ export class App {
     this.sfx.setVolume(this.settings.volume);
     if (this.controls) this.controls.settings = { lookSensitivity: this.settings.lookSensitivity, invertY: this.settings.invertY };
     this.world?.setQuality(this.settings.quality);
+    if (this.host) this.host.slowOnEvents = this.settings.slowOnEvents;
   }
 
   // ───────────────── 画面 ─────────────────
@@ -666,6 +669,13 @@ export class App {
     this.leaveGame();
     this.onLeaveGame = onLeave ?? null;
     this.host = host;
+    // 倍速は前の日・前に遊んだときの速さを続ける（イベントで等倍に戻ったら等倍。オーナーの判断 2026-11-13）
+    host.slowOnEvents = this.settings.slowOnEvents;
+    if (host.mode === 'local') {
+      const sp = this.settings.gameSpeed;
+      host.speed = [1, 2, 3, 5].includes(sp) && !host.speedLockReason() ? sp : 1;
+    }
+    this.lastSpeed = host.speed;
     this.show(null);
     this.world = new World(this.canvas, this.overlay, this.settings.quality);
     this.controls = new Controls(this.uiLayer, this.canvas);
@@ -937,6 +947,20 @@ export class App {
     if (w?.kind === 'gun') c.pitch = Math.min(1.2, c.pitch + (w.spread ? 0.06 : 0.03));
   }
 
+  /**
+   * ゲーム速度を設定に残す（次の日・次に始めたときもそのまま）。珍しいことが起きて等倍に戻ったときは知らせる
+   */
+  private trackSpeed(host: GameHost): void {
+    if (host.mode !== 'local' || host.speed === this.lastSpeed) return;
+    const why = host.speed === 1 && this.lastSpeed > 1 ? host.speedLockReason() : null;
+    if (why) toast(this.uiLayer, `${why.replace(/（設定で変えられます）$/, '').replace(/は倍速にできません$/, '')}は等倍にします`, 'info', 2500);
+    this.lastSpeed = host.speed;
+    if (this.settings.gameSpeed !== host.speed) {
+      this.settings.gameSpeed = host.speed;
+      saveSettings(this.settings);
+    }
+  }
+
   // ───────────────── 毎フレーム ─────────────────
 
   private frame(dt: number, t: number, interval: number): void {
@@ -962,6 +986,7 @@ export class App {
     // シングルプレイではメニュー中は時間を止める
     const pauseLocal = host.mode === 'local' && (blocking || s.phase === 'closed' || !!this.marketBusy);
     if (!pauseLocal) host.tick(dt);
+    this.trackSpeed(host);
     c.update();
     const me = s.players.find((p) => p.id === host.playerId);
     let moving = false;

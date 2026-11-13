@@ -16,6 +16,10 @@ export interface Settings {
   /** 「ホーム画面に追加すると全画面で遊べる」を案内したか */
   homeTipShown: boolean;
   lastSlot: number;
+  /** 店で珍しいことが起きたら倍速を解除して等倍に戻し、終わるまで等倍にする（オーナーの判断 2026-11-13。初期はオン） */
+  slowOnEvents: boolean;
+  /** 最後のゲーム速度（次の日・次に始めたときもそのまま。イベントで等倍に戻ったら等倍） */
+  gameSpeed: number;
 }
 
 const KEY = 'jiro.settings';
@@ -32,6 +36,8 @@ export const DEFAULT_SETTINGS: Settings = {
   tutorialSeen: false,
   homeTipShown: false,
   lastSlot: 1,
+  slowOnEvents: true,
+  gameSpeed: 1,
 };
 
 export function loadSettings(): Settings {

@@ -283,10 +283,12 @@ export class Hud {
                 class: 'chip',
                 title: 'ゲーム速度',
                 onclick: () => {
-                  // 爆発事故・人を襲った事件の間は倍速にできない（等速で見せる）
-                  if (speedLocked(this.host.state)) {
+                  // 爆発事故・人を襲った事件・珍しいことが起きている間は倍速にできない（等速で見せる）
+                  const why = this.host.speedLockReason();
+                  if (why) {
                     this.host.speed = 1;
                     this.lastTopKey = '';
+                    toast(this.root, why, 'info', 2200);
                     return;
                   }
                   // ×1 → ×2 → ×3 → ×5 → ×1（オーナーの指示で5倍速を足した）
@@ -319,7 +321,7 @@ export class Hud {
 
   private updateTop(s: GameState): void {
     const buzz = buzzLeftMinutes(s);
-    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}|${buzz}|${speedLocked(s) ? 1 : 0}`;
+    const key = `${s.day}|${s.phase}|${clockText(s)}|${s.money}|${s.reputation.toFixed(2)}|${s.queue.length}|${s.insideQueue.length}|${this.host.speed}|${this.host.conn}|${this.host.peers.length}|${buzz}|${this.host.speedLockReason() ?? ''}`;
     if (key === this.lastTopKey) return;
     this.lastTopKey = key;
     const t = (this.topParts ??= this.buildTop());
@@ -345,9 +347,11 @@ export class Hud {
     t.buzz.hidden = buzz === null;
     if (this.host.mode === 'local') {
       t.speed.textContent = `×${this.host.speed}`;
-      const locked = speedLocked(s);
-      (t.speed as HTMLButtonElement).disabled = locked;
-      t.speed.title = locked ? (s.events?.accident ? '事故の間は倍速にできません' : '事件の間は倍速にできません') : 'ゲーム速度';
+      const why = this.host.speedLockReason();
+      // 爆発事故・武器の事件は押せない。珍しいことの間は押すと理由を出す
+      (t.speed as HTMLButtonElement).disabled = !!why && speedLocked(s);
+      t.speed.classList.toggle('locked', !!why);
+      t.speed.title = why ?? 'ゲーム速度';
     }
     else {
       t.speed.className = `chip conn ${this.host.conn}`;

@@ -146,7 +146,11 @@ test('隠し扉と武器庫: 店の外の横の壁を押すと開き、武器を
   await take.click();
   await expect(panel).toHaveCount(0);
   await expect(page.locator('.hud-hand')).toContainText('拳銃');
-  // 倍速にしておく（襲うと等速に戻る。オーナーの指示 2026-11-11）
+  // 倍速にしておく（襲うと等速に戻る。オーナーの指示 2026-11-11）。偶然の珍しいお客さん・クレームで等倍にならないよう、
+  // ここでは「イベントが起きたら等倍に戻す」を止める（事件の等倍は設定に関係なく起きる）
+  await page.evaluate(() => {
+    (window as unknown as { __jiro: { host: { slowOnEvents: boolean } } }).__jiro.host.slowOnEvents = false;
+  });
   const speed = page.locator('.hud .chip', { hasText: /^×\d$/ });
   await speed.click();
   await expect(speed).toHaveText('×2');
@@ -243,6 +247,42 @@ test('開店すると時計が進み、客が来店する', async ({ page }) => 
   expect(arrived).toBe(true);
   await expect(page.locator('.ticket').first()).toBeVisible();
   await shot(page, '05-open');
+});
+
+test('イベントが起きたら倍速を解除して等倍に戻し、終わるまで等倍。設定でオフにできる。何もなければ倍速は次の日も続く（2026-11-13）', async ({ page }) => {
+  await startNewGame(page);
+  type St = { phase: string; openT: number; events?: { buzz?: unknown } };
+  type App = { __jiro: { host: { state: St; speed: number; tick(dt: number): void; act(a: unknown): Promise<{ ok: boolean }> } } };
+  await page.getByRole('button', { name: /開店する/ }).click();
+  await expect.poll(async () => page.evaluate(() => (window as unknown as App).__jiro.host.state.phase), { timeout: 10_000 }).toBe('open');
+  const speed = page.locator('.hud .chip', { hasText: /^×\d$/ });
+  await speed.click();
+  await expect(speed).toHaveText('×2');
+  // 倍速は設定に残る（次の日・次に始めたときもそのまま）
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('jiro.settings') ?? '{}').gameSpeed)).toBe(2);
+  // SNS のバズが始まる → 等倍に戻り、知らせが出る。バズの間は倍速にできない
+  await page.evaluate(() => {
+    const s = (window as unknown as App).__jiro.host.state;
+    s.events = s.events ?? {};
+    s.events.buzz = { id: 'bz-e2e', startT: s.openT, endT: s.openT + 3000, mult: 2 };
+  });
+  await expect(speed).toHaveText('×1');
+  await expect(page.locator('.toast').filter({ hasText: '等倍' }).first()).toBeVisible();
+  await speed.click();
+  await expect(speed).toHaveText('×1');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('jiro.settings') ?? '{}').gameSpeed)).toBe(1);
+  await shot(page, 'speed-event-lock');
+  // 設定で「イベントが起きたら等倍に戻す」をオフにすると、バズの間も倍速にできる
+  await openSettings(page);
+  const toggle = page.locator('label.kv', { hasText: 'イベントが起きたら等倍に戻す' }).locator('input');
+  await expect(toggle).toBeChecked();
+  await toggle.uncheck();
+  await page.getByRole('button', { name: '閉じる' }).last().click();
+  await expect(page.locator('.settings')).toHaveCount(0);
+  if ((await page.locator('.manage').count()) > 0) await press(page.locator('.manage .close, .manage [data-close]').first());
+  await expect(page.locator('.manage')).toHaveCount(0);
+  await speed.click();
+  await expect(speed).toHaveText('×2');
 });
 
 test('経営メニューとレイアウト編集が開ける', async ({ page }) => {

@@ -12,7 +12,7 @@ import {
   type GameState,
   type PeerInfo,
   type SimCtx,
-  speedLocked,
+  speedLockReason,
 } from '@jiro/core';
 
 export type ConnState = 'local' | 'connecting' | 'online' | 'reconnecting' | 'paused' | 'closed';
@@ -38,6 +38,10 @@ export interface GameHost {
   onStatus(cb: () => void): () => void;
   /** 速度倍率（シングルプレイのみ） */
   speed: number;
+  /** 店で珍しいことが起きている間は等倍にする（設定。初期はオン。オーナーの判断 2026-11-13） */
+  slowOnEvents: boolean;
+  /** 今は倍速にできない理由（できるなら null） */
+  speedLockReason(): string | null;
   dispose(): void;
 }
 
@@ -47,6 +51,7 @@ export class LocalHost implements GameHost {
   readonly conn: ConnState = 'local';
   readonly peers: PeerInfo[] = [];
   speed = 1;
+  slowOnEvents = true;
   private ctx: SimCtx = makeCtx();
   private eventCbs = new Set<(ev: GameEvent[]) => void>();
   private statusCbs = new Set<() => void>();
@@ -81,20 +86,25 @@ export class LocalHost implements GameHost {
     // 爆発事故（発火してから焼け跡のあいだ）は倍速をやめて等速にする（オーナーの指示: 15秒の火事をそのまま体験してから爆発する）。
     // 発火がフレームの途中で始まっても倍速で進みすぎないよう、細かく区切って進める
     // 人を襲った日の事件の間（襲った瞬間から営業が終わるまで）も等速に戻す（オーナーの指示 2026-11-11）
+    // 店で珍しいこと（珍客・YouTuber・テレビ取材・覆面調査員・SNS のバズ・クレームなど）が起きている間も等倍（設定でオフにできる）
     let real = Math.min(0.25, dtReal);
     while (real > 1e-9) {
-      if (speedLocked(this.state)) this.speed = 1;
+      if (this.speed !== 1 && this.speedLockReason()) this.speed = 1;
       const r = Math.min(real, 0.05);
       step(this.state, r * this.speed, this.ctx);
       real -= r;
     }
-    if (speedLocked(this.state)) this.speed = 1;
+    if (this.speed !== 1 && this.speedLockReason()) this.speed = 1;
     this.flush();
   }
 
-  /** 倍速にできないか（爆発事故・人を襲った事件の間） */
+  speedLockReason(): string | null {
+    return speedLockReason(this.state, this.slowOnEvents);
+  }
+
+  /** 倍速にできないか（爆発事故・人を襲った事件・珍しいことが起きている間） */
   get speedLocked(): boolean {
-    return speedLocked(this.state);
+    return this.speedLockReason() !== null;
   }
 
   onEvents(cb: (ev: GameEvent[]) => void): () => void {
