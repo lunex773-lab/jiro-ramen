@@ -154,6 +154,21 @@ export function noodlesStartedFor(s: GameState, orderId: Id): boolean {
   return !!b?.contents && b.contents.noodleG > 0;
 }
 
+/** コールを聞けないまま、この秒数を過ぎた丼は「そのまま」で盛る（冷めすぎないように） */
+export const TOPPING_WAIT_CALL_SEC = 40;
+
+/**
+ * 従業員がトッピングを盛ってよい丼か: 麺が入っていてまだ盛っておらず、提供を待っている注文があり、コールを聞いた
+ * （または聞けないまま TOPPING_WAIT_CALL_SEC を過ぎた）。注文のない丼には盛らない（あとでほかの注文に回るとコール違いになる）
+ */
+export function staffCanTop(s: GameState, b: Bowl): boolean {
+  const c = b.contents;
+  if (!c || c.noodleG <= 0 || c.steps.includes('toppings')) return false;
+  const o = orderById(s, b.orderId);
+  if (!o || o.status !== 'waiting') return false;
+  return o.callRevealed || s.t - c.startedAt > TOPPING_WAIT_CALL_SEC;
+}
+
 export function bowlsOnAssembly(s: GameState, e: Equipment): { slot: number; bowl: Bowl }[] {
   const out: { slot: number; bowl: Bowl }[] = [];
   e.bowlSlots.forEach((id, slot) => {
@@ -163,17 +178,28 @@ export function bowlsOnAssembly(s: GameState, e: Equipment): { slot: number; bow
   return out;
 }
 
-/** 割り当てのない丼に、丼のない注文を古い順に割り当てる */
+/**
+ * 割り当てのない丼に、丼のない注文を古い順に割り当てる。麺の入った丼は、同じ量の注文にだけ回す（大と小の取り違えを防ぐ）。
+ * その注文の麺がもうゆで始めていれば空の丼を、まだなら同じ量の麺が入った丼を先に使う
+ */
 export function assignBowls(s: GameState): void {
   const unassignedBowls = s.bowls.filter(
     (b) => b.orderId === null && (b.state === 'assembling' || (b.state === 'clean' && b.loc.at === 'station')),
   );
   if (unassignedBowls.length === 0) return;
   for (const o of waitingOrders(s)) {
+    if (unassignedBowls.length === 0) break;
     if (bowlForOrder(s, o.id)) continue;
-    const b = unassignedBowls.shift();
-    if (!b) break;
-    b.orderId = o.id;
+    const g = menuOf(o.menuId).noodleG;
+    const empty = (b: Bowl) => !b.contents || b.contents.noodleG <= 0;
+    const fits = (b: Bowl) => !!b.contents && b.contents.noodleG === g;
+    const boiling = s.equipment.some((e) => e.slots.some((sl) => sl && sl.orderId === o.id));
+    const i = boiling
+      ? unassignedBowls.findIndex(empty) >= 0 ? unassignedBowls.findIndex(empty) : unassignedBowls.findIndex(fits)
+      : unassignedBowls.findIndex(fits) >= 0 ? unassignedBowls.findIndex(fits) : unassignedBowls.findIndex(empty);
+    if (i < 0) continue;
+    const [b] = unassignedBowls.splice(i, 1);
+    b!.orderId = o.id;
   }
 }
 
@@ -275,6 +301,26 @@ function ordersNeedingNoodles(s: GameState): Order[] {
   return waitingOrders(s).filter((o) => !noodlesStartedFor(s, o.id));
 }
 
+/** その麺釜から麺を上げて完成まで持っていける盛り付け台（近くにあり、スープとトッピングに届くもの） */
+export function linkedAssemblies(s: GameState, boiler: Equipment): Equipment[] {
+  const c = equipmentCenter(boiler);
+  return s.equipment.filter((x) => x.placed && roleOf(x) === 'assembly' && dist(equipmentCenter(x), c) <= MAX_DEPENDENCY_DIST && assemblyFunctional(s, x));
+}
+
+/**
+ * 従業員がその麺釜で麺をゆでる注文（麺がまだ・古い順）。丼がまだない注文か、丼がこの麺釜から届く盛り付け台にある注文だけ。
+ * 届く盛り付け台がない麺釜ではゆでない（離れた2台目の麺釜でゆでた麺が上げられず、ゆですぎで捨てていた）
+ */
+export function staffNoodleOrders(s: GameState, boiler: Equipment): Order[] {
+  const linked = linkedAssemblies(s, boiler);
+  if (linked.length === 0) return [];
+  const ids = new Set(linked.map((x) => x.id));
+  return ordersNeedingNoodles(s).filter((o) => {
+    const b = bowlForOrder(s, o.id);
+    return !b || b.loc.at !== 'station' || ids.has(b.loc.stationId);
+  });
+}
+
 const VERBS: VerbDef[] = [
   // ── 麺釜 ──
   {
@@ -290,7 +336,9 @@ const VERBS: VerbDef[] = [
       if (a.hand.kind === 'dirty' || a.hand.kind === 'trash' || a.hand.kind === 'mop') return no(label, '手を洗ってから（汚れ物を持っています）');
       const free = e.slots.filter((x) => x === null).length;
       if (free === 0) return no(label, '空いているテボがありません');
-      const want = ordersNeedingNoodles(s).length;
+      const want = a.kind === 'player' ? ordersNeedingNoodles(s).length : staffNoodleOrders(s, e).length;
+      // 従業員は、この麺釜で受けられる注文がないときは入れない（見込みでゆでない）
+      if (a.kind !== 'player' && want === 0) return no(label, 'この麺釜で受けられる注文がありません');
       const n = Math.max(1, Math.min(free, want));
       if (!noodleSource(s, 300)) return no(label, '麺の在庫がありません');
       const sp = effectiveSpeed(e);
@@ -300,7 +348,8 @@ const VERBS: VerbDef[] = [
       const e = eq(t);
       const slotIdx = e.slots.findIndex((x) => x === null);
       if (slotIdx < 0) return;
-      const order = ordersNeedingNoodles(s)[0];
+      const order = a.kind === 'player' ? ordersNeedingNoodles(s)[0] : staffNoodleOrders(s, e)[0];
+      if (!order && a.kind !== 'player') return;
       const grams = order ? menuOf(order.menuId).noodleG : 300;
       const src = noodleSource(s, grams);
       if (!src) {
@@ -334,6 +383,8 @@ const VERBS: VerbDef[] = [
       if (ready.length === 0) return no(label, 'ゆで上がった麺がありません');
       const targets = drainTargets(s, a, e);
       if (targets.length === 0) return no(label, '麺を受ける丼がありません（盛り付け台に丼を並べるか、丼を持ってください）');
+      // 従業員は、その麺に合う丼（同じ注文・同じ量の注文・注文のない丼）がなければ上げない（大と小の取り違えを防ぐ）
+      if (a.kind !== 'player' && !ready.some((sl) => pickDrainBowl(s, a, sl!, targets))) return no(label, '麺に合う丼がありません');
       // スープ入りの丼があるときは、その数だけ上げる（スープのない丼に麺だけ入れない）
       const soupReady = targets.filter((b) => b.contents && b.contents.soupL > 0).length;
       const n = Math.min(ready.length, soupReady > 0 ? soupReady : targets.length);
@@ -344,22 +395,15 @@ const VERBS: VerbDef[] = [
     applyUnit: (s, a, t, _args, ctx) => {
       const e = eq(t);
       const targets = drainTargets(s, a, e);
-      // ゆで上がりの早い順に
+      // ゆで上がりの早い順に（従業員は、合う丼がある麺から）
       const order = e.slots
         .map((sl, i) => ({ sl, i }))
         .filter((x) => x.sl && x.sl.elapsed >= x.sl.ideal * 0.6)
         .sort((x, y) => y.sl!.elapsed - x.sl!.elapsed);
-      const first = order[0];
+      const first = order.find((x) => pickDrainBowl(s, a, x.sl!, targets));
       if (!first || !first.sl) return;
       const sl = first.sl;
-      // 注文が一致する丼 → 同じ量の注文の丼 → 麺のない丼
-      const pickBowl =
-        targets.find((b) => sl.orderId && b.orderId === sl.orderId) ??
-        targets.find((b) => {
-          const o = orderById(s, b.orderId);
-          return o ? menuOf(o.menuId).noodleG === sl.grams : true;
-        }) ??
-        targets[0];
+      const pickBowl = pickDrainBowl(s, a, sl, targets);
       if (!pickBowl) return;
       if (!pickBowl.contents) pickBowl.contents = emptyContents(s.t);
       const c = pickBowl.contents;
@@ -551,13 +595,11 @@ const VERBS: VerbDef[] = [
     match: isRole('assembly'),
     phases: COOKING_PHASES,
     skill: 'cook',
-    plan: (s, _a, t) => {
+    plan: (s, a, t) => {
       const e = eq(t);
       const label = 'コールどおりに盛る';
-      const targets = bowlsOnAssembly(s, e).filter(
-        (x) => x.bowl.contents && x.bowl.contents.noodleG > 0 && !x.bowl.contents.steps.includes('toppings'),
-      );
-      if (targets.length === 0) return no(label, '麺の入った丼がありません');
+      const targets = toppingTargets(s, a, e);
+      if (targets.length === 0) return no(label, a.kind === 'player' ? '麺の入った丼がありません' : 'コールを聞いた注文の丼がありません');
       const top = dependency(s, e, 'topping');
       if (!top) return no(label, '近くに使えるトッピング台がありません');
       const unasked = targets.filter((x) => {
@@ -569,9 +611,7 @@ const VERBS: VerbDef[] = [
     },
     applyUnit: (s, a, t, _args, ctx) => {
       const e = eq(t);
-      const target = bowlsOnAssembly(s, e).find(
-        (x) => x.bowl.contents && x.bowl.contents.noodleG > 0 && !x.bowl.contents.steps.includes('toppings'),
-      );
+      const target = toppingTargets(s, a, e)[0];
       const top = dependency(s, e, 'topping');
       if (!target || !target.bowl.contents || !top) return;
       applyToppings(s, ctx, target.bowl, a);
@@ -1426,6 +1466,33 @@ export function soupTemperature(e: Equipment): number {
 }
 
 /** 麺上げで麺を受けられる丼（手に持った丼 or 近くの盛り付け台の、スープ以降の工程が済んだ麺なしの丼） */
+/**
+ * ゆで上がった麺を入れる丼: その注文の丼 → （その注文の丼がまだなければ）注文のない丼 → 同じ量の注文の丼 → 注文のない丼。
+ * プレイヤーは最後に、どの丼でも（台の左から）。従業員は量の違う注文の丼には入れない（大と小の取り違え）
+ */
+function pickDrainBowl(s: GameState, a: Actor, sl: NonNullable<Equipment['slots'][number]>, targets: Bowl[]): Bowl | undefined {
+  const mine = sl.orderId ? targets.find((b) => b.orderId === sl.orderId) : undefined;
+  if (mine) return mine;
+  const free = (b: Bowl) => !orderById(s, b.orderId);
+  const sameSize = (b: Bowl) => {
+    const o = orderById(s, b.orderId);
+    return !!o && menuOf(o.menuId).noodleG === sl.grams;
+  };
+  const orderHasBowl = !!sl.orderId && !!bowlForOrder(s, sl.orderId);
+  return (!orderHasBowl ? targets.find(free) : undefined) ?? targets.find(sameSize) ?? targets.find(free) ?? (a.kind === 'player' ? targets[0] : undefined);
+}
+
+/**
+ * トッピングを盛る丼（盛り付け台の上）。プレイヤーは麺の入った丼ならどれでも（台の左から）。
+ * 従業員は staffCanTop の丼だけを、コールを聞いた丼から先に
+ */
+function toppingTargets(s: GameState, a: Actor, e: Equipment): { slot: number; bowl: Bowl }[] {
+  const on = bowlsOnAssembly(s, e);
+  if (a.kind === 'player') return on.filter((x) => x.bowl.contents && x.bowl.contents.noodleG > 0 && !x.bowl.contents.steps.includes('toppings'));
+  const asked = (x: { bowl: Bowl }) => (orderById(s, x.bowl.orderId)?.callRevealed ? 1 : 0);
+  return on.filter((x) => staffCanTop(s, x.bowl)).sort((x, y) => asked(y) - asked(x));
+}
+
 function drainTargets(s: GameState, a: Actor, boiler: Equipment): Bowl[] {
   if (a.hand.kind === 'bowl') {
     const b = bowlById(s, a.hand.bowlId);

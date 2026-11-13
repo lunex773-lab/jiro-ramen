@@ -38,6 +38,9 @@ import {
   waitingOrders,
   noodlesStartedFor,
   bowlForOrder,
+  linkedAssemblies,
+  staffCanTop,
+  staffNoodleOrders,
   dropHand,
   verbBlocked,
   assemblyFunctional,
@@ -545,26 +548,36 @@ export function buildTasks(s: GameState): Task[] {
   if (cooking) {
     // ── 調理 ──
     const ordersWithoutBowl = orders.filter((o) => !bowlForOrder(s, o.id));
+    // 並べる丼の数は、盛り付け台が何台あっても注文の数だけ（台ごとに同じ注文の分を並べると、割り当てのない丼が余り、
+    // それに盛った麺やトッピングがほかの注文に回って提供ミスになっていた）。割り当てを待っている丼・従業員が運んでいる丼も数える
+    const spareBowls = s.bowls.filter(
+      (b) =>
+        b.orderId === null &&
+        (b.state === 'assembling' ||
+          (b.state === 'clean' && b.loc.at === 'station') ||
+          (b.state === 'clean' && b.loc.at === 'hand' && s.employees.some((x) => x.id === (b.loc as { actorId?: string }).actorId))),
+    ).length;
+    let bowlsToSet = Math.max(0, ordersWithoutBowl.length - spareBowls);
     for (const asm of placedRole(s, 'assembly')) {
       const on = bowlsOnAssembly(s, asm);
       const free = asm.bowlSlots.filter((x) => x === null).length;
       const cleanAtRack = s.bowls.filter((b) => b.state === 'clean' && b.loc.at === 'rack').length;
       // スープやトッピングに届かない盛り付け台には丼を並べない（完成できず詰まるため）
-      if (free > 0 && ordersWithoutBowl.length > 0 && cleanAtRack > 0 && racks[0] && assemblyFunctional(s, asm)) {
-        const n = Math.min(free, ordersWithoutBowl.length, 6);
+      // 麺を受けられない盛り付け台（近くに使える麺釜がない）にも並べない
+      const fed = placedRole(s, 'boiler').some((b) => isUsable(b) && linkedAssemblies(s, b).some((x) => x.id === asm.id));
+      if (free > 0 && bowlsToSet > 0 && cleanAtRack > 0 && racks[0] && assemblyFunctional(s, asm) && fed) {
+        const n = Math.min(free, bowlsToSet, 6);
+        bowlsToSet -= n;
         add('setBowls', `setBowls:${asm.id}`, [step(racks[0].id, 'bowls_take', { count: n }), step(asm.id, 'bowls_place')]);
       }
       if (on.some((x) => x.bowl.contents && x.bowl.contents.tare === 0) && stockOf(s, 'tare') > 30) add('tare', `tare:${asm.id}`, [step(asm.id, 'tare')]);
       if (on.some((x) => x.bowl.contents && x.bowl.contents.tare > 0 && x.bowl.contents.soupL === 0)) add('soup', `soup:${asm.id}`, [step(asm.id, 'soup')]);
-      const needTop = on.filter((x) => x.bowl.contents && x.bowl.contents.noodleG > 0 && !x.bowl.contents.steps.includes('toppings'));
+      // トッピングは、注文が決まっていてコールを聞いた丼だけに盛る（staffCanTop。注文のない丼に「そのまま」で盛ると、
+      // あとでほかの注文に回ってコール違いになる。コールを聞けないまま長く待った丼だけは「そのまま」で盛る）
+      const needTop = on.filter((x) => staffCanTop(s, x.bowl));
       // 豚やヤサイが切れているときは、補充できる見込みがある限り待ってから盛る（足りないまま出すとミスになる）
       const stocked = Object.entries(MIN_FOR_BOWL).every(([id, q]) => stockOf(s, id) >= q || !canReplenish(s, id));
-      if (needTop.length > 0 && stocked) {
-        const allAsked = needTop.every((x) => s.orders.find((o) => o.id === x.bowl.orderId)?.callRevealed ?? true);
-        // コール未確認のまま盛ると間違えるので、確認してから盛る（丼が冷めすぎる前に）
-        const oldest = Math.max(...needTop.map((x) => s.t - (x.bowl.contents?.startedAt ?? s.t)));
-        if (allAsked || oldest > 40) add('toppings', `toppings:${asm.id}`, [step(asm.id, 'toppings')]);
-      }
+      if (needTop.length > 0 && stocked) add('toppings', `toppings:${asm.id}`, [step(asm.id, 'toppings')]);
       for (const { slot, bowl } of on) {
         if (!isBowlComplete(bowl.contents) || !bowl.orderId) continue;
         const o = s.orders.find((x) => x.id === bowl.orderId);
@@ -576,11 +589,12 @@ export function buildTasks(s: GameState): Task[] {
     }
     for (const b of placedRole(s, 'boiler')) {
       const free = b.slots.filter((x) => x === null).length;
-      const need = orders.filter((o) => !noodlesStartedFor(s, o.id)).length;
+      // この麺釜で受けられる注文だけ（丼が届く盛り付け台にある・まだ丼がない注文。staffNoodleOrders）
+      const need = staffNoodleOrders(s, b).length;
       // 故障した釜でも、入っている麺は上げられる（新しく入れるのは不可）
       if (isUsable(b) && free > 0 && need > 0) add('noodlesIn', `noodlesIn:${b.id}`, [step(b.id, 'noodles_in')], Math.min(10, need));
-      // スープまで入った丼が待っているときだけ麺を上げる（麺だけ先に入れると品質が下がる）
-      const readyBowls = placedRole(s, 'assembly').some((a) => bowlsOnAssembly(s, a).some((x) => x.bowl.contents && x.bowl.contents.soupL > 0 && x.bowl.contents.noodleG === 0));
+      // スープまで入った丼が、この麺釜から届く盛り付け台で待っているときだけ麺を上げる（麺だけ先に入れると品質が下がる）
+      const readyBowls = linkedAssemblies(s, b).some((a) => bowlsOnAssembly(s, a).some((x) => x.bowl.contents && x.bowl.contents.soupL > 0 && x.bowl.contents.noodleG === 0));
       if (readyBowls && b.slots.some((x) => x && x.elapsed >= x.ideal - 1.5)) add('noodlesUp', `noodlesUp:${b.id}`, [step(b.id, 'noodles_up')]);
       if (b.slots.some((x) => x && x.elapsed > x.ideal + BALANCE.cooking.noodleBadWindow)) add('discard', `discard:${b.id}`, [step(b.id, 'noodles_discard')]);
     }

@@ -111,15 +111,16 @@ describe('自動発注と冷蔵庫の容量（統合進化設計書 v2.1 の測�
         runDay(s, ctx);
         nextDay(s, ctx);
       }
-      return s.history;
+      // 期限切れで捨てた在庫の額（買いすぎの損。ゆですぎの麺など調理の廃棄は日ごとのぶれが大きいので分ける）
+      const expired = ctx.events.filter((e) => e.type === 'waste' && (e.text ?? '').includes('期限切れ')).reduce((a, e) => a + (e.value ?? 0), 0);
+      return { h: s.history, expired };
     };
     const base = play(1);
     const over = play(3);
-    const served = (h: typeof base) => h.slice(3).reduce((a, r) => a + r.served, 0) / (h.length - 3);
-    const waste = (h: typeof base) => h.reduce((a, r) => a + r.waste, 0);
+    const served = (h: typeof base.h) => h.slice(3).reduce((a, r) => a + r.served, 0) / (h.length - 3);
     CHAOS_KINDS.forEach((k, i) => ((CHAOS[k] as { dayChance: number }).dayChance = saved[i]!));
-    expect(served(over)).toBeGreaterThan(20);
-    expect(waste(over)).toBeGreaterThan(waste(base));
+    expect(served(over.h)).toBeGreaterThan(20);
+    expect(over.expired).toBeGreaterThan(base.expired * 1.2);
   });
 });
 
