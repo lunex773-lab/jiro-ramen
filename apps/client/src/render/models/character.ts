@@ -108,6 +108,11 @@ class SkinBuilder {
   sw: number[] = [];
   idx: number[] = [];
 
+  /** 今までに足した頂点の数（範囲を覚えるため） */
+  get count(): number {
+    return this.pos.length / 3;
+  }
+
   add(geo: THREE.BufferGeometry, color: THREE.ColorRepresentation, bone: number, xf?: XForm): void {
     let g = geo;
     if (xf) {
@@ -383,7 +388,14 @@ function chooseLook(o: CharacterOpts): Look {
 
 // ───────────────────────── 体の組み立て ─────────────────────────
 
-function buildBody(look: Look): { geo: THREE.BufferGeometry; J: ReturnType<typeof joints> } {
+/** 金色覚醒のときに隠す頂点の範囲（髪・頭に付けた物）と、金色にする眉の範囲（[始め, 終わり)） */
+interface HairRanges {
+  hide: [number, number][];
+  brows: [number, number][];
+}
+
+function buildBody(look: Look): { geo: THREE.BufferGeometry; J: ReturnType<typeof joints>; hair: HairRanges } {
+  const hair: HairRanges = { hide: [], brows: [] };
   const J = joints(look.body);
   const s = look.body.s;
   const w = J.w;
@@ -410,14 +422,17 @@ function buildBody(look: Look): { geo: THREE.BufferGeometry; J: ReturnType<typeo
     sb.add(G.box(), new THREE.Color(skin).multiplyScalar(0.9), B.head, { y: headY - 0.008 * s, z: hr * 0.98, sx: 0.022 * s, sy: 0.034 * s, sz: 0.02 * s, rx: -0.2 });
     for (const sx of [1, -1]) {
       sb.add(G.sphere(6, 4), '#1a1410', B.head, { x: sx * 0.037 * s, y: headY + 0.012 * s, z: hr * 0.9, sx: 0.011 * s, sy: 0.014 * s, sz: 0.008 * s });
+      const browFrom = sb.count;
       sb.add(G.box(), look.hairColor, B.head, { x: sx * 0.038 * s, y: headY + 0.04 * s, z: hr * 0.9, sx: 0.034 * s, sy: 0.007 * s, sz: 0.01 * s, rz: sx * -0.12 });
+      hair.brows.push([browFrom, sb.count]);
     }
     sb.add(G.box(), '#9a5048', B.head, { y: headY - 0.045 * s, z: hr * 0.9, sx: 0.034 * s, sy: 0.007 * s, sz: 0.01 * s });
     if (look.glasses) {
       for (const sx of [1, -1]) sb.add(G.torus(), look.glassesColor, B.head, { x: sx * 0.038 * s, y: headY + 0.012 * s, z: hr * 0.98, sx: 0.022 * s, sy: 0.02 * s, sz: 0.02 * s });
       sb.add(G.box(), look.glassesColor, B.head, { y: headY + 0.016 * s, z: hr * 0.99, sx: 0.03 * s, sy: 0.004 * s, sz: 0.004 * s });
     }
-    // 髪
+    // 髪（金色覚醒のときは隠して、金色の逆立つ髪に変える）
+    const hairFrom = sb.count;
     const hc = look.hairColor;
     switch (look.hair) {
       case 'short':
@@ -461,6 +476,7 @@ function buildBody(look: Look): { geo: THREE.BufferGeometry; J: ReturnType<typeo
     if (look.ponytail && look.hair === 'cap') {
       sb.add(G.sphere(7, 5), hc, B.head, { y: headY - 0.03 * s, z: -hr * 1.06, sx: 0.03 * s, sy: 0.07 * s, sz: 0.028 * s, rx: 0.2 });
     }
+    hair.hide.push([hairFrom, sb.count]);
     // ひげ（髪の色）
     if (look.beard === 'stubble' || look.beard === 'full') {
       const c = look.beard === 'full' ? new THREE.Color(hc) : new THREE.Color(skin).lerp(new THREE.Color(hc), 0.45);
@@ -468,7 +484,8 @@ function buildBody(look: Look): { geo: THREE.BufferGeometry; J: ReturnType<typeo
     }
     if (look.beard === 'goatee') sb.add(G.box(), hc, B.head, { y: headY - 0.083 * s, z: hr * 0.8, sx: 0.04 * s, sy: 0.035 * s, sz: 0.03 * s, rx: -0.3 });
     if (look.beard === 'mustache' || look.beard === 'full') sb.add(G.box(), hc, B.head, { y: headY - 0.031 * s, z: hr * 0.93, sx: 0.052 * s, sy: 0.011 * s, sz: 0.012 * s });
-    // 頭に付ける物
+    // 頭に付ける物（金色覚醒のときは髪と一緒に隠す）
+    const hwFrom = sb.count;
     const hw = look.headColor;
     switch (look.headwear) {
       case 'towel':
@@ -497,6 +514,7 @@ function buildBody(look: Look): { geo: THREE.BufferGeometry; J: ReturnType<typeo
       case 'none':
         break;
     }
+    hair.hide.push([hwFrom, sb.count]);
   }
   // 首
   sb.add(G.cyl(7), skin, B.head, { y: neckY + 0.02 * s, sx: 0.05 * s, sy: 0.09 * s, sz: 0.05 * s });
@@ -616,7 +634,7 @@ function buildBody(look: Look): { geo: THREE.BufferGeometry; J: ReturnType<typeo
     // 靴
     sb.add(G.box(), look.shoes, shinBone, { x: lx, y: 0.035 * s, z: 0.035 * s, sx: 0.095 * s, sy: 0.07 * s, sz: 0.25 * s });
   }
-  return { geo: sb.build(), J };
+  return { geo: sb.build(), J, hair };
 }
 
 /** 宇宙人の頭: 大きな卵形の頭・黒いアーモンド形の目・小さな口・触角 */
@@ -650,43 +668,114 @@ function bearHead(sb: SkinBuilder, look: Look, headY: number, s: number): void {
   sb.add(G.box(), '#3a2418', B.head, { y: headY - hr * 0.5, z: hr * 1.04, sx: hr * 0.2, sy: 0.006 * s, sz: 0.01 * s });
 }
 
-/** 金色覚醒の逆立つ髪（頭の骨に付ける別のメッシュ。光らせる） */
-function goldenHair(s: number): THREE.Mesh {
-  const g = cached(`ch:goldhair${Math.round(s * 100)}`, () => {
-    const parts: THREE.BufferGeometry[] = [];
-    const hr = 0.108 * s;
-    for (let ring = 0; ring < 3; ring++) {
-      const n = 7 - ring * 2;
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2 + ring * 0.5;
-        const rad = hr * (0.75 - ring * 0.3);
-        const len = (0.17 + ring * 0.05) * s;
-        const c = new THREE.ConeGeometry(0.038 * s, len, 5);
-        c.translate(0, len / 2, 0);
-        const tilt = 0.55 - ring * 0.25;
-        c.rotateX(Math.sin(a) * tilt - 0.2);
-        c.rotateZ(-Math.cos(a) * tilt);
-        c.translate(Math.cos(a) * rad, hr * (0.55 + ring * 0.25), Math.sin(a) * rad - 0.01 * s);
-        parts.push(c.toNonIndexed());
-      }
-    }
-    // つなげて1つの形に
-    let count = 0;
-    for (const p of parts) count += p.attributes.position!.count;
-    const pos = new Float32Array(count * 3);
-    let o = 0;
-    for (const p of parts) {
-      pos.set(p.attributes.position!.array as Float32Array, o);
-      o += p.attributes.position!.count * 3;
-      p.dispose();
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.computeVertexNormals();
-    return geo;
+/** 頂点の位置だけの形をつなげて1つにする（法線は作り直す） */
+function mergePositions(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  let count = 0;
+  const flat = parts.map((p) => {
+    const q = p.index ? p.toNonIndexed() : p;
+    count += q.attributes.position!.count;
+    return q;
   });
-  const m = cached('ch:goldhairmat', () => new THREE.MeshStandardMaterial({ color: '#ffd23a', emissive: '#ffb000', emissiveIntensity: 0.9, roughness: 0.35, metalness: 0.2 }));
-  return new THREE.Mesh(g, m);
+  const pos = new Float32Array(count * 3);
+  let o = 0;
+  for (const q of flat) {
+    pos.set(q.attributes.position!.array as Float32Array, o);
+    o += q.attributes.position!.count * 3;
+  }
+  for (const p of parts) p.dispose();
+  for (const q of flat) q.dispose();
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * 金色覚醒の髪（頭の骨に付ける別のメッシュ。光らせる）。元の髪は隠し（setOwnHair）、頭全体をおおう金色の髪にする:
+ * 頭をおおう土台（前は眉より上・後ろはうなじまで）と、上・後ろへ大きく逆立つ房・横の房・もみあげ・額にかかる前髪。
+ * 顔（目・鼻・口）は見えるように、前髪は眉の上で止める。頭の中心が原点（+Z が顔の前）
+ */
+function goldenHair(s: number): { group: THREE.Group; spikes: THREE.Mesh } {
+  const hr = 0.108 * s;
+  const capGeo = cached(`ch:goldcap2${Math.round(s * 100)}`, () => {
+    // 頭の形（少し縦長の楕円）に合わせた土台。生え際は前で高く（眉より上）、横は耳をおおい、後ろはうなじまで下がる
+    const r = hr * 1.07;
+    const g = new THREE.SphereGeometry(r, 28, 18, 0, Math.PI * 2, 0, (132 * Math.PI) / 180);
+    const p = g.attributes.position as THREE.BufferAttribute;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i);
+      const theta = Math.acos(THREE.MathUtils.clamp(v.y / r, -1, 1));
+      // 前（+Z）からの角度（0 = 前、180 = 後ろ）
+      const front = (Math.abs(Math.atan2(v.x, v.z)) * 180) / Math.PI;
+      const maxDeg = front < 40 ? 60 : front < 85 ? 60 + ((front - 40) / 45) * 46 : 106 + ((front - 85) / 95) * 24;
+      const max = (maxDeg * Math.PI) / 180;
+      if (theta <= max) continue;
+      const az = Math.atan2(v.z, v.x);
+      p.setXYZ(i, Math.sin(max) * Math.cos(az) * r, Math.cos(max) * r, Math.sin(max) * Math.sin(az) * r);
+    }
+    g.scale(0.98, 1.1, 1.05);
+    g.computeVertexNormals();
+    return g;
+  });
+  const spikeGeo = cached(`ch:goldspikes${Math.round(s * 100)}`, () => {
+    const parts: THREE.BufferGeometry[] = [];
+    const up = new THREE.Vector3(0, 1, 0);
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    /** 房1本: theta = 真上からの角度（度）、phi = 前（+Z）から右回りの角度（度）、len・rad = 頭の半径に対する長さ・太さ、dir = 向き（法線に足す上・後ろ・前の量） */
+    const spike = (theta: number, phi: number, len: number, rad: number, lift: number, back: number) => {
+      const t = (theta * Math.PI) / 180;
+      const f = (phi * Math.PI) / 180;
+      const n = new THREE.Vector3(Math.sin(t) * Math.sin(f), Math.cos(t), Math.sin(t) * Math.cos(f));
+      const base = new THREE.Vector3(n.x * 0.97, n.y * 1.1, n.z * 1.04).multiplyScalar(hr * 0.88);
+      const d = n.clone().addScaledVector(up, lift).add(new THREE.Vector3(0, 0, -back)).normalize();
+      const L = len * hr;
+      const c = new THREE.ConeGeometry(rad * hr, L, 5);
+      c.translate(0, L / 2, 0);
+      c.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(yAxis, d));
+      c.translate(base.x, base.y, base.z);
+      parts.push(c);
+    };
+    // 頭のてっぺん: 上と後ろへ大きく逆立つ
+    spike(4, 180, 2.5, 0.46, 0.9, 0.35);
+    for (const ph of [0, 72, 144, 216, 288]) spike(24, ph, 2.3, 0.44, 0.85, 0.3);
+    // 上の輪: 外へ開きながら上と後ろへ
+    for (const ph of [36, 108, 180, 252, 324]) spike(48, ph, 2.0, 0.42, 0.65, 0.35);
+    for (const ph of [70, 290]) spike(58, ph, 1.6, 0.4, 0.55, 0.15);
+    // 後ろ: 後ろへ流れる房と、うなじへ下がる房
+    for (const ph of [140, 180, 220]) spike(85, ph, 1.7, 0.42, 0.25, 0.55);
+    for (const ph of [155, 205]) spike(108, ph, 1.2, 0.36, -0.15, 0.45);
+    for (const ph of [130, 180, 230]) spike(122, ph, 0.9, 0.3, -0.45, 0.3);
+    // 横: 耳の上で外へ大きく張り出す房（少し上と後ろへ）
+    for (const ph of [92, 268]) spike(76, ph, 1.45, 0.38, 0.35, 0.15);
+    for (const ph of [115, 245]) spike(90, ph, 1.45, 0.38, 0.12, 0.3);
+    for (const ph of [105, 255]) spike(104, ph, 0.95, 0.3, -0.2, 0.25);
+    // もみあげ（耳の前に下がる）
+    for (const ph of [80, 280]) spike(98, ph, 0.62, 0.22, -0.9, -0.05);
+    // 前: 額の上で上へ立つ房と、眉の上で止まる前髪（目にはかからない）
+    spike(32, 0, 1.6, 0.4, 0.85, -0.12);
+    for (const ph of [-26, 0, 26]) {
+      const t = (52 * Math.PI) / 180;
+      const f = (ph * Math.PI) / 180;
+      const base = new THREE.Vector3(Math.sin(t) * Math.sin(f) * 0.97, Math.cos(t) * 1.1, Math.sin(t) * Math.cos(f) * 1.04).multiplyScalar(hr * 0.92);
+      const d = new THREE.Vector3(Math.sin(f) * 0.35, -0.5, 0.9).normalize();
+      const L = 0.68 * hr;
+      const c = new THREE.ConeGeometry(0.3 * hr, L, 5);
+      c.translate(0, L / 2, 0);
+      c.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(yAxis, d));
+      c.translate(base.x, base.y, base.z);
+      parts.push(c);
+    }
+    return mergePositions(parts);
+  });
+  const capMat = cached('ch:goldcapmat', () => new THREE.MeshStandardMaterial({ color: '#ffcf33', emissive: '#ff9f00', emissiveIntensity: 0.55, roughness: 0.4, metalness: 0.15 }));
+  const spikeMat = cached('ch:goldhairmat2', () => new THREE.MeshStandardMaterial({ color: '#ffe066', emissive: '#ffb000', emissiveIntensity: 0.75, roughness: 0.35, metalness: 0.15, flatShading: true }));
+  const group = new THREE.Group();
+  group.name = 'golden-hair';
+  const cap = new THREE.Mesh(capGeo, capMat);
+  const spikes = new THREE.Mesh(spikeGeo, spikeMat);
+  group.add(cap, spikes);
+  return { group, spikes };
 }
 
 // ───────────────────────── マテリアル・名札 ─────────────────────────
@@ -752,7 +841,7 @@ function setRot(p: PoseBuf, bone: number, x: number, y: number, z: number): void
 
 export function createCharacter(opts: CharacterOpts): CharacterModel {
   const look = chooseLook(opts);
-  const { geo, J } = buildBody(look);
+  const { geo, J, hair: hairRanges } = buildBody(look);
   const s = look.body.s;
 
   // 骨
@@ -840,8 +929,45 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
   let eatM: EatMotion | null = null;
   let act: CharacterAct | null = null;
   // 金色覚醒（必要になったときに作る）
-  let gold: { hair: THREE.Mesh; aura: AuraModel } | null = null;
+  let gold: { hair: THREE.Group; spikes: THREE.Mesh; aura: AuraModel; on: boolean } | null = null;
   let goldPower = 0;
+  // 金色覚醒のあいだ、元の髪・頭に付けた物を隠す（頂点を頭の中の1点に集める）。眉は金色に。戻すときは控えから戻す
+  let hairBackup: { pos: Float32Array; col: Float32Array } | null = null;
+  function setOwnHair(hidden: boolean): void {
+    if (hairRanges.hide.length === 0 && hairRanges.brows.length === 0) return;
+    const pa = geo.attributes.position as THREE.BufferAttribute;
+    const ca = geo.attributes.color as THREE.BufferAttribute;
+    if (!hairBackup) {
+      if (!hidden) return;
+      hairBackup = { pos: (pa.array as Float32Array).slice(), col: (ca.array as Float32Array).slice() };
+    }
+    const P = pa.array as Float32Array;
+    const C = ca.array as Float32Array;
+    const headCenterY = neckY + 0.13 * s;
+    for (const [a, b] of hairRanges.hide) {
+      for (let i = a; i < b; i++) {
+        if (hidden) {
+          P[i * 3] = 0;
+          P[i * 3 + 1] = headCenterY;
+          P[i * 3 + 2] = 0;
+        } else {
+          P[i * 3] = hairBackup.pos[i * 3]!;
+          P[i * 3 + 1] = hairBackup.pos[i * 3 + 1]!;
+          P[i * 3 + 2] = hairBackup.pos[i * 3 + 2]!;
+        }
+      }
+    }
+    const goldBrow = new THREE.Color('#f2b51c');
+    for (const [a, b] of hairRanges.brows) {
+      for (let i = a; i < b; i++) {
+        C[i * 3] = hidden ? goldBrow.r : hairBackup.col[i * 3]!;
+        C[i * 3 + 1] = hidden ? goldBrow.g : hairBackup.col[i * 3 + 1]!;
+        C[i * 3 + 2] = hidden ? goldBrow.b : hairBackup.col[i * 3 + 2]!;
+      }
+    }
+    pa.needsUpdate = true;
+    ca.needsUpdate = true;
+  }
 
   function computePose(pose: CharacterPose, t: number, speed: number): void {
     target.rot.fill(0);
@@ -1153,7 +1279,9 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
         group.rotation.x += (1.25 - group.rotation.x) * clamp(dt * 3, 0, 1);
       } else if (group.rotation.x !== 0) group.rotation.x = 0;
       if (gold) {
-        goldPower += ((gold.hair.visible ? 1 : 0) - goldPower) * clamp(dt * 2.5, 0, 1);
+        goldPower += ((gold.on ? 1 : 0) - goldPower) * clamp(dt * 2.5, 0, 1);
+        // 覚醒すると、金色の房が下から伸びて逆立つ（土台はすぐに出る）
+        gold.spikes.scale.setScalar(0.35 + 0.65 * goldPower);
         gold.aura.update(t, goldPower);
         gold.aura.group.position.y = cur.hipsY - hipsY;
       }
@@ -1165,13 +1293,15 @@ export function createCharacter(opts: CharacterOpts): CharacterModel {
       const on = !!fx && fx.golden > 0;
       if (!on && !gold) return;
       if (!gold) {
-        const hair = goldenHair(s);
-        hair.position.set(0, 0.13 * s, 0);
-        bones[B.head]!.add(hair);
+        const h = goldenHair(s);
+        h.group.position.set(0, 0.13 * s, 0);
+        bones[B.head]!.add(h.group);
         const aura = createAura(1.8 * s);
         group.add(aura.group);
-        gold = { hair, aura };
+        gold = { hair: h.group, spikes: h.spikes, aura, on: false };
       }
+      if (gold.on !== on) setOwnHair(on);
+      gold.on = on;
       gold.hair.visible = on;
     },
     setHeld(kind) {
