@@ -11,7 +11,6 @@ import {
   type GameState,
   type SlotInfo,
   reportFinalProfit,
-  SLOW_EVENTS,
 } from '@jiro/core';
 import type { Settings } from '../game/settings';
 import { serverUrlCard } from './server-url';
@@ -352,44 +351,19 @@ export function settingsScreen(st: Settings, onChange: (s: Settings) => void, on
       ),
       h('p', { class: 'note' }, '動きが重いときは、描画の細かさを自動で下げます（画質はその上限です）。'),
       toggle('動作の重さを表示（fps）', 'showFps'),
+      // 倍速の解除（どのイベントで解除するか・説明は出さない。イベントのネタバレになる。オーナーの指示 2026-11-13）
       toggle('イベントが起きたら倍速を解除する', 'slowOnEvents'),
       h(
-        'div',
-        { class: 'slow-events', 'data-slow-events': '' },
+        'label',
+        { class: 'kv' },
+        h('span', null, '解除したときの速さ'),
         h(
-          'label',
-          { class: 'kv' },
-          h('span', null, '解除したときの速さ'),
-          h(
-            'select',
-            { class: 'select', 'data-slow-speed': '', onchange: (e: Event) => { cur.slowSpeed = Number((e.target as HTMLSelectElement).value) === 2 ? 2 : 1; update(); } },
-            h('option', { value: '1', selected: cur.slowSpeed !== 2 }, '等倍（×1）'),
-            h('option', { value: '2', selected: cur.slowSpeed === 2 }, '2倍（×2）'),
-          ),
-        ),
-        h('p', { class: 'note' }, '解除するイベント:'),
-        h(
-          'div',
-          { class: 'row wrap' },
-          SLOW_EVENTS.map((x) =>
-            h(
-              'label',
-              { class: 'chip-check' },
-              h('input', {
-                type: 'checkbox',
-                'data-slow-event': x.key,
-                checked: cur.slowEvents?.[x.key] !== false,
-                onchange: (e: Event) => {
-                  cur.slowEvents = { ...(cur.slowEvents ?? {}), [x.key]: (e.target as HTMLInputElement).checked };
-                  update();
-                },
-              }),
-              h('span', null, x.label),
-            ),
-          ),
+          'select',
+          { class: 'select', 'data-slow-speed': '', onchange: (e: Event) => { cur.slowSpeed = Number((e.target as HTMLSelectElement).value) === 2 ? 2 : 1; update(); } },
+          h('option', { value: '1', selected: cur.slowSpeed !== 2 }, '等倍（×1）'),
+          h('option', { value: '2', selected: cur.slowSpeed === 2 }, '2倍（×2）'),
         ),
       ),
-      h('p', { class: 'note' }, 'オンにすると、選んだイベントが起きたときに倍速を解除し、終わるまで選んだ速さ（等倍か2倍）より速くしません。もともとそれより遅い速さ（×1 など）のときはそのままです。店の火事・武器の事件の間は、この設定に関係なく等倍です。何も起きなければ、倍速は次の日もそのまま続きます。'),
       h(
         'label',
         { class: 'kv' },

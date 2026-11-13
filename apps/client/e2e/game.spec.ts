@@ -249,10 +249,15 @@ test('開店すると時計が進み、客が来店する', async ({ page }) => 
   await shot(page, '05-open');
 });
 
-test('イベントが起きたら倍速を解除して等倍に戻し、終わるまで等倍。設定でオフにできる。何もなければ倍速は次の日も続く（2026-11-13）', async ({ page }) => {
-  await startNewGame(page);
-  type St = { phase: string; openT: number; events?: { buzz?: unknown } };
-  type App = { __jiro: { host: { state: St; speed: number; tick(dt: number): void; act(a: unknown): Promise<{ ok: boolean }> } } };
+test('イベントが起きたら倍速を解除して等倍に戻し、終わるまで等倍。解除したときの速さは2倍にもでき、設定でオフにできる。設定にイベントの名前は出ない（2026-11-13）', async ({ page }) => {
+  await startNewGame(page, '/?debug=1');
+  type St = { day: number; phase: string; openT: number; customers: { state: string; special?: { kind: string } | null }[]; events?: { buzz?: unknown } };
+  type App = { __jiro: { host: { state: St; speed: number; tick(dt: number): void } } };
+  // 解除するイベント（オーナーが選んだもの）のうち、クマを次の新規の客で起こす（4日目から起きるので6日目にする）
+  await page.evaluate(() => {
+    (window as unknown as App).__jiro.host.state.day = 6;
+  });
+  await forceEvent(page, 'bear');
   await page.getByRole('button', { name: /開店する/ }).click();
   await expect.poll(async () => page.evaluate(() => (window as unknown as App).__jiro.host.state.phase), { timeout: 10_000 }).toBe('open');
   const speed = page.locator('.hud .chip', { hasText: /^×\d$/ });
@@ -260,26 +265,42 @@ test('イベントが起きたら倍速を解除して等倍に戻し、終わ�
   await expect(speed).toHaveText('×2');
   // 倍速は設定に残る（次の日・次に始めたときもそのまま）
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('jiro.settings') ?? '{}').gameSpeed)).toBe(2);
-  // SNS のバズが始まる → 等倍に戻り、知らせが出る。バズの間は倍速にできない
+  // SNS のバズでは解除しない（オーナーが選んだイベントではない）
   await page.evaluate(() => {
     const s = (window as unknown as App).__jiro.host.state;
     s.events = s.events ?? {};
     s.events.buzz = { id: 'bz-e2e', startT: s.openT, endT: s.openT + 3000, mult: 2 };
   });
+  await page.waitForTimeout(400);
+  await expect(speed).toHaveText('×2');
+  // クマが来る → 等倍に戻り、知らせが出る。いる間は倍速にできない
+  const bear = await page.evaluate(() => {
+    const app = (window as unknown as App).__jiro;
+    for (let i = 0; i < 3000; i++) {
+      if (app.host.state.customers.some((c) => c.special?.kind === 'bear' && c.state !== 'left')) return true;
+      app.host.tick(0.1);
+    }
+    return false;
+  });
+  expect(bear).toBe(true);
   await expect(speed).toHaveText('×1');
   await expect(page.locator('.toast').filter({ hasText: '等倍' }).first()).toBeVisible();
   await speed.click();
   await expect(speed).toHaveText('×1');
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('jiro.settings') ?? '{}').gameSpeed)).toBe(1);
   await shot(page, 'speed-event-lock');
-  // 設定で解除したときの速さを2倍にすると、バズの間も×2までは上げられる（×3 は飛ばして ×1 へ。オーナーの指示 2026-11-13）
   const closeSettings = async () => {
     await page.getByRole('button', { name: '閉じる' }).last().click();
     await expect(page.locator('.settings')).toHaveCount(0);
     if ((await page.locator('.manage').count()) > 0) await press(page.locator('.manage .close, .manage [data-close]').first());
     await expect(page.locator('.manage')).toHaveCount(0);
   };
+  // 設定には、どのイベントで解除するか・説明を出さない（ネタバレになる。オーナーの指示 2026-11-13）
   await openSettings(page);
+  const settingsText = (await page.locator('.settings').textContent()) ?? '';
+  for (const w of ['UFO', 'クマ', 'YouTuber', 'テレビ', '珍客', '金色', 'バウンス', '確認待ち']) expect(settingsText).not.toContain(w);
+  await expect(page.locator('[data-slow-event]')).toHaveCount(0);
+  // 解除したときの速さを2倍にすると、クマの間も×2までは上げられる（×3 は飛ばして ×1 へ）
   await page.locator('[data-slow-speed]').selectOption('2');
   await closeSettings();
   await speed.click();
@@ -288,27 +309,19 @@ test('イベントが起きたら倍速を解除して等倍に戻し、終わ�
   await expect(speed).toHaveText('×1');
   await speed.click();
   await expect(speed).toHaveText('×2');
-  // ×5 で遊んでいるときにバズが起きると ×2 まで下がる
+  // ×5 で遊んでいるときは ×2 まで下がる
   await page.evaluate(() => {
-    (window as unknown as { __jiro: { host: { speed: number } } }).__jiro.host.speed = 5;
+    (window as unknown as App).__jiro.host.speed = 5;
   });
   await expect(speed).toHaveText('×2');
-  // 解除するイベントから SNS のバズを外すと、バズの間も ×3 以上にできる
+  // 「イベントが起きたら倍速を解除する」をオフにすると、イベントの間も倍速にできる
   await openSettings(page);
-  await expect(page.locator('[data-slow-event]')).toHaveCount(8);
-  await page.locator('[data-slow-event="buzz"]').uncheck();
-  await closeSettings();
-  await speed.click();
-  await expect(speed).toHaveText('×3');
-  // 設定で「イベントが起きたら倍速を解除する」をオフにすると、どのイベントの間も倍速にできる
-  await openSettings(page);
-  await page.locator('[data-slow-event="buzz"]').check();
   const toggle = page.locator('label.kv', { hasText: 'イベントが起きたら倍速を解除する' }).locator('input');
   await expect(toggle).toBeChecked();
   await toggle.uncheck();
   await closeSettings();
   await speed.click();
-  await expect(speed).toHaveText('×5');
+  await expect(speed).toHaveText('×3');
 });
 
 test('経営メニューとレイアウト編集が開ける', async ({ page }) => {
