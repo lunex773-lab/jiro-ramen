@@ -32,7 +32,7 @@ import { planManagerDay, runManagerDay, standaloneArrivals } from './sim/manager
 import { makeCtx, type SimCtx } from './sim/notices';
 import { cleanStoreName, openStoreProblem, runAbsentStores, storeStatus } from './sim/stores';
 import { locationLabel, locationProblem, MARKET_SCOPE_LABEL, MARKET_SCOPES } from './sim/location';
-import { creditOp, creditsFor, exitCredits, flushCredits, settleCredits, type CompanyCredit, type CreditOp, type CreditResult, type PendingCredit } from './credit';
+import { ackDeliveries, creditOp, creditsFor, exitCredits, flushCredits, inboxOf, settleCredits, type CompanyCredit, type CreditDelivery, type CreditOp, type CreditResult, type DeliveryView, type PendingCredit } from './credit';
 
 export const MARKET_SCHEMA = 2;
 
@@ -266,6 +266,8 @@ export interface MarketState {
   creditSeq?: number;
   /** 端末で営業中の会社に、営業が終わったら入れるお金 */
   pendingCredits?: PendingCredit[];
+  /** 端末で営業中の会社への、企業間の貸し借りのお金の届け物（credit.ts。すぐ届ける） */
+  creditDeliveries?: CreditDelivery[];
   /** 設定の変更の記録（新しいものが後ろ。最大50件。古い市場にはない） */
   settingsLog?: SettingsChange[];
 }
@@ -931,7 +933,9 @@ export function commitDay(m: MarketState, ownerId: string, now: number, token: s
     log(m, c.id, `${o.gameDate}日目は0時から30分を過ぎても届かなかったため無効になりました`, o.gameDate);
     return done({ ok: false, code: 'expired', reason: '0時から30分を過ぎたため、この日は無効になりました。前の日の状態からやり直してください' });
   }
-  const v = verifyCommit(c.state, next, { gameDate: o.gameDate, demand: o.demand });
+  // 営業中に届けた企業間の貸し借りのお金（端末が入れた入金はこれと合えば受け取る）
+  const credits = (m.creditDeliveries ?? []).filter((d) => d.companyId === c.id && d.status !== 'refused').map((d) => ({ key: d.id, amount: d.amount }));
+  const v = verifyCommit(c.state, next, { gameDate: o.gameDate, demand: o.demand, credits });
   if (v.reject.length > 0) {
     c.openDay = null;
     c.progress.synchronizationStatus = 'idle';
@@ -1586,6 +1590,20 @@ export function marketAction(m: MarketState, ownerId: string, a: Action, now = 0
 }
 
 /** 企業間の貸し借りの操作（申し込む・承認する・断る・取り消す・前倒しで返す）。サーバーだけが呼ぶ */
+/** 自分の会社の端末がまだ受け取っていない、企業間の貸し借りのお金の届け物 */
+export function marketCreditInbox(m: MarketState, ownerId: string): DeliveryView[] {
+  const me = playerCompany(m, ownerId);
+  return me ? inboxOf(m, me.id) : [];
+}
+
+/** 端末からの返事（届け物を入れた・断った）。すぐ続き（貸し出しの成立・返済の完了）を行う */
+export function marketCreditAck(m: MarketState, ownerId: string, acks: { id: string; applied: boolean }[], now: number): { ok: boolean; reason?: string } {
+  const me = playerCompany(m, ownerId);
+  if (!me) return { ok: false, reason: 'この市場に参加していません' };
+  ackDeliveries(m, me, acks, now);
+  return { ok: true };
+}
+
 export function marketCredit(m: MarketState, ownerId: string, op: CreditOp, now: number): CreditResult {
   const me = playerCompany(m, ownerId);
   if (!me) return { ok: false, reason: 'この市場に参加していません' };

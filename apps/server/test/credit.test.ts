@@ -117,4 +117,36 @@ describe('企業間の貸し借り（サーバー）', () => {
     expect(reloaded.body.mine!.credits.map((x) => x.status)).toEqual(['active']);
     expect(reloaded.body.mine!.state.money).toBe(b0 + 100_000);
   });
+
+  it('すぐ反映（2026-11-13）: 貸し手が端末で営業中なら、承認した貸し出しは貸し手の端末に届き、返事が来たらすぐ借り手に入る', async () => {
+    const a = await newPlayer('即時の貸し手');
+    const b = await newPlayer('即時の借り手');
+    const m = await create(a, '即時貸し亭', { aiFill: false, maxCompanies: 4 });
+    expect((await callJson('/api/v1/market/join', { token: b.token, body: { code: m.code, companyName: '即時借り軒' } })).status).toBe(200);
+    const vb = await view(b, m.marketId);
+    const borrowerId = vb.body.mine!.companyId;
+    const b0 = vb.body.mine!.state.money;
+    const va = await view(a, m.marketId);
+    const st = await callJson('/api/v1/market/' + m.marketId + '/day/start', { token: a.token, body: { token: `tok-now-${Date.now().toString(36)}`, baseVersion: va.body.mine!.progress.stateVersion } });
+    expect(st.status, JSON.stringify(st.body)).toBe(200);
+    const o = await credit(a, m.marketId, { op: 'offer', borrowerId, amount: 100_000, days: 5, dailyRate: 0 });
+    expect(o.body.ok).toBe(true);
+    expect((await credit(b, m.marketId, { op: 'accept', creditId: o.body.creditId! })).body).toMatchObject({ ok: true, status: 'approved' });
+    // 貸し手の端末が受け取る
+    const inbox = await callJson<{ ok: boolean; inbox: { id: string; amount: number; needsFunds?: boolean }[] }>(`/api/v1/market/${m.marketId}/credit/inbox`, { token: a.token });
+    expect(inbox.status).toBe(200);
+    expect(inbox.body.inbox).toEqual([expect.objectContaining({ amount: -100_000, needsFunds: true })]);
+    // ほかの人には見えない
+    expect((await callJson<{ inbox: unknown[] }>(`/api/v1/market/${m.marketId}/credit/inbox`, { token: b.token })).body.inbox).toEqual([]);
+    // 入れたと返事をすると、すぐ借り手に入る
+    const ack = await callJson(`/api/v1/market/${m.marketId}/credit/ack`, { token: a.token, body: { acks: [{ id: inbox.body.inbox[0]!.id, applied: true }] } });
+    expect(ack.status, JSON.stringify(ack.body)).toBe(200);
+    const after = await view(b, m.marketId);
+    expect(after.body.mine!.credits.map((x) => x.status)).toEqual(['active']);
+    expect(after.body.mine!.state.money).toBe(b0 + 100_000);
+    await evictDurableObject(stub(m.marketId));
+    expect((await view(b, m.marketId)).body.mine!.state.money).toBe(b0 + 100_000);
+    // 形の違う返事は断る
+    expect((await callJson(`/api/v1/market/${m.marketId}/credit/ack`, { token: a.token, body: { acks: [{ id: 1, applied: 'yes' }] } })).status).toBe(400);
+  });
 });

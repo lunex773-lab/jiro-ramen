@@ -551,7 +551,11 @@ export class ManageMenu {
         try {
           const r = await session.api.creditMarket(session.auth.token, session.marketId, `cr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, op);
           if (!r.ok) toast(this.root, r.reason ?? 'できませんでした', 'warn');
-          else toast(this.root, okMsg, 'good', 1800);
+          else {
+            toast(this.root, okMsg, 'good', 1800);
+            // 自分の会社に動くお金（届け物）は、すぐ入れる
+            if (r.inbox && r.inbox.length > 0) await session.syncCredits(this.host.state, r.inbox);
+          }
         } catch (e) {
           toast(this.root, (e as Error)?.message ?? String(e), 'warn');
         }
@@ -560,7 +564,7 @@ export class ManageMenu {
       },
     });
     return card
-      ? h('div', null, card, h('p', { class: 'note' }, '営業中でも申し込み・承認ができます。お金は、この日の営業を送ったあと（日の確定のあと）に動きます。前倒しの返済も、日の確定のあとに返します。'))
+      ? h('div', null, card, h('p', { class: 'note' }, '営業中でも申し込み・承認・前倒しの返済ができ、お金はすぐ動きます（相手が端末で営業中なら、相手の端末に数秒で届きます）。'))
       : null;
   }
 

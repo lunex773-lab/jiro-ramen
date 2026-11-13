@@ -7,8 +7,10 @@
 //   ・借り手はいつでも前倒しで全部返せる（その日までの利息）
 //   ・借り手が抜けた・破産した・市場が終わったときは、現金から返せるだけ返し、残りは貸し手の損
 //
-// 端末で営業中の会社のお金は動かせない（日の終わりに端末から届く状態と合わなくなる）。営業中の会社に入るお金は、
-// 営業が終わったとき（日の確定・無効・同期）に入れる。営業中の会社から出るお金（承認・返済）は、営業中は動かさない。
+// お金はすぐ動かす（オーナーの判断 2026-11-13「貸し借りは即反映」）。端末で営業中の会社のお金はサーバーでは動かせない
+// （日の終わりに端末から届く状態で置き換わる）ので、「届け物」（CreditDelivery）にして端末へ届ける。営業中の端末は数秒ごとに
+// 届け物を受け取り、自分の状態に入れて返事をする（出金はお金が足りるか確かめ、足りなければ断る）。返事が来たら続き（貸し出しの成立・
+// 返済の完了）をすぐ行う。端末が受け取らないまま営業が終わったとき（日の確定・無効・同期）は、サーバーの状態に入れる。
 // 同じ操作の送り直しはサーバーの操作の ID で一度だけ（MarketRoom）。契約の状態で二重に動かさない。
 
 import { BALANCE } from './data/balance';
@@ -80,7 +82,7 @@ export interface CompanyCredit {
   events: CreditEvent[];
 }
 
-/** 営業が終わったら入れるお金 */
+/** 前の版の「営業が終わったら入れるお金」（読み込んだら届け物にする） */
 export interface PendingCredit {
   companyId: Id;
   amount: number;
@@ -89,12 +91,61 @@ export interface PendingCredit {
   key: string;
 }
 
+/**
+ * 端末で営業中の会社への届け物（入金は正・出金は負）。id は取引の key と同じ（端末で二重に入れない）。
+ * needsFunds: 出金で、端末のお金が足りるか確かめてから（足りなければ断る）。then: 端末が入れたあとの続き（lend:<契約> / repay:<契約>）
+ */
+export interface CreditDelivery {
+  id: string;
+  companyId: Id;
+  amount: number;
+  type: TxnType;
+  memo: string;
+  needsFunds?: boolean;
+  status: 'pending' | 'applied' | 'refused';
+  then?: string;
+  at: number;
+}
+
+/** 端末に渡す届け物 */
+export interface DeliveryView {
+  id: string;
+  amount: number;
+  type: TxnType;
+  memo: string;
+  needsFunds?: boolean;
+}
+
 const C = () => BALANCE.market.credit;
 const OPEN: CreditStatus[] = ['active', 'overdue', 'defaulted'];
 const yen = (n: number) => `¥${Math.round(n).toLocaleString('ja-JP')}`;
 
 export function creditsOf(m: MarketState): CompanyCredit[] {
   return (m.credits ??= []);
+}
+
+/** 届け物の一覧（前の版の「営業が終わったら入れるお金」は届け物にする） */
+export function deliveriesOf(m: MarketState): CreditDelivery[] {
+  const list = (m.creditDeliveries ??= []);
+  if (m.pendingCredits && m.pendingCredits.length > 0) {
+    for (const p of m.pendingCredits) {
+      if (!list.some((d) => d.id === p.key)) list.push({ id: p.key, companyId: p.companyId, amount: p.amount, type: p.type, memo: p.memo, status: 'pending', at: 0 });
+    }
+    m.pendingCredits = [];
+  }
+  return list;
+}
+
+function deliver(m: MarketState, d: CreditDelivery): void {
+  const list = deliveriesOf(m);
+  if (!list.some((x) => x.id === d.id)) list.push(d);
+}
+
+/** その会社の端末がまだ受け取っていない届け物（端末に渡す形） */
+export function inboxOf(m: MarketState, companyId: Id): DeliveryView[] {
+  return deliveriesOf(m)
+    .filter((d) => d.companyId === companyId && d.status === 'pending')
+    .map((d) => ({ id: d.id, amount: d.amount, type: d.type, memo: d.memo, ...(d.needsFunds ? { needsFunds: true } : {}) }));
 }
 
 /** 返している最中の契約か */
@@ -164,11 +215,11 @@ export function refreshCreditBook(m: MarketState): void {
   }
 }
 
-/** お金を入れる（営業中なら、営業が終わってから） */
-function payIn(m: MarketState, c: MarketCompany, amount: number, type: TxnType, memo: string, key: string): void {
+/** お金を入れる（端末で営業中なら、端末へ届ける。すぐ届く） */
+function payIn(m: MarketState, c: MarketCompany, amount: number, type: TxnType, memo: string, key: string, now = 0): void {
   if (amount <= 0) return;
   if (busy(c)) {
-    (m.pendingCredits ??= []).push({ companyId: c.id, amount, type, memo, key });
+    deliver(m, { id: key, companyId: c.id, amount, type, memo, status: 'pending', at: now });
     return;
   }
   cash(c.state, type, amount, memo, key);
@@ -193,24 +244,65 @@ function applyPayment(cr: CompanyCredit, pay: number): void {
   cr.paid += pay;
 }
 
-/** 営業が終わった会社に、待っていたお金を入れ、承認済みの貸し出しを動かす */
+/**
+ * 営業が終わった会社（日の確定・無効・同期）の届け物を片付け、承認済みの貸し出しを動かす。
+ * 端末が入れて確定した届け物（状態の appliedCredits にある）はそのまま。端末が入れないまま終わった届け物は、サーバーの状態に入れる
+ * （端末が入れたと返事をしたあとに、その日が受け取られなかった出金は、相手にもう渡しているので足りなくても引く）
+ */
 export function flushCredits(m: MarketState, c: MarketCompany, now: number): void {
   if (busy(c)) return;
-  const pend = m.pendingCredits ?? [];
-  const mine = pend.filter((p) => p.companyId === c.id);
+  const list = deliveriesOf(m);
+  const mine = list.filter((d) => d.companyId === c.id);
   if (mine.length > 0) {
-    m.pendingCredits = pend.filter((p) => p.companyId !== c.id);
-    for (const p of mine) cash(c.state, p.type, p.amount, p.memo, p.key);
-    touched(c);
+    m.creditDeliveries = list.filter((d) => d.companyId !== c.id);
+    const onState = new Set(c.state.appliedCredits ?? []);
+    for (const d of mine) {
+      if (d.status === 'refused') continue;
+      if (onState.has(d.id)) {
+        // 端末が入れて、その日が受け取られた（返事が届いていなければ、ここで続きを行う）
+        if (d.status === 'pending') {
+          d.status = 'applied';
+          runThen(m, d, now);
+        }
+        continue;
+      }
+      if (d.amount > 0) {
+        cash(c.state, d.type, d.amount, d.memo, d.id);
+        touched(c);
+        if (d.status === 'pending') {
+          d.status = 'applied';
+          runThen(m, d, now);
+        }
+        continue;
+      }
+      if (d.status === 'applied') {
+        cash(c.state, d.type, d.amount, d.memo, d.id, true);
+        touched(c);
+        continue;
+      }
+      // まだ端末が受け取っていない出金: 今のお金で確かめる
+      if (!d.needsFunds || c.state.money >= -d.amount) {
+        cash(c.state, d.type, d.amount, d.memo, d.id, true);
+        touched(c);
+        d.status = 'applied';
+      } else d.status = 'refused';
+      runThen(m, d, now);
+    }
+    if (c.state.appliedCredits) {
+      const left = new Set((m.creditDeliveries ?? []).map((d) => d.id));
+      c.state.appliedCredits = c.state.appliedCredits.filter((k) => left.has(k));
+      if (c.state.appliedCredits.length === 0) delete c.state.appliedCredits;
+    }
   }
   for (const cr of creditsOf(m)) if (cr.status === 'approved' && cr.lenderId === c.id) startCredit(m, cr, now);
-  // 営業中に頼まれた前倒しの返済
+  // 前の版で営業中に頼まれた前倒しの返済
   for (const cr of creditsOf(m)) {
     if (!cr.repayRequested || cr.borrowerId !== c.id) continue;
     if (!creditOpen(cr)) {
       delete cr.repayRequested;
       continue;
     }
+    if (deliveriesOf(m).some((d) => d.then === `repay:${cr.id}`)) continue;
     if (c.state.money >= creditOwed(cr)) repayNow(m, cr, c, now);
     else {
       delete cr.repayRequested;
@@ -220,14 +312,71 @@ export function flushCredits(m: MarketState, c: MarketCompany, now: number): voi
   refreshCreditBook(m);
 }
 
-/** 承認された貸し出しのお金を動かす（貸し手と借り手が営業中でないこと） */
+/**
+ * 端末からの返事（届け物を入れた・断った）。入れた出金は続き（貸し出しの成立・前倒しの返済の完了）をすぐ行う。
+ * 同じ返事の送り直しは何もしない
+ */
+export function ackDeliveries(m: MarketState, c: MarketCompany, acks: { id: string; applied: boolean }[], now: number): void {
+  for (const a of acks) {
+    const d = deliveriesOf(m).find((x) => x.id === a.id && x.companyId === c.id);
+    if (!d || d.status !== 'pending') continue;
+    // 入金は断れない（入れたことにする）
+    d.status = a.applied || d.amount > 0 ? 'applied' : 'refused';
+    runThen(m, d, now);
+  }
+  refreshCreditBook(m);
+}
+
+/** 届け物の続き: 貸し手が貸すお金を出した → 借り手に入れて契約が始まる。借り手が返すお金を出した → 貸し手に入れて返し終わる */
+function runThen(m: MarketState, d: CreditDelivery, now: number): void {
+  if (!d.then) return;
+  const [kind, id] = d.then.split(':');
+  const cr = creditsOf(m).find((x) => x.id === id);
+  if (!cr) return;
+  if (kind === 'lend') {
+    if (cr.status !== 'approved') return;
+    if (d.status === 'applied') activate(m, cr, now);
+    else {
+      cr.status = 'failed';
+      event(m, cr, now, 'fail', '貸し手のお金が足りず、貸し出せませんでした');
+      decide(m, cr.lenderId, `${cr.borrowerName}への貸し出し ${yen(cr.principal)} は、お金が足りず取りやめになりました`);
+    }
+    return;
+  }
+  if (kind === 'repay') {
+    delete cr.repayRequested;
+    if (!creditOpen(cr)) return;
+    if (d.status !== 'applied') {
+      event(m, cr, now, 'repay', `お金が足りず、前倒しの返済はできませんでした（${yen(-d.amount)} が要る）`);
+      return;
+    }
+    const paid = -d.amount;
+    applyPayment(cr, paid);
+    const lender = byId(m, cr.lenderId);
+    if (lender) payIn(m, lender, paid, 'companyCollect', `${cr.borrowerName}からの返済（前倒し）`, `${d.id}:in`, now);
+    cr.status = 'repaid';
+    event(m, cr, now, 'repay', `借り手が前倒しで全部返しました（${yen(paid)}）`, paid);
+    decide(m, cr.borrowerId, `${cr.borrowerName}が${cr.lenderName}への借金を前倒しで返しました（${yen(paid)}）`);
+  }
+}
+
+/**
+ * 承認された貸し出しのお金を動かす。貸し手が端末で営業中なら、貸すお金を出す届け物を貸し手の端末へ送る（すぐ届く。
+ * お金が足りれば成立、足りなければ不成立）。営業中でなければ、その場で貸し手から引き、借り手に入れる
+ */
 function startCredit(m: MarketState, cr: CompanyCredit, now: number): void {
   const lender = byId(m, cr.lenderId);
   const borrower = byId(m, cr.borrowerId);
-  if (!lender || !borrower || busy(lender)) return;
+  if (!lender || !borrower) return;
   if (borrower.status !== 'active' || lender.status !== 'active') {
     cr.status = 'cancelled';
     event(m, cr, now, 'cancel', '相手の会社が市場にいないため取り消しました');
+    return;
+  }
+  const key = `credit:${cr.id}:lend`;
+  if (busy(lender)) {
+    if (deliveriesOf(m).some((d) => d.id === key)) return;
+    deliver(m, { id: key, companyId: lender.id, amount: -cr.principal, type: 'companyLend', memo: `${borrower.name}への貸し出し`, needsFunds: true, status: 'pending', then: `lend:${cr.id}`, at: now });
     return;
   }
   if (lender.state.money < cr.principal) {
@@ -236,8 +385,16 @@ function startCredit(m: MarketState, cr: CompanyCredit, now: number): void {
     decide(m, lender.id, `${borrower.name}への貸し出し ${yen(cr.principal)} は、お金が足りず取りやめになりました`);
     return;
   }
-  payOut(lender, cr.principal, 'companyLend', `${borrower.name}への貸し出し`, `credit:${cr.id}:lend`, true);
-  payIn(m, borrower, cr.principal, 'companyLoan', `${lender.name}からの借入（${cr.days}日・日利${(cr.dailyRate * 100).toFixed(1)}%）`, `credit:${cr.id}:loan`);
+  payOut(lender, cr.principal, 'companyLend', `${borrower.name}への貸し出し`, key, true);
+  activate(m, cr, now);
+}
+
+/** 貸し手からお金が出た: 借り手に入れて、返す期限を決める */
+function activate(m: MarketState, cr: CompanyCredit, now: number): void {
+  const lender = byId(m, cr.lenderId);
+  const borrower = byId(m, cr.borrowerId);
+  if (!lender || !borrower) return;
+  payIn(m, borrower, cr.principal, 'companyLoan', `${lender.name}からの借入（${cr.days}日・日利${(cr.dailyRate * 100).toFixed(1)}%）`, `credit:${cr.id}:loan`, now);
   cr.status = 'active';
   cr.startDay = m.commonMarketDate;
   cr.dueDay = m.commonMarketDate + cr.days;
@@ -370,9 +527,11 @@ export function creditOp(m: MarketState, env: CreditEnv, op: CreditOp): CreditRe
   if (!creditOpen(cr)) return { ok: false, reason: '返している最中の契約ではありません' };
   const owed = creditOwed(cr);
   if (busy(me)) {
-    // 端末で営業中: その日の営業が終わったら返す
+    // 端末で営業中: 返すお金を出す届け物を自分の端末へ送る（すぐ届く。お金が足りれば返し終わる）
+    if (deliveriesOf(m).some((d) => d.then === `repay:${cr.id}` && d.status === 'pending')) return { ok: true, credit: cr };
     cr.repayRequested = true;
-    event(m, cr, now, 'repay', '借り手が前倒しの返済を頼みました（端末の営業が終わったら返します）');
+    deliver(m, { id: `credit:${cr.id}:early:${cr.paid}:${cr.events.length}`, companyId: me.id, amount: -owed, type: 'companyRepay', memo: `${cr.lenderName}への返済（前倒し）`, needsFunds: true, status: 'pending', then: `repay:${cr.id}`, at: now });
+    event(m, cr, now, 'repay', `借り手が前倒しで返します（${yen(owed)}）`);
     return { ok: true, credit: cr };
   }
   if (me.state.money < owed) return { ok: false, reason: `全部返すには ${yen(owed)} が要ります（今 ${yen(me.state.money)}）` };
@@ -387,7 +546,7 @@ function repayNow(m: MarketState, cr: CompanyCredit, me: MarketCompany, now: num
   const paid = payOut(me, owed, 'companyRepay', `${cr.lenderName}への返済（前倒し）`, `credit:${cr.id}:early:${cr.paid}`, true);
   if (paid < owed) return false;
   applyPayment(cr, paid);
-  payIn(m, lender, paid, 'companyCollect', `${cr.borrowerName}からの返済（前倒し）`, `credit:${cr.id}:earlyIn:${cr.paid}`);
+  payIn(m, lender, paid, 'companyCollect', `${cr.borrowerName}からの返済（前倒し）`, `credit:${cr.id}:earlyIn:${cr.paid}`, now);
   cr.status = 'repaid';
   delete cr.repayRequested;
   event(m, cr, now, 'repay', `借り手が前倒しで全部返しました（${yen(paid)}）`, paid);
@@ -538,4 +697,30 @@ export function offerExpiresAt(cr: CompanyCredit): number {
 /** 申し込みの期限の日付（JST。表示用） */
 export function offerExpiresDate(cr: CompanyCredit): string {
   return jstDateKey(offerExpiresAt(cr));
+}
+
+// ───────────────────────── 端末（営業中の会社） ─────────────────────────
+
+/**
+ * 届け物を端末の状態に入れる（同じものは二度入れない）。出金で needsFunds のものは、お金が足りなければ断る。
+ * 返事（入れた・断った）を返す。入れたものは appliedCredits に残す（サーバーが日の確定のときに確かめる）
+ */
+export function applyDeliveries(s: GameState, items: DeliveryView[]): { id: string; applied: boolean; amount: number; memo: string }[] {
+  const out: { id: string; applied: boolean; amount: number; memo: string }[] = [];
+  for (const it of items) {
+    if (!it || typeof it.id !== 'string' || !Number.isFinite(it.amount)) continue;
+    const done = (s.appliedCredits ?? []).includes(it.id) || s.transactions.some((t) => t.key === it.id);
+    if (done) {
+      out.push({ id: it.id, applied: true, amount: 0, memo: it.memo });
+      continue;
+    }
+    if (it.amount < 0 && it.needsFunds && s.money < -it.amount) {
+      out.push({ id: it.id, applied: false, amount: it.amount, memo: it.memo });
+      continue;
+    }
+    cash(s, it.type, it.amount, it.memo, it.id, true);
+    s.appliedCredits = [...(s.appliedCredits ?? []), it.id].slice(-100);
+    out.push({ id: it.id, applied: true, amount: it.amount, memo: it.memo });
+  }
+  return out;
 }

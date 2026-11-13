@@ -103,6 +103,8 @@ export class App {
   private lastPhase = '';
   /** 前のフレームのゲーム速度（等倍に戻ったことに気づくため） */
   private lastSpeed = 1;
+  /** 共通市場: 企業間の貸し借りのお金を受け取る間隔のタイマー */
+  private creditTimer: number | null = null;
   private pausedForMenu = false;
   /** 共通市場の企業を端末で営業している（会社の状態はサーバー。端末のスロットには保存しない） */
   private marketPlay: { session: MarketSession; api: Api; auth: Auth; marketId: string } | null = null;
@@ -382,6 +384,18 @@ export class App {
     }
     this.startGame(new MarketHost(r.state, me?.id ?? 'p1', session));
     this.marketPlay = { session, api, auth, marketId };
+    // 企業間の貸し借りのお金（すぐ反映）: 数秒ごとに受け取る
+    session.onCredit = (rs) => {
+      for (const r of rs) {
+        const yen = `¥${Math.abs(r.amount).toLocaleString('ja-JP')}`;
+        if (!r.applied) toast(this.uiLayer, `💴 ${r.memo}: お金が足りず、できませんでした（${yen} が要ります）`, 'warn', 4000);
+        else toast(this.uiLayer, r.amount > 0 ? `💴 ${r.memo}: ${yen} が入りました` : `💴 ${r.memo}: ${yen} を払いました`, r.amount > 0 ? 'good' : 'info', 3500);
+      }
+    };
+    if (this.creditTimer !== null) clearInterval(this.creditTimer);
+    this.creditTimer = window.setInterval(() => {
+      if (this.marketPlay?.session === session && this.host) void session.syncCredits(this.host.state);
+    }, 5000);
     session.onStale = () => {
       if (this.marketPlay?.session !== session) return;
       toast(this.uiLayer, 'サーバーの会社の状態が新しくなっていたため、読み直します（企業間の貸し借りのお金など）', 'info', 4000);
@@ -791,7 +805,8 @@ export class App {
     this.setMarketBusy(null);
     if (this.cloudTimer !== null) clearInterval(this.cloudTimer);
     if (this.sendRetry !== null) clearInterval(this.sendRetry);
-    this.cloudTimer = this.sendRetry = null;
+    if (this.creditTimer !== null) clearInterval(this.creditTimer);
+    this.cloudTimer = this.sendRetry = this.creditTimer = null;
     this.cloudStatusEl?.remove();
     this.cloudStatusEl = null;
     this.sendStatusEl = null;

@@ -1,6 +1,6 @@
 // バックエンド（Cloudflare Workers）の HTTP API クライアント（設計書 18.1）。
 
-import type { Action, ActionResult, CheckpointMeta, CommitResult, CreditOp, DayTicket, GameState, SaveFile } from '@jiro/core';
+import type { Action, ActionResult, CheckpointMeta, CommitResult, CreditOp, DayTicket, DeliveryView, GameState, SaveFile } from '@jiro/core';
 
 const URL_KEY = 'jiro.serverUrl';
 const AUTH_KEY = 'jiro.auth';
@@ -197,8 +197,18 @@ export class Api {
   }
 
   /** 企業間の貸し借り（申し込む・承認する・断る・取り消す・前倒しで返す。cid が同じなら二度実行しない） */
-  creditMarket(token: string, marketId: string, cid: string, op: CreditOp): Promise<{ ok: boolean; reason?: string; creditId?: string; status?: string; duplicate?: boolean }> {
+  creditMarket(token: string, marketId: string, cid: string, op: CreditOp): Promise<{ ok: boolean; reason?: string; creditId?: string; status?: string; duplicate?: boolean; inbox?: DeliveryView[] }> {
     return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/credit`, { method: 'POST', token, body: JSON.stringify({ cid, op }) });
+  }
+
+  /** 企業間の貸し借りの届け物（端末で営業中の会社が受け取るお金）。すぐ反映（2026-11-13） */
+  creditInbox(token: string, marketId: string): Promise<{ ok: boolean; inbox?: DeliveryView[] }> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/credit/inbox`, { token });
+  }
+
+  /** 届け物を入れた・断ったの返事 */
+  creditAck(token: string, marketId: string, acks: { id: string; applied: boolean }[]): Promise<{ ok: boolean }> {
+    return this.req(`/api/v1/market/${encodeURIComponent(marketId)}/credit/ack`, { method: 'POST', token, body: JSON.stringify({ acks }) });
   }
 
   viewMarket<T>(token: string, marketId: string): Promise<T> {

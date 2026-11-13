@@ -7,7 +7,7 @@ import { connectRoom, createSession, joinSession, leaveSession } from './api/ses
 import { rankingsApi, rewardsApi } from './api/ranking';
 import { grantEndedCommunities, grantGlobalRewards } from './rank-store';
 import { jstDateKey } from '@jiro/core';
-import { actMarketApi, checkpointApi, commitDayApi, createMarketApi, creditMarketApi, deleteMarketApi, joinMarketApi, listMarketsApi, publicCommunitiesApi, retireCompanyApi, startDayApi, updateMarketSettingsApi, viewMarketApi } from './api/market';
+import { actMarketApi, checkpointApi, commitDayApi, createMarketApi, creditBoxApi, creditMarketApi, deleteMarketApi, joinMarketApi, listMarketsApi, publicCommunitiesApi, retireCompanyApi, startDayApi, updateMarketSettingsApi, viewMarketApi } from './api/market';
 import { requirePlayer } from './auth';
 import type { Env } from './env';
 import { allowedOrigins, corsHeaders, errorResponse, HttpError, withCors } from './http';
@@ -57,6 +57,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const marketRetire = /^\/api\/v1\/market\/([^/]+)\/retire$/.exec(path);
   const marketSettings = /^\/api\/v1\/market\/([^/]+)\/settings$/.exec(path);
   const marketCredit = /^\/api\/v1\/market\/([^/]+)\/credit$/.exec(path);
+  // 企業間の貸し借りの届け物（営業中の端末がすぐ受け取る）
+  const marketCreditBox = /^\/api\/v1\/market\/([^/]+)\/credit\/(inbox|ack)$/.exec(path);
   // 営業の途中のセーブ（じろ7 4）
   const marketCheckpoint = /^\/api\/v1\/market\/([^/]+)\/checkpoint$/.exec(path);
   const rankingPath = path === '/api/v1/rankings' || path === '/api/v1/rewards';
@@ -75,6 +77,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     marketRetire !== null ||
     marketSettings !== null ||
     marketCredit !== null ||
+    marketCreditBox !== null ||
     marketCheckpoint !== null ||
     rankingPath;
   if (!known) throw new HttpError(404, 'not_found', 'API が見つかりません');
@@ -111,6 +114,10 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (marketRetire && m === 'POST') {
     limit(HTTP_LIMITS.session, player.id);
     return retireCompanyApi(env, ctx, player, decodeURIComponent(marketRetire[1]!));
+  }
+  if (marketCreditBox && ((marketCreditBox[2] === 'inbox' && m === 'GET') || (marketCreditBox[2] === 'ack' && m === 'POST'))) {
+    limit(HTTP_LIMITS.session, player.id);
+    return creditBoxApi(req, env, player, decodeURIComponent(marketCreditBox[1]!), marketCreditBox[2] as 'inbox' | 'ack');
   }
   if (marketCredit && m === 'POST') {
     limit(HTTP_LIMITS.session, player.id);

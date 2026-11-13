@@ -1625,6 +1625,11 @@ export interface GameState {
    */
   finalizedDay?: number;
   /** 結果を確定したときの、その日のお金の集計（確定のあとに動いた分を次の日へ回すのに使う）と手元の現金 */
+  /**
+   * 共通市場: 端末で営業中に入れた、企業間の貸し借りのお金の届け物の id（取引の key）。サーバーが日の確定のときに、
+   * 入れたものと入れていないものを分けるのに使う（credit.ts）
+   */
+  appliedCredits?: string[];
   finalizeBase?: Record<string, number>;
   cashAtFinalize?: number;
 

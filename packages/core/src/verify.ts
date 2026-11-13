@@ -27,6 +27,8 @@ export interface VerifyTicket {
   gameDate: number;
   /** 店の id → 客の取り合いの倍率 */
   demand: Record<string, number>;
+  /** 営業中にサーバーが届けた企業間の貸し借りのお金（取引の key と金額。credit.ts） */
+  credits?: { key: string; amount: number }[];
 }
 
 export interface VerifyResult {
@@ -115,7 +117,11 @@ export function verifyCommit(prev: GameState, next: GameState, ticket: VerifyTic
   for (const t of newTx) {
     if (!Number.isInteger(t.amount) || !Number.isFinite(t.amount)) reject.push('取引の金額が整数でない');
     if (t.day < prev.day || t.day > next.day) reject.push(`取引の日付が範囲外（${t.day}日）`);
-    if (t.amount > 0 && !['sale', 'loan', 'equipmentSale'].includes(t.type)) reject.push(`入金にならない取引の種類（${t.type}）`);
+    // 企業間の貸し借りの入金は、サーバーが営業中に届けたもの（key と金額が合うもの）だけ
+    const delivered = t.key ? ticket.credits?.find((x) => x.key === t.key) : undefined;
+    if (t.amount > 0 && (t.type === 'companyLoan' || t.type === 'companyCollect')) {
+      if (!delivered || delivered.amount !== t.amount) reject.push(`届けていない貸し借りの入金（${t.type}）`);
+    } else if (t.amount > 0 && !['sale', 'loan', 'equipmentSale'].includes(t.type)) reject.push(`入金にならない取引の種類（${t.type}）`);
   }
   const sum = newTx.reduce((a, t) => a + t.amount, 0);
   if (next.money !== prev.money + sum) reject.push(`お金が取引の記録と合わない（${prev.money} + ${sum} ≠ ${next.money}）`);

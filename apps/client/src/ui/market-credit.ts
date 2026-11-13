@@ -7,7 +7,7 @@ import { cardHead } from './kit';
 
 const STATUS_LABEL: Record<CreditStatus, string> = {
   offered: '返事待ち',
-  approved: '承認済み（貸し手の営業が終わったらお金が動く）',
+  approved: '承認済み（貸し手の端末に届くとすぐお金が動く）',
   active: '返している最中',
   overdue: '延滞',
   defaulted: '債務不履行',
@@ -155,7 +155,7 @@ export function creditCard(root: HTMLElement, v: MarketView, handlers: CreditHan
     { class: 'card market-credit', 'data-market-credit': '' },
     cardHead(
       '企業間の貸し借り',
-      `ほかのプレイヤーの会社にお金を貸せます（相手の承認でお金が動く）。日数は市場の日付（全社がそろった日付）で数え、利息は0時の同期で足します。期限の日に借り手の現金から自動で返し、足りなければ延滞（利息に日${(C.overdueRate * 100).toFixed(1)}%を上乗せし毎日回収）、期限から${C.defaultAfterDays}日で債務不履行（新しく借りられない・評判 −${C.defaultReputation}）。借り手はいつでも前倒しで全部返せます（利息はその日まで）。貸すのは何社にでもできますが、借りられるのは同時に1社まで（返し終わればほかの会社から借りられます）。借り手が抜けた・破産した・市場が終わったときは、返せるだけ返して残りは貸し手の損。端末で営業中の会社のお金は、その日の営業が終わって結果を送ったとき（または0時の計算のとき）に動きます。`,
+      `ほかのプレイヤーの会社にお金を貸せます（相手の承認でお金が動く）。日数は市場の日付（全社がそろった日付）で数え、利息は0時の同期で足します。期限の日に借り手の現金から自動で返し、足りなければ延滞（利息に日${(C.overdueRate * 100).toFixed(1)}%を上乗せし毎日回収）、期限から${C.defaultAfterDays}日で債務不履行（新しく借りられない・評判 −${C.defaultReputation}）。借り手はいつでも前倒しで全部返せます（利息はその日まで）。貸すのは何社にでもできますが、借りられるのは同時に1社まで（返し終わればほかの会社から借りられます）。借り手が抜けた・破産した・市場が終わったときは、返せるだけ返して残りは貸し手の損。お金はすぐ動きます（端末で営業中の会社には数秒で届きます。端末を閉じていると、その日の営業が終わったときに動きます）。`,
     ),
     book ? h('p', { class: 'note', 'data-credit-book': '' }, `借りている ${yenStr(book.owed)}・貸している ${yenStr(book.lent)}（企業価値では、貸しているお金は資産・借りているお金は負債）`) : null,
     blocked ? h('p', { class: 'note bad' }, blocked) : null,

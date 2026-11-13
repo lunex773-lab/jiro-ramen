@@ -2,7 +2,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyAction,
+  applyDeliveries,
   autoPlayDay,
+  marketCreditAck,
+  marketCreditInbox,
   BALANCE,
   commitDay,
   createMarket,
@@ -362,5 +365,117 @@ describe('借りるのは同時に1社まで・貸すのは何社にでも（オ
     const after = marketCredit(m, 'u3', { op: 'offer', borrowerId: borrower(m).id, amount: 50_000, days: 3, dailyRate: 0 }, T0);
     expect(after.ok).toBe(true);
     expect(marketCredit(m, 'u2', { op: 'accept', creditId: after.ok ? after.credit.id : '' }, T0).ok).toBe(true);
+  });
+});
+
+describe('貸し借りはすぐ反映（オーナーの判断 2026-11-13）: 端末で営業中の会社にも、お金をすぐ届ける', () => {
+  /** 端末の代わり: 届け物を受け取って状態に入れ、返事をする */
+  function deviceSync(m: MarketState, owner: string, s: GameState) {
+    const inbox = marketCreditInbox(m, owner);
+    const acks = applyDeliveries(s, inbox);
+    expect(marketCreditAck(m, owner, acks.map((a) => ({ id: a.id, applied: a.applied })), T0 + 500).ok).toBe(true);
+    return acks;
+  }
+
+  it('貸し手が営業中: 承認するとすぐ貸し手の端末からお金が出て、借り手に入る。確定しても二重に動かない', () => {
+    const m = withBorrower();
+    const o = offer(m);
+    const L = lender(m);
+    const t = startDay(m, 'u1', T0, `t${++tok}`, L.progress.stateVersion);
+    if (!t.ok) throw new Error(t.reason);
+    const dev: GameState = clone(L.state);
+    const b0 = borrower(m).state.money;
+    const l0 = dev.money;
+    expect(marketCredit(m, 'u2', { op: 'accept', creditId: o.ok ? o.credit.id : '' }, T0).ok).toBe(true);
+    // 貸し手の端末に届く（お金が足りるか確かめてから入れる）
+    expect(marketCreditInbox(m, 'u1')).toEqual([expect.objectContaining({ amount: -100_000, needsFunds: true })]);
+    const acks = deviceSync(m, 'u1', dev);
+    expect(acks.map((a) => a.applied)).toEqual([true]);
+    expect(dev.money).toBe(l0 - 100_000);
+    // 返事が届いたらすぐ成立して、借り手（営業中でない）に入る
+    expect(m.credits![0]!.status).toBe('active');
+    expect(borrower(m).state.money).toBe(b0 + 100_000);
+    expect(marketCreditInbox(m, 'u1')).toEqual([]);
+    // 営業を続けて確定する: 端末の状態の出金を受け取り、サーバーで二重に引かない
+    autoPlayDay(dev, t.ticket.gameDate, t.ticket.demand, { allowLoan: false });
+    const end = dev.money;
+    const r = commitDay(m, 'u1', T0 + 1000, t.ticket.token, dev);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(lender(m).state.money).toBe(end);
+  });
+
+  it('借り手が営業中: 承認するとすぐ借り手の端末に入り、確定で受け取られる（届けていない入金は受け取らない）', () => {
+    const m = withBorrower();
+    const o = offer(m);
+    const B = borrower(m);
+    const t = startDay(m, 'u2', T0, `t${++tok}`, B.progress.stateVersion);
+    if (!t.ok) throw new Error(t.reason);
+    const dev: GameState = clone(B.state);
+    const l0 = lender(m).state.money;
+    expect(marketCredit(m, 'u2', { op: 'accept', creditId: o.ok ? o.credit.id : '' }, T0).ok).toBe(true);
+    expect(m.credits![0]!.status).toBe('active');
+    expect(lender(m).state.money).toBe(l0 - 100_000);
+    const before = dev.money;
+    deviceSync(m, 'u2', dev);
+    expect(dev.money).toBe(before + 100_000);
+    // 2回受け取っても二重に入らない
+    deviceSync(m, 'u2', dev);
+    expect(dev.money).toBe(before + 100_000);
+    autoPlayDay(dev, t.ticket.gameDate, t.ticket.demand, { allowLoan: false });
+    const end = dev.money;
+    expect(commitDay(m, 'u2', T0 + 1000, t.ticket.token, dev).ok).toBe(true);
+    expect(borrower(m).state.money).toBe(end);
+    // 届けていない入金（自分で作った貸し借りの入金）は受け取らない
+    const fake = clone(borrower(m).state);
+    fake.money += 50_000;
+    fake.transactions.push({ id: 'Tfake', day: fake.day, t: 0, type: 'companyLoan', amount: 50_000, memo: 'うそ', key: 'credit:fake' });
+    const v = verifyCommit(borrower(m).state, fake, { gameDate: fake.day, demand: {}, credits: [] });
+    expect(v.reject.some((x) => x.includes('届けていない'))).toBe(true);
+  });
+
+  it('借り手が営業中に前倒しで返す: すぐ端末から出て、貸し手に入り、返し終わる。お金が足りなければ断られる', () => {
+    const m = withBorrower();
+    const o = offer(m, 100_000, 10, 0);
+    expect(marketCredit(m, 'u2', { op: 'accept', creditId: o.ok ? o.credit.id : '' }, T0).ok).toBe(true);
+    const cr = m.credits![0]!;
+    const B = borrower(m);
+    const t = startDay(m, 'u2', T0, `t${++tok}`, B.progress.stateVersion);
+    if (!t.ok) throw new Error(t.reason);
+    const dev: GameState = clone(B.state);
+    // お金が足りないと断る
+    const keep = dev.money;
+    dev.money = 10;
+    expect(marketCredit(m, 'u2', { op: 'repay', creditId: cr.id }, T0).ok).toBe(true);
+    expect(deviceSync(m, 'u2', dev).map((a) => a.applied)).toEqual([false]);
+    expect(cr.status).toBe('active');
+    dev.money = keep;
+    // 足りれば返し終わり、貸し手にすぐ入る
+    const l0 = lender(m).state.money;
+    expect(marketCredit(m, 'u2', { op: 'repay', creditId: cr.id }, T0).ok).toBe(true);
+    expect(deviceSync(m, 'u2', dev).map((a) => a.applied)).toEqual([true]);
+    expect(dev.money).toBe(keep - 100_000);
+    expect(cr.status).toBe('repaid');
+    expect(lender(m).state.money).toBe(l0 + 100_000);
+  });
+
+  it('端末が入れたあとにその日が受け取られなかったら、サーバーの状態でお金を動かす（相手にはもう渡している）', () => {
+    const m = withBorrower();
+    const o = offer(m);
+    const L = lender(m);
+    const t = startDay(m, 'u1', T0, `t${++tok}`, L.progress.stateVersion);
+    if (!t.ok) throw new Error(t.reason);
+    const dev: GameState = clone(L.state);
+    const l0 = L.state.money;
+    expect(marketCredit(m, 'u2', { op: 'accept', creditId: o.ok ? o.credit.id : '' }, T0).ok).toBe(true);
+    deviceSync(m, 'u1', dev);
+    expect(m.credits![0]!.status).toBe('active');
+    // 受け取られない日（状態の形が壊れている）
+    const bad = clone(dev);
+    (bad as unknown as { money: unknown }).money = 'x';
+    const r = commitDay(m, 'u1', T0 + 1000, t.ticket.token, bad);
+    expect(r.ok).toBe(false);
+    // サーバーの状態（前の日）から貸したお金を引く
+    expect(lender(m).state.money).toBe(l0 - 100_000);
+    expect(m.creditDeliveries ?? []).toEqual([]);
   });
 });

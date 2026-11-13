@@ -6,7 +6,7 @@
 // 営業の途中の状態はサーバーに「途中のセーブ」として保存でき（じろ7 4）、次に始めるときはそこから続ける。
 // 会社の状態はサーバーにあり、端末のセーブのスロットには保存しない。
 
-import { checksum, ensureStartingUnlocks, hasPrepSnapshot, takePrepSnapshot, type Action, type ActionResult, type CheckpointMeta, type CommitResult, type DayTicket, type GameState } from '@jiro/core';
+import { applyDeliveries, checksum, ensureStartingUnlocks, hasPrepSnapshot, takePrepSnapshot, type Action, type ActionResult, type CheckpointMeta, type CommitResult, type DayTicket, type DeliveryView, type GameState } from '@jiro/core';
 import { Api, ApiError, type Auth } from '../net/api';
 import { LocalHost } from './host';
 
@@ -86,6 +86,9 @@ export class MarketSession {
   committedDay: number | null = null;
   /** サーバーの会社の状態が端末より新しいとわかったとき（読み直す。App が入れる） */
   onStale: (() => void) | null = null;
+  /** 企業間の貸し借りのお金を入れた・断ったとき（知らせる。App が入れる） */
+  onCredit: ((r: { amount: number; memo: string; applied: boolean }[]) => void) | null = null;
+  private creditSyncing = false;
 
   constructor(
     readonly api: Api,
@@ -227,6 +230,28 @@ export class MarketSession {
       const c = errorCode(e);
       if (c.code === 'old_rev' || c.code === 'stale') this.cpBlocked = c.message;
       return { ok: false, ...c };
+    }
+  }
+
+  /**
+   * 企業間の貸し借りの届け物を受け取り、端末の状態に入れて返事をする（すぐ反映。オーナーの判断 2026-11-13）。
+   * その日を始めている間（サーバーがこの会社のお金を動かせない間）だけ。inbox を渡せば、それを入れる（操作の答えに入っていたもの）
+   */
+  async syncCredits(state: GameState, inbox?: DeliveryView[]): Promise<void> {
+    if (!this.ticket || this.creditSyncing) return;
+    this.creditSyncing = true;
+    try {
+      const items = inbox ?? (await this.api.creditInbox(this.auth.token, this.marketId)).inbox ?? [];
+      if (items.length === 0) return;
+      const acks = applyDeliveries(state, items);
+      state.version = (state.version ?? 0) + 1;
+      await this.api.creditAck(this.auth.token, this.marketId, acks.map((a) => ({ id: a.id, applied: a.applied })));
+      const shown = acks.filter((a) => a.amount !== 0);
+      if (shown.length > 0) this.onCredit?.(shown);
+    } catch {
+      // 通信できないときは、次の受け取りで送り直す（同じ届け物は二度入れない）
+    } finally {
+      this.creditSyncing = false;
     }
   }
 

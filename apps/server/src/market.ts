@@ -23,6 +23,8 @@ import {
   jstDateKey,
   marketAction,
   marketCredit,
+  marketCreditAck,
+  marketCreditInbox,
   marketView,
   migrateMarket,
   MARKET_SCHEMA,
@@ -496,13 +498,31 @@ export class MarketRoom extends DurableObject<Env> {
       const prev = cache.get(body.cid);
       if (prev) return json({ ...prev, duplicate: true });
       const r = marketCredit(m, playerId, body.op as unknown as CreditOp, now);
-      const out = r.ok ? { ok: true, creditId: r.credit.id, status: r.credit.status } : { ok: false, reason: r.reason };
+      // 自分の端末が営業中なら、受け取るお金（届け物）も返す（すぐ入れられる）
+      const out = r.ok ? { ok: true, creditId: r.credit.id, status: r.credit.status, inbox: marketCreditInbox(m, playerId) } : { ok: false, reason: r.reason };
       cache.set(body.cid, out as ActionResult);
       this.cids.set(playerId, cache);
       // 貸し手・借り手の両方の会社の状態が変わる
       this.markAll();
       this.save();
       return json(out);
+    }
+    // 企業間の貸し借り: 端末で営業中の会社への届け物（すぐ反映。オーナーの判断 2026-11-13）
+    if (url.pathname === '/internal/credit/inbox' && req.method === 'GET') {
+      return json({ ok: true, inbox: marketCreditInbox(m, playerId) });
+    }
+    if (url.pathname === '/internal/credit/ack' && req.method === 'POST') {
+      const body = safeJsonParse(await req.text());
+      const acks = isObj(body) && Array.isArray(body.acks) ? body.acks : null;
+      if (!acks || acks.length > 50 || !acks.every((a) => isObj(a) && typeof a.id === 'string' && a.id.length <= 128 && typeof a.applied === 'boolean')) {
+        return json({ error: 'bad_request', message: '形式が不正です' }, 400);
+      }
+      const before = this.versions();
+      const r = marketCreditAck(m, playerId, acks as { id: string; applied: boolean }[], now);
+      // 相手の会社の状態（お金）も変わる
+      this.markChanged(before);
+      this.save();
+      return json(r.ok ? { ok: true } : { error: 'not_member', message: r.reason }, r.ok ? 200 : 409);
     }
     if (url.pathname === '/internal/day/start' && req.method === 'POST') {
       const body = (await req.json()) as { token?: unknown; baseVersion?: unknown };

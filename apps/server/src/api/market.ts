@@ -479,6 +479,23 @@ export async function creditMarketApi(req: Request, env: Env, ctx: ExecutionCont
   return json(r);
 }
 
+/** 企業間の貸し借りの届け物: 受け取る（GET inbox）・返事をする（POST ack） */
+export async function creditBoxApi(req: Request, env: Env, player: AuthedPlayer, marketId: string, kind: 'inbox' | 'ack'): Promise<Response> {
+  if (!isUuid(marketId)) throw new HttpError(404, 'market_not_found', '市場が見つかりません');
+  await requireMember(env, marketId, player.id);
+  if (kind === 'inbox') {
+    return json(await readBody(await stub(env, marketId).fetch('https://market/internal/credit/inbox', { method: 'GET', headers: identity(player) })));
+  }
+  const body = await readJson(req, MARKET_BODY_LIMIT);
+  const res = await stub(env, marketId).fetch('https://market/internal/credit/ack', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...identity(player) },
+    body: JSON.stringify(body),
+  });
+  const r = await readBody(res);
+  return json(r, res.status);
+}
+
 const CREDIT_ID_RE = /^cr\d{1,9}$/;
 const COMPANY_ID_RE = /^c\d{1,4}$/;
 
