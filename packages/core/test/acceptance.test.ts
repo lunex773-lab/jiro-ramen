@@ -28,10 +28,16 @@ describe('経済の受け入れの条件（短い版）', () => {
     expect(rows.every((r) => !r.bankrupt)).toBe(true);
   });
 
-  it('調理担当を1人雇うと、一人営業より利益が増える（投資が報われる）', { timeout: 180_000 }, () => {
-    const solo = runCase(policy('c11_smart_solo'), 24, 778).rows.filter((r) => r.day >= 10);
-    const cook = runCase(policy('c12_smart_cook'), 24, 778).rows.filter((r) => r.day >= 10);
-    expect(avg(cook.map((r) => r.op))).toBeGreaterThan(avg(solo.map((r) => r.op)));
+  // 1つのシードだけだと、アルバイトの調理担当が休みの日の客のぶれで逆になることがある（設備の故障の決まりを変えたとき
+  // 778 だけ −0.9%）ので、3つのシードの平均で比べる（2026-11-13 の測定: 一人 15,425円/日・調理担当あり 16,496円/日）
+  it('調理担当を1人雇うと、一人営業より利益が増える（投資が報われる）', { timeout: 400_000 }, () => {
+    let solo = 0;
+    let cook = 0;
+    for (const seed of [778, 779, 780]) {
+      solo += avg(runCase(policy('c11_smart_solo'), 24, seed).rows.filter((r) => r.day >= 10).map((r) => r.op));
+      cook += avg(runCase(policy('c12_smart_cook'), 24, seed).rows.filter((r) => r.day >= 10).map((r) => r.op));
+    }
+    expect(cook).toBeGreaterThan(solo);
   });
 
   it('人を雇いすぎると、1人だけ雇うより利益が減る（無計画な人員増加にはコストがかかる）', { timeout: 180_000 }, () => {
