@@ -206,32 +206,9 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
                 'div',
                 { class: `trow${m.ended ? ' ended' : ''}`, 'data-my-market': m.marketId },
                 h('div', { class: 'tname' }, m.name, h('small', null, [`招待コード ${m.code}${m.isOwner ? '・あなたが作った市場' : ''}`, marketState(m)].filter(Boolean).join('・'))),
-                h(
-                  'div',
-                  { class: 'row' },
-                  h('button', { class: 'btn', 'data-open-market': m.marketId, onclick: () => open(c.api, c.auth, m.marketId) }, '開く'),
-                  m.isOwner
-                    ? h(
-                        'button',
-                        {
-                          class: 'btn ghost danger',
-                          'data-delete-market': m.marketId,
-                          onclick: async () => {
-                            if (await confirmDeleteMarket(app.root, m.name, m.otherCompanies ?? 0)) {
-                              try {
-                                await c.api.deleteMarket(c.auth.token, m.marketId);
-                                toast(app.root, `「${m.name}」を消しました`, 'good', 2000);
-                              } catch (e) {
-                                toast(app.root, errText(e), 'warn');
-                              }
-                              void refreshList();
-                            }
-                          },
-                        },
-                        '消す',
-                      )
-                    : null,
-                ),
+                // 一覧には「開く」だけ（消すボタンが横にあると押し間違えるので、消すのは市場の画面のいちばん下から。
+                // オーナーの指示 2026-11-13）
+                h('div', { class: 'row' }, h('button', { class: 'btn', 'data-open-market': m.marketId, onclick: () => open(c.api, c.auth, m.marketId) }, '開く')),
               ),
             ),
       );
@@ -367,15 +344,45 @@ export function openMarketLobby(app: App, onBack: () => void): HTMLElement {
   return el;
 }
 
-/** 市場を消す前の確認（消すと元に戻せない。ほかの人の会社も消える。オーナーの判断） */
+/**
+ * 市場を消す前の確認（消すと元に戻せない。ほかの人の会社も消える。オーナーの判断）。
+ * 押し間違えで消さないように、市場の名前を入れたときだけ「消す」を押せる（オーナーの指示 2026-11-13）
+ */
 function confirmDeleteMarket(root: HTMLElement, name: string, others: number): Promise<boolean> {
-  return confirmDialog(
-    root,
-    '市場を消す',
-    `「${name}」を消します。\nこの市場の会社・店・お金・記録がすべて消え、元に戻せません。${others > 0 ? `\nほかのプレイヤーの会社 ${others}社も消えます。` : ''}\n受け取った称号は残ります。`,
-    '消す',
-    true,
-  );
+  return new Promise((resolve) => {
+    const close = (v: boolean) => {
+      overlay.remove();
+      resolve(v);
+    };
+    const ok = h('button', { class: 'btn danger', 'data-delete-confirm': '', disabled: true, onclick: () => close(true) }, '消す') as HTMLButtonElement;
+    const input = h('input', {
+      class: 'input',
+      'data-delete-name': '',
+      placeholder: name,
+      'aria-label': '消す市場の名前',
+      oninput: () => {
+        ok.disabled = input.value.trim() !== name.trim();
+      },
+    }) as HTMLInputElement;
+    const overlay = h(
+      'div',
+      { class: 'modal-overlay' },
+      h(
+        'div',
+        { class: 'modal' },
+        h('h3', null, '市場を消す'),
+        h(
+          'p',
+          { class: 'modal-body' },
+          `「${name}」を消します。\nこの市場の会社・店・お金・記録がすべて消え、元に戻せません。${others > 0 ? `\nほかのプレイヤーの会社 ${others}社も消えます。` : ''}\n受け取った称号は残ります。`,
+        ),
+        h('p', { class: 'note' }, `消すときは、市場の名前「${name}」を入れてください。`),
+        input,
+        h('div', { class: 'row end' }, h('button', { class: 'btn ghost', onclick: () => close(false) }, 'キャンセル'), ok),
+      ),
+    );
+    root.appendChild(overlay);
+  });
 }
 
 /** 自動営業の実行状況（仕様書 8.1）: 同期の最中ならその段階、なければ前回の結果 */

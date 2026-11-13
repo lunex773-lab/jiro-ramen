@@ -226,7 +226,7 @@ test('コミュニティ: 終わった市場でも営業でき、会社を引退
   expect(mock.markets.get('old2')!.m.companies.find((c) => c.ownerId === ME)!.status).toBe('retired');
 });
 
-test('コミュニティ: 自分が作った市場は、確認してから消せる（ほかの人が作った市場には消すボタンが出ない）', async ({ page }) => {
+test('コミュニティ: 自分が作った市場は、市場の画面のいちばん下から、名前を入れて確かめてから消せる（一覧には消すボタンがない。ほかの人が作った市場は消せない）', async ({ page }) => {
   const mock = mockCommunities(page);
   await mock.install();
   const lobby = await openLobby(page);
@@ -237,23 +237,26 @@ test('コミュニティ: 自分が作った市場は、確認してから消せ
   await screen.locator('[data-market-tab="settings"]').click();
   await expect(screen.locator('[data-delete-this-market]')).toHaveCount(0);
   await screen.getByRole('button', { name: '← 市場から出る' }).click();
+  // 参加している市場の一覧は「開く」だけ（「開く」の横に消すボタンがあると押し間違える。オーナーの指示 2026-11-13）
   const lobby2 = await openLobby(page);
-  await expect(lobby2.locator('[data-delete-market="pub1"]')).toHaveCount(0);
-  // 自分が作った市場は消せる（キャンセルすると消えない）
-  await lobby2.locator('[data-delete-market="old2"]').click();
-  const modal = page.locator('.modal');
-  await expect(modal).toContainText('元に戻せません');
-  await modal.getByRole('button', { name: 'キャンセル' }).click();
-  expect(mock.markets.has('old2')).toBe(true);
-  await lobby2.locator('[data-delete-market="old2"]').click();
-  await page.locator('.modal').getByRole('button', { name: '消す' }).click();
-  await expect(lobby2.locator('[data-my-market="old2"]')).toHaveCount(0);
-  expect(mock.markets.has('old2')).toBe(false);
-  // 市場の画面からも消せる
-  await lobby2.locator('[data-open-market="old1"]').click();
+  await expect(lobby2.locator('[data-my-market="old2"] [data-open-market="old2"]')).toBeVisible();
+  await expect(lobby2.locator('[data-my-market] button', { hasText: '消す' })).toHaveCount(0);
+  // 自分が作った市場は、市場の画面のいちばん下から消せる。名前を入れるまで「消す」は押せない（キャンセルすると消えない）
+  await lobby2.locator('[data-open-market="old2"]').click();
   await screen.locator('[data-market-tab="settings"]').click();
   await screen.locator('[data-delete-this-market]').click();
-  await page.locator('.modal').getByRole('button', { name: '消す' }).click();
+  const modal = page.locator('.modal');
+  await expect(modal).toContainText('元に戻せません');
+  const confirm = modal.locator('[data-delete-confirm]');
+  await expect(confirm).toBeDisabled();
+  await modal.locator('[data-delete-name]').fill('ちがう名前');
+  await expect(confirm).toBeDisabled();
+  await modal.getByRole('button', { name: 'キャンセル' }).click();
+  expect(mock.markets.has('old2')).toBe(true);
+  await screen.locator('[data-delete-this-market]').click();
+  await page.locator('.modal [data-delete-name]').fill('おととしの大会');
+  await expect(page.locator('.modal [data-delete-confirm]')).toBeEnabled();
+  await page.locator('.modal [data-delete-confirm]').click();
   await expect(page.locator('.market-lobby')).toBeVisible();
-  expect(mock.markets.has('old1')).toBe(false);
+  expect(mock.markets.has('old2')).toBe(false);
 });
