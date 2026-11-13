@@ -50,7 +50,6 @@ import { MarketHost, MarketSession, prepareState } from './market-play';
 import { RankingScreen } from '../ui/ranking';
 import type { Api, Auth } from '../net/api';
 import { installRotatedScroll } from '../ui/rotated-scroll';
-import { cloudDownload, cloudUpload } from '../net/cloud';
 
 export const VERSION = '0.9.0';
 
@@ -715,23 +714,9 @@ export class App {
       onClose: () => this.closeManage(),
       onLayoutEditor: () => this.openEditor(),
       onSave: () => this.saveNow(true),
+      // クラウドへの保存は共通市場の企業だけ（ひとりプレイ・共同経営のクラウドセーブは廃止。オーナーの判断 2026-11-13）
       onCloudSave: () => {
-        if (this.marketPlay) {
-          void this.cloudSave('manual');
-          return;
-        }
-        this.saveNow(false);
-        void cloudUpload(this.uiLayer, this.store, this.slot, this.settings.playerName);
-      },
-      onCloudLoad: async () => {
-        if (this.marketPlay) {
-          toast(this.uiLayer, '市場の企業は、始めるときに途中のセーブから自動で続けます', 'info', 4000);
-          return;
-        }
-        const replaced = await cloudDownload(this.uiLayer, this.store, this.slot, this.settings.playerName);
-        if (!replaced) return;
-        const r = loadFromSlot(this.store, this.slot);
-        if (r.ok) this.startLocal(r.file.state, this.slot);
+        if (this.marketPlay) void this.cloudSave('manual');
       },
       onSettings: () => this.showSettings(() => this.show(null), true),
       onTitle: () => void this.returnToTitle(),

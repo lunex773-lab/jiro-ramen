@@ -21,9 +21,9 @@ describe('匿名認証', () => {
 
   it('トークンで認証でき、不正なトークンは 401', async () => {
     const p = await newPlayer('店主A');
-    const ok = await callJson<{ playerId: string; name: string; slots: unknown[] }>('/api/v1/profile', { token: p.token });
+    const ok = await callJson<{ playerId: string; name: string }>('/api/v1/profile', { token: p.token });
     expect(ok.status).toBe(200);
-    expect(ok.body).toMatchObject({ playerId: p.playerId, name: '店主A', slots: [] });
+    expect(ok.body).toMatchObject({ playerId: p.playerId, name: '店主A' });
 
     const bad = await callJson<{ error: string; code: string }>('/api/v1/profile', { token: 'A'.repeat(43) });
     expect(bad.status).toBe(401);

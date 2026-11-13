@@ -2,7 +2,6 @@
 // 共同経営のリアルタイム処理は Durable Object（./room.ts の GameRoom）が担当する。
 
 import { createAnonymous, gameVersion, profile } from './api/account';
-import { deleteSave, downloadSave, uploadSave } from './api/saves';
 import { connectRoom, createSession, joinSession, leaveSession } from './api/session';
 import { rankingsApi, rewardsApi } from './api/ranking';
 import { grantEndedCommunities, grantGlobalRewards } from './rank-store';
@@ -87,15 +86,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const player = await requirePlayer(req, env, ctx);
 
   if (path === '/api/v1/profile' && m === 'GET') return profile(env, player);
-  if (path === '/api/v1/save' && m === 'POST') {
-    limit(HTTP_LIMITS.save, player.id);
-    return uploadSave(req, env, ctx, player);
-  }
-  if (saveSlot && m === 'GET') return downloadSave(env, player, saveSlot[1]!);
-  if (saveSlot && m === 'DELETE') {
-    limit(HTTP_LIMITS.save, player.id);
-    return deleteSave(env, ctx, player, saveSlot[1]!);
-  }
+  // ひとりプレイ・共同経営のクラウドセーブは廃止した（オーナーの判断 2026-11-13）。前の版の端末からの要求には 410 を返す
+  if (path === '/api/v1/save' || saveSlot) throw new HttpError(410, 'cloud_save_removed', 'クラウドセーブは終了しました（セーブはこの端末に保存されます。クラウドに保存できるのはオンライン市場だけです）');
   if (path === '/api/v1/session/create' && m === 'POST') {
     limit(HTTP_LIMITS.session, player.id);
     return createSession(req, env, ctx, player);

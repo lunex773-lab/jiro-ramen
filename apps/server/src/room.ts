@@ -43,7 +43,6 @@ import {
   type ServerMsg,
   type SimCtx,
 } from '@jiro/core';
-import { MAX_STORED_BYTES } from './api/saves';
 import { audit, type AuditEntry } from './audit';
 import { decodeCheckpoint, encodeCheckpoint, RidCache, type CheckpointData } from './checkpoint';
 import type { Env } from './env';
@@ -54,7 +53,6 @@ import { ensureSchema } from './schema';
 import { isClientSupported } from './version';
 
 /** 保存の控えをルームごとに何世代残すか */
-const KEEP_ROOM_SAVES = 3;
 
 // ───────────────────────── 定数 ─────────────────────────
 
@@ -108,7 +106,7 @@ export interface RoomMeta {
   hostActorId: string | null;
   createdAt: number;
   ended: boolean;
-  /** ルームでの保存回数（D1 の room_snapshots に置く控えの revision） */
+  /** ルームでの保存回数（保存したセーブの revision） */
   saveRevision: number;
   /** 最後に誰かが切断した時刻（無人ルームの期限切れ判定） */
   lastActivityAt: number;
@@ -140,6 +138,8 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 // ───────────────────────── 本体 ─────────────────────────
 
 export class GameRoom extends DurableObject<Env> {
+  /** 最後の保存の答え（同じ保存要求の再送に同じ答えを返す。共同経営の保存はホストの端末だけに残し、サーバーに控えは残さない） */
+  private lastSave: { rid: string; text: string } | null = null;
   private sql: SqlStorage;
   meta: RoomMeta | null = null;
   state: GameState | null = null;
@@ -695,27 +695,6 @@ export class GameRoom extends DurableObject<Env> {
       clearInterval(this.loop);
       this.loop = null;
     }
-    const now = Date.now();
-    if (this.state && validateState(this.state).length === 0) {
-      const file = makeSaveFile(this.state, 0, null, now);
-      file.saveId = `room-${meta.roomId}`;
-      file.revision = meta.saveRevision + 1;
-      file.createdAt = meta.createdAt;
-      try {
-        const body = JSON.stringify(file);
-        if (new TextEncoder().encode(body).length > MAX_STORED_BYTES) throw new Error('snapshot too large');
-        await ensureSchema(this.env.DB);
-        // 最終状態だけを残し、途中の保存の控えは消す
-        await this.env.DB.batch([
-          this.env.DB.prepare(
-            "INSERT INTO room_snapshots (room_id, kind, revision, body, created_at) VALUES (?, 'final', ?, ?, ?) ON CONFLICT(room_id, kind, revision) DO UPDATE SET body = excluded.body, created_at = excluded.created_at",
-          ).bind(meta.roomId, file.revision, body, now),
-          this.env.DB.prepare("DELETE FROM room_snapshots WHERE room_id = ? AND kind = 'save'").bind(meta.roomId),
-        ]);
-      } catch (e) {
-        log('error', 'room_archive_failed', { roomId: meta.roomId, error: String(e) });
-      }
-    }
     meta.ended = true;
     this.broadcast({ t: 'error', code: 'room_closed', message: reason === 'idle' ? '長時間使われなかったためルームを終了しました' : 'ホストがルームを終了しました' });
     for (const ws of this.ctx.getWebSockets()) {
@@ -741,7 +720,7 @@ export class GameRoom extends DurableObject<Env> {
     this.clearCheckpoint();
     await this.ctx.storage.deleteAlarm();
     try {
-      await this.env.DB.prepare("UPDATE rooms SET status = 'ended', ended_at = ? WHERE id = ? AND status = 'open'").bind(now, meta.roomId).run();
+      await this.env.DB.prepare("UPDATE rooms SET status = 'ended', ended_at = ? WHERE id = ? AND status = 'open'").bind(Date.now(), meta.roomId).run();
     } catch (e) {
       log('error', 'room_end_d1_failed', { roomId: meta.roomId, error: String(e) });
     }
@@ -924,19 +903,8 @@ export class GameRoom extends DurableObject<Env> {
     const hit = cache.get(m.rid);
     if (hit) {
       // 同じ保存要求の再送: もう一度保存せず、前回の内容を返す
-      const revision = (hit.data as { revision?: number } | undefined)?.revision;
-      const row =
-        hit.ok && typeof revision === 'number'
-          ? await this.env.DB.prepare("SELECT body FROM room_snapshots WHERE room_id = ? AND kind = 'save' AND revision = ?")
-              .bind(meta.roomId, revision)
-              .first<{ body: string }>()
-          : null;
-      if (row) {
-        const file = JSON.parse(row.body) as { state: GameState; checksum: string };
-        this.send(ws, { t: 'saved', rid: m.rid, ok: true, state: file.state, checksum: file.checksum });
-      } else {
-        this.send(ws, { t: 'saved', rid: m.rid, ok: false, error: hit.reason ?? '前回の保存結果が見つかりません' });
-      }
+      if (hit.ok && this.lastSave?.rid === m.rid) this.send(ws, this.lastSave.text);
+      else this.send(ws, { t: 'saved', rid: m.rid, ok: false, error: hit.reason ?? '前回の保存結果が見つかりません' });
       return;
     }
     const s = this.state;
@@ -959,27 +927,12 @@ export class GameRoom extends DurableObject<Env> {
     file.createdAt = meta.createdAt;
     cache.set(m.rid, { ok: true, data: { revision: file.revision, checksum: file.checksum } });
     this.checkpoint('save');
+    // 共同経営の保存はホストの端末のセーブスロットにだけ残す（サーバーの控え＝クラウドセーブは廃止。オーナーの判断 2026-11-13）
     const job = (async (): Promise<string> => {
-      try {
-        const body = JSON.stringify(file);
-        if (new TextEncoder().encode(body).length > MAX_STORED_BYTES) throw new Error('snapshot too large');
-        await ensureSchema(this.env.DB);
-        await this.env.DB.batch([
-          this.env.DB.prepare("INSERT INTO room_snapshots (room_id, kind, revision, body, created_at) VALUES (?, 'save', ?, ?, ?)").bind(
-            meta.roomId,
-            file.revision,
-            body,
-            now,
-          ),
-          this.env.DB.prepare("DELETE FROM room_snapshots WHERE room_id = ? AND kind = 'save' AND revision <= ?").bind(meta.roomId, file.revision - KEEP_ROOM_SAVES),
-        ]);
-      } catch (e) {
-        log('error', 'room_save_failed', { roomId: meta.roomId, error: String(e) });
-        cache.set(m.rid, fail('クラウドへの保存に失敗しました'));
-        return JSON.stringify({ t: 'saved', rid: m.rid, ok: false, error: 'クラウドへの保存に失敗しました' } satisfies ServerMsg);
-      }
       this.auditLater({ kind: 'room_save', playerId: a.pid, detail: { revision: file.revision, day: file.meta.day } });
-      return JSON.stringify({ t: 'saved', rid: m.rid, ok: true, state: file.state, checksum: file.checksum } satisfies ServerMsg);
+      const text = JSON.stringify({ t: 'saved', rid: m.rid, ok: true, state: file.state, checksum: file.checksum } satisfies ServerMsg);
+      this.lastSave = { rid: m.rid, text };
+      return text;
     })();
     this.saving.set(m.rid, job);
     try {

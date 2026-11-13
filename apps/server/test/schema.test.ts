@@ -31,6 +31,8 @@ describe('D1 のテーブルを Worker が自分で用意する', () => {
     const p = await env.DB.prepare('SELECT name FROM players WHERE id = ?').bind('schema-test').first<{ name: string }>();
     expect(p?.name).toBe('x');
     const tables = (await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all<{ name: string }>()).results.map((r) => r.name);
-    for (const t of ['players', 'save_slots', 'save_bodies', 'rooms', 'room_members', 'room_snapshots', 'audit_log']) expect(tables).toContain(t);
+    for (const t of ['players', 'rooms', 'room_members', 'audit_log']) expect(tables).toContain(t);
+    // ひとりプレイ・共同経営のクラウドセーブの表は消した（2026-11-13）
+    for (const t of ['save_slots', 'save_bodies', 'room_snapshots']) expect(tables).not.toContain(t);
   });
 });

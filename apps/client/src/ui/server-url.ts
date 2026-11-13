@@ -1,4 +1,4 @@
-// サーバーの URL（共同経営・オンライン市場・クラウドセーブで使う）。
+// サーバーの URL（共同経営・オンライン市場で使う）。
 // 誤って書き換えないよう、入口の画面には出さず（今の URL を表示するだけ）、設定の画面で「変更する」を押したときだけ入力できる。
 
 import { Api, ApiError, defaultServerUrl, rememberServerUrl } from '../net/api';
@@ -20,7 +20,7 @@ export function validServerUrl(raw: string): string | null {
 /** 設定の画面の「サーバー」の欄 */
 export function serverUrlCard(root: () => HTMLElement): HTMLElement {
   const body = h('div', null);
-  const card = h('section', { class: 'card wide server-url-card' }, h('h4', null, 'サーバー（共同経営・オンライン市場・クラウドセーブ）'), body);
+  const card = h('section', { class: 'card wide server-url-card' }, h('h4', null, 'サーバー（共同経営・オンライン市場）'), body);
   const show = () => {
     const cur = defaultServerUrl();
     replace(

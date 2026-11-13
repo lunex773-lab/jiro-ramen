@@ -184,8 +184,8 @@ export interface ManageCallbacks {
   onClose(): void;
   onLayoutEditor(): void;
   onSave(): void;
+  /** 共通市場の企業の途中のセーブ（クラウドに保存できるのは共通市場だけ） */
   onCloudSave(): void;
-  onCloudLoad(): void;
   onSettings(): void;
   onTitle(): void;
   onHelp(): void;
@@ -2805,14 +2805,7 @@ export class ManageMenu {
                 ? h('p', { class: 'note' }, '閉店後に自動で保存されます。いつでも手動で保存できます。')
                 : h('p', { class: 'note' }, '共同経営の保存はホストが行い、ホストのセーブスロットに記録されます。参加者のセーブは変更されません。'),
               h('button', { class: 'btn primary', disabled: !this.host.isHost, onclick: () => this.cb.onSave() }, '今すぐ保存'),
-              this.host.mode === 'local'
-                ? h(
-                    'div',
-                    null,
-                    h('p', { class: 'note' }, 'クラウドセーブ（任意）: サーバーを設定していれば、別の端末と同じ進行を共有できます。競合したときは確認してから上書きします。'),
-                    h('div', { class: 'row wrap' }, h('button', { class: 'btn', onclick: () => this.cb.onCloudSave() }, '☁ クラウドに保存'), h('button', { class: 'btn ghost', onclick: () => this.cb.onCloudLoad() }, '☁ クラウドから読み込む')),
-                  )
-                : null,
+              h('p', { class: 'note' }, 'セーブはこの端末に保存されます（クラウドに保存できるのはオンライン市場だけです）。'),
             ],
       ),
       h(

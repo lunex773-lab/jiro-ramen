@@ -146,14 +146,6 @@ export class Api {
     return this.req('/api/v1/session/leave', { method: 'POST', token, body: JSON.stringify({ roomId }) });
   }
 
-  uploadSave(token: string, slot: number, save: SaveFile, baseRevision: number | null): Promise<{ revision: number }> {
-    return this.req('/api/v1/save', { method: 'POST', token, body: JSON.stringify({ slot, save, baseRevision }) });
-  }
-
-  downloadSave(token: string, slot: number): Promise<{ save: SaveFile; revision: number }> {
-    return this.req(`/api/v1/save/${slot}`, { token });
-  }
-
   // ── 共通市場（docs/MARKET_RANKING_PLAN.md） ──
 
   createMarket(token: string, name: string, companyName: string, settings?: Record<string, unknown>): Promise<{ marketId: string; code: string; name: string }> {
